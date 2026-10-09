@@ -132,6 +132,7 @@ const Bubble = ({ start, out, children }) => {
         fontFamily: F.sans,
         fontSize: 30,
         lineHeight: 1.3,
+        textWrap: "balance",
         opacity: p,
         transform: `translateY(${(1 - p) * 24}px) scale(${0.96 + 0.04 * p})`,
         transformOrigin: out ? "bottom right" : "bottom left",
@@ -271,7 +272,7 @@ const NODES = [
   { title: "private tunnel", lines: ["Tailscale", "Cloudflare Tunnel"] },
   { title: "your machine", lines: ["macOS", "Linux"] },
 ];
-const NODE_W = 310;
+const NODE_W = 340;
 const NODE_H = 200;
 const NODE_GAP = (WORK.w - NODE_W * 3) / 2;
 const ROW_Y = 230; // relative to WORK
@@ -282,14 +283,17 @@ const Infra = () => {
   const { from, to } = beat("infra");
   const opacity = visible(frame, from, to);
   // The path starts at the phone's right edge (in work-area coordinates) and ends at the machine.
+  // The dot runs beneath the nodes, so it never covers their text; each node lights as it passes.
   const startX = PHONE.x + PHONE.w - WORK.x;
-  const endX = WORK.w - NODE_W / 2;
+  const nodeX = (i) => i * (NODE_W + NODE_GAP);
+  const endX = nodeX(2) + NODE_W / 2;
   const draw = interpolate(frame, [from + 2, from + 30], [0, 1], clamp);
-  const dot = interpolate(frame, [from + 34, from + 66], [startX, endX], {
+  const dot = interpolate(frame, [from + 30, from + 60], [startX, endX], {
     ...clamp,
     easing: (t) => 1 - Math.pow(1 - t, 3),
   });
-  const arrived = frame >= from + 66;
+  const moving = frame >= from + 30;
+  const arrived = frame >= from + 60;
   return (
     <AbsoluteFill style={{ left: WORK.x, top: WORK.y, width: WORK.w, height: WORK.h, opacity }}>
       <div
@@ -303,15 +307,28 @@ const Infra = () => {
           borderRadius: 2,
         }}
       />
+      <div
+        style={{
+          position: "absolute",
+          left: dot - 14,
+          top: LINE_Y - 14,
+          width: 28,
+          height: 28,
+          borderRadius: 14,
+          background: C.green,
+          boxShadow: `0 0 30px ${C.green}`,
+          opacity: moving && !arrived ? 1 : 0,
+        }}
+      />
       {NODES.map((n, i) => {
         const p = interpolate(frame, [from + 6 + i * 7, from + 16 + i * 7], [0, 1], clamp);
-        const lit = i === 2 && arrived;
+        const lit = moving && dot >= nodeX(i);
         return (
           <div
             key={n.title}
             style={{
               position: "absolute",
-              left: i * (NODE_W + NODE_GAP),
+              left: nodeX(i),
               top: ROW_Y,
               width: NODE_W,
               height: NODE_H,
@@ -324,7 +341,9 @@ const Infra = () => {
               transform: `translateY(${(1 - p) * 20}px)`,
             }}
           >
-            <div style={{ fontFamily: F.sans, fontWeight: 700, fontSize: 36, color: C.ink, marginBottom: 14 }}>
+            <div
+              style={{ fontFamily: F.sans, fontWeight: 700, fontSize: 36, color: C.ink, marginBottom: 14, whiteSpace: "nowrap" }}
+            >
               {n.title}
             </div>
             {n.lines.map((l) => (
@@ -338,23 +357,12 @@ const Infra = () => {
       <div
         style={{
           position: "absolute",
-          left: dot - 14,
-          top: LINE_Y - 14,
-          width: 28,
-          height: 28,
-          borderRadius: 14,
-          background: C.green,
-          boxShadow: `0 0 30px ${C.green}`,
-          opacity: frame >= from + 34 && !arrived ? 1 : 0,
-        }}
-      />
-      <div
-        style={{
-          position: "absolute",
-          left: NODE_W + NODE_GAP,
-          width: NODE_W,
+          // Centered under the tunnel node, wider than it so the label stays on one line.
+          left: nodeX(1) + NODE_W / 2 - 230,
+          width: 460,
           top: ROW_Y + NODE_H + 28,
           textAlign: "center",
+          whiteSpace: "nowrap",
           fontFamily: F.mono,
           fontSize: 26,
           color: C.green,
@@ -366,8 +374,8 @@ const Infra = () => {
       <div
         style={{
           position: "absolute",
-          left: 2 * (NODE_W + NODE_GAP) - 40,
-          width: NODE_W + 40,
+          left: nodeX(2),
+          width: NODE_W,
           top: ROW_Y + NODE_H + 28,
           boxSizing: "border-box",
           padding: "16px 18px",
@@ -378,7 +386,7 @@ const Infra = () => {
           lineHeight: 1.4,
           color: C.ink,
           textAlign: "center",
-          opacity: fade(frame, from + 40),
+          opacity: fade(frame, from + 32),
         }}
       >
         service user <b>agent</b>
@@ -416,7 +424,7 @@ const Terminal = ({ title, children, style }) => (
       ))}
       <div style={{ marginLeft: 14, fontFamily: F.mono, fontSize: 24, color: C.dim }}>{title}</div>
     </div>
-    <div style={{ padding: "26px 32px", fontFamily: F.mono, fontSize: 30, lineHeight: 1.55, color: C.ink }}>
+    <div style={{ padding: "26px 32px", fontFamily: F.mono, fontSize: 30, lineHeight: 1.55, color: C.ink, whiteSpace: "pre" }}>
       {children}
     </div>
   </div>
@@ -426,11 +434,11 @@ const CMD1 = "./install.sh --runtime claude-code \\";
 const CMD2 = "    --transport tailscale --level builder";
 
 const SETUP_LINES = [
-  { at: 34, text: "one-time: approve this machine in your browser", interactive: true },
-  { at: 46, text: "tunnel up · auth key stored, key-based from now on" },
-  { at: 54, text: "created service user  agent" },
-  { at: 62, text: "applied level  builder  to ~/code" },
-  { at: 70, text: "runtime  claude-code  connected" },
+  { at: 16, text: "one-time: approve this machine in your browser", interactive: true },
+  { at: 30, text: "tunnel up · auth key stored, key-based from now on" },
+  { at: 34, text: "created service user  agent" },
+  { at: 38, text: "applied level  builder  to ~/code" },
+  { at: 42, text: "runtime  claude-code  connected" },
 ];
 
 const Setup = () => {
@@ -438,10 +446,10 @@ const Setup = () => {
   const { from, to } = beat("setup");
   const t = frame - from;
   const opacity = visible(frame, from, to);
-  const typed = Math.round(interpolate(t, [2, 24], [0, CMD1.length + CMD2.length], clamp));
+  const typed = Math.round(interpolate(t, [1, 14], [0, CMD1.length + CMD2.length], clamp));
   const l1 = CMD1.slice(0, typed);
   const l2 = CMD2.slice(0, Math.max(0, typed - CMD1.length));
-  const approved = t >= 44;
+  const approved = t >= 30;
   return (
     <div style={{ position: "absolute", left: WORK.x, top: WORK.y + 40, width: WORK.w, opacity }}>
       <Terminal title="you@your-machine: ~">
@@ -452,7 +460,7 @@ const Setup = () => {
         <div style={{ minHeight: 46 }}>{l2}</div>
         <div style={{ height: 18 }} />
         {SETUP_LINES.map((l) => {
-          const show = fade(t, l.at, 5);
+          const show = fade(t, l.at, 4);
           const pending = l.interactive && !approved;
           return (
             <div key={l.text} style={{ opacity: show, color: pending ? C.amber : C.ink }}>
@@ -507,7 +515,7 @@ const Chip = ({ on, children }) => (
     style={{
       display: "inline-block",
       marginRight: 14,
-      padding: "8px 20px",
+      padding: "8px 18px",
       borderRadius: 999,
       fontFamily: F.mono,
       fontSize: 28,
@@ -531,21 +539,22 @@ const Features = () => {
   const frame = useCurrentFrame();
   const { from, to } = beat("features");
   const opacity = visible(frame, from, to);
-  const half = (WORK.w - 30) / 2;
-  const killOn = frame >= from + 70;
+  const levelsW = 650;
+  const pathsW = WORK.w - levelsW - 30;
+  const killOn = frame >= from + 56;
   return (
     <div style={{ position: "absolute", left: WORK.x, top: WORK.y, width: WORK.w, height: WORK.h, opacity }}>
-      <Tile start={from + 2} title="Preset levels" style={{ left: 0, top: 0, width: half, height: 210 }}>
+      <Tile start={from + 2} title="Preset levels" style={{ left: 0, top: 0, width: levelsW, height: 210 }}>
         <Chip>observer</Chip>
         <Chip on>builder</Chip>
         <Chip>operator</Chip>
       </Tile>
-      <Tile start={from + 8} title="Per-path access" style={{ left: half + 30, top: 0, width: half, height: 210 }}>
+      <Tile start={from + 8} title="Per-path access" style={{ left: levelsW + 30, top: 0, width: pathsW, height: 210 }}>
         <Row left="~/code" right="read · write" color={C.green} />
         <Row left="~/.ssh" right="denied" color={C.red} />
       </Tile>
       <Tile start={from + 14} title="Audit log · every action" style={{ left: 0, top: 240, width: WORK.w, height: 220 }}>
-        <div style={{ fontFamily: F.mono, fontSize: 28, lineHeight: 1.6 }}>
+        <div style={{ fontFamily: F.mono, fontSize: 28, lineHeight: 1.6, color: C.ink, whiteSpace: "pre" }}>
           <div style={{ opacity: fade(frame, from + 22, 4) }}>
             <span style={{ color: C.dim }}>12:04:07 agent </span> git checkout -b fix/login-flake
             <span style={{ color: C.green }}>  ok</span>
@@ -612,7 +621,7 @@ const UseCases = () => {
       {USE_CASES.map(([title, sub], i) => (
         <Tile
           key={title}
-          start={from + 2 + i * 5}
+          start={from + i * 5}
           title={`use case ${i + 1}`}
           style={{ left: (i % 2) * (w + 30), top: Math.floor(i / 2) * (h + 30), width: w, height: h }}
         >

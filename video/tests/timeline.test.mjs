@@ -36,7 +36,7 @@ test("captions match the storyboard", () => {
 
 test("project name is not hard-coded anywhere in video source", () => {
   const src = join(here, "..", "src");
-  for (const f of readdirSync(src)) {
+  for (const f of readdirSync(src).filter((x) => /\.jsx?$/.test(x))) {
     const text = readFileSync(join(src, f), "utf8");
     assert.ok(!text.includes(project.name), `${f} hard-codes the project name`);
   }

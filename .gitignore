@@ -6,3 +6,4 @@ out/
 !.env.example
 /tmp/
 .DS_Store
+.claude/

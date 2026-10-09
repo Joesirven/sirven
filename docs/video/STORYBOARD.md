@@ -33,7 +33,7 @@ names shown match the design in `docs/SCOPE.md` and `docs/PERMISSIONS.md`. Some 
   Amber `#F5B544` only for the one-time interactive step.
 - Type: Inter (captions, labels), JetBrains Mono (terminal, commands, audit log). Bundled from npm
   (`@fontsource`), so rendering never depends on system fonts.
-- Minimum on-screen size: captions 60px, body 34px, terminal 30px. Nothing smaller than 24px.
+- Minimum on-screen size: captions 60px, terminal 30px, nothing smaller than 24px (labels, chips and tile titles sit at 24 to 28px).
 - Persistent layout: phone on the left third (the through line), the working area on the right two
   thirds. A beat counter (`1 infra · 2 setup · 3 ships with · 4 use cases`) sits top-right and
   highlights the current beat.
@@ -72,7 +72,8 @@ names shown match the design in `docs/SCOPE.md` and `docs/PERMISSIONS.md`. Some 
 
 - Visual: the right side becomes a terminal window. One command types in:
   `./install.sh --runtime claude-code --transport tailscale --level builder`
-  Output lines appear one per ~8 frames:
+  Output lines appear one per ~4 frames after the approval, all fully in by frame 181 so the last
+  line still holds 1.2 seconds before the beat fades:
   - `◆ one-time: approve this machine in your browser` (amber, then turns green ✓)
   - `✓ tunnel up · auth key stored, key-based from now on`
   - `✓ created service user  agent`
@@ -117,3 +118,16 @@ names shown match the design in `docs/SCOPE.md` and `docs/PERMISSIONS.md`. Some 
 - `video/` renders exactly 450 frames at 1920x1080, 30 frames per second.
 - At least six extracted frames (one per beat) inspected for legibility, alignment, cropping, pacing.
 - The project name appears only through `project.json`.
+
+## Render notes (first render, 2026-10-09)
+
+Rendered on Jose's MacBook Pro by bb thread `thr_jhz7pyikvf`, then frames 40, 100, 200, 290, 380
+and 440 were re-inspected by the director. Deliberate deviations from the beat text above:
+
+- The hook caption holds about 23 frames and the end card about 25 frames: both beats are shorter
+  than the 1.2-second hold rule allows once their entrances finish. Accepted for a 15-second cut.
+- The one-time approval line is amber for about 10 frames before it turns green.
+- Beat 3 drops the "terminal shrinks to the top" element; the four tiles fill the work area.
+- The traveling dot shows only between nodes; each node lights green as the message passes it.
+- The kill-switch line reads "One command revokes every key and stops the agent." Use-case cards
+  carry a one-line subtitle under each title.
