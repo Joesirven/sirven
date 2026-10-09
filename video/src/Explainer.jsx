@@ -650,12 +650,12 @@ const EndCard = () => {
         transform: `scale(${0.97 + 0.03 * p})`,
       }}
     >
-      <div style={{ fontFamily: F.mono, fontWeight: 700, fontSize: 104, color: C.ink, letterSpacing: "-0.02em" }}>
+      <div style={{ fontFamily: F.mono, fontWeight: 700, fontSize: 160, color: C.ink, letterSpacing: "-0.02em" }}>
         <span style={{ color: C.green }}>{">"} </span>
         {PROJECT.name}
         <span style={{ color: C.green, opacity: cursorOn ? 1 : 0 }}>█</span>
       </div>
-      <div style={{ fontFamily: F.sans, fontSize: 44, color: C.ink, marginTop: 30 }}>{PROJECT.tagline}</div>
+      <div style={{ fontFamily: F.sans, fontSize: 44, color: C.ink, marginTop: 30 }}>{PROJECT.subtitle}</div>
       <div style={{ fontFamily: F.sans, fontSize: 30, color: C.dim, marginTop: 26 }}>
         open source · macOS + Linux · Claude Code, Codex, Pi
       </div>

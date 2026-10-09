@@ -2,7 +2,7 @@
 
 15 seconds, 1920x1080, 30 frames per second, exactly 450 frames. Source: `video/`. Render: `out/explainer.mp4`.
 
-The project name on screen is a placeholder read from `project.json` (`name`). Renaming the project
+The project name on screen (working name "Sirv") is read from `project.json` (`name`). Renaming the project
 re-renders the video with no source edits.
 
 ## Brief
@@ -109,7 +109,8 @@ names shown match the design in `docs/SCOPE.md` and `docs/PERMISSIONS.md`. Some 
 ### Beat 5. End card (frames 405 to 449)
 
 - Visual: everything fades out except a centered wordmark: the project name (from `project.json`)
-  in JetBrains Mono with a blinking block cursor. Below: the tagline from `project.json`.
+  in JetBrains Mono at 160px with a blinking block cursor. Below: the subtitle from `project.json`
+  ("secure agent access").
   Below that, small: `open source · macOS + Linux · Claude Code, Codex, Pi`.
 - No URL on screen (nothing is public yet).
 

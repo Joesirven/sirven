@@ -1,14 +1,23 @@
 # Scope
 
-Status: draft for Jose's review, 2026-10-09. The project name is a placeholder that lives in
-`project.json`; this document says "the package" instead.
+Status: draft for Jose's review, 2026-10-09. Working name **Sirv**, subtitle "secure agent access".
+The name lives only in `project.json`; this document says "Sirv" or "the package".
+
+## Name
+
+- **Sirv is a working name.** Known public-name collisions: sirv.com (an image content delivery
+  network) and getsirv.com. Revisit the name before any public launch.
+- Positioning: "the shadcn of agent access": install it, own it, no hosted middleman.
+- The GitHub repository is still `Joesirven/secure-agent-access`. Renaming it to `Joesirven/sirv`
+  is pending Jose's GitHub authentication fix on the MacBook; update `repository` in
+  `project.json` when it happens.
 
 ## What it is
 
 An open-source onboarding package that lets an owner point their agent runtime (Claude Code,
 Codex, or Pi) at a macOS or Linux machine and get secure agent access in one sitting. The owner
 texts their agent from a phone, the agent starts work on the owner's machine, and that access is
-scoped, logged, and revocable. "shadcn for agent access": you copy in a small, readable set of
+scoped, logged, and revocable. "The shadcn of agent access": you copy in a small, readable set of
 scripts and data files that you own and can change. It is not a hosted service.
 
 The defaults are the product. A fresh install is conservative: a dedicated service user with no

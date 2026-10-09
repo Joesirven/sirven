@@ -1,6 +1,7 @@
 {
-  "name": "secure-agent-access",
-  "tagline": "Secure, scoped, auditable agent access to your own machine.",
+  "name": "Sirv",
+  "subtitle": "secure agent access",
+  "positioning": "the shadcn of agent access: install it, own it, no hosted middleman",
   "repository": "Joesirven/secure-agent-access",
   "license": "MIT"
 }
