@@ -45,7 +45,7 @@ export const G = {
   sheet: { x: 262, y: 216, w: 1396, h: 600 },
   card: { x: 404, y: 280, w: 1112, h: 456 },
   nodeXs: [120, 560, 1000, 1440],
-  node: { y: 336, w: 360, h: 264 },
+  node: { y: 336, w: 360, h: 288 },
   connectorY: 468,
   // wrap is the text measure that breaks the slogan after "agent's" (layout wrapping only, no inserted characters).
   slogan: { x: 240, y: 400, w: 1440, h: 208, wrap: 1200 },

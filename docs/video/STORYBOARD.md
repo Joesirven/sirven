@@ -114,7 +114,7 @@ no fake traffic lights, prompt glyph, cursor, syntax colors, or character-by-cha
 - Full command sheet: x=262, y=216, width=1396, height=600; padding 48px, radius 24px.
 - Single feature or use-case card: x=404, y=280, width=1112, height=456;
   padding 48px, radius 24px. Titles above body with 24px separation. No card grid.
-- Diagram: four 360px-wide nodes at x=120, 560, 1000, 1440; y=336, height=264.
+- Diagram: four 360px-wide nodes at x=120, 560, 1000, 1440; y=336, height=288.
   Node padding 24px, radius 24px. Connectors run between node edges at y=468.
   Their paths are static; the dot travels only in the gaps and is occluded behind nodes.
 - Level chips: radius 12px, padding 12px 20px, 24px gaps. Builder uses accent outline and
@@ -186,19 +186,19 @@ Caption: **1 · A private path to your machine.**
 Caption: **2 · Set up once. Connect with keys.**
 
 All content accumulates on the command sheet; previous lines stay still. At frame 330,
-cut to the empty sheet with static title `On your machine` at 32px. Code starts at y=296.
+cut to the empty sheet with static title `On your machine` at 32px with a 44px line height at y=264. The command starts at y=332.
 Use the same reserved line positions throughout; no shifting when output arrives.
 
 1. Frames 330–341: reveal the complete two-line command as one object:
    `./install.sh --runtime claude-code \` / `  --transport tailscale --level builder`.
    Frames 342–401: hold (60 frames).
-2. Frames 402–413: reveal the next output line at y=424:
+2. Frames 402–413: reveal the next output line at y=452:
    `Approve this machine in your browser`.
    Frames 414–449: hold. No amber prompt or animated browser simulation.
-3. Frames 450–461: reveal the next line at y=492:
+3. Frames 450–461: reveal the next line at y=520:
    `Approved · future connections use keys`.
    Frames 462–497: hold. The earlier approval instruction remains unchanged.
-4. Frames 498–509: reveal one completion block at y=560, three 44px lines:
+4. Frames 498–509: reveal one completion block at y=588, three 44px lines:
    `Service user: agent · builder access to ~/code`
    / `Claude Code connected`
    / `Build started on your machine.`

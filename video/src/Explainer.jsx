@@ -202,13 +202,13 @@ const Sheet = ({ frame }) => {
   );
   return (
     <div style={surface(G.sheet.x, G.sheet.y, G.sheet.w, G.sheet.h, 24, 48)}>
-      <div style={{ ...T.detail, lineHeight: "32px", color: C.dim, whiteSpace: "nowrap" }}>On your machine</div>
-      {line("setup-command", 296, <div style={T.mono}>{"./install.sh --runtime claude-code \\\n  --transport tailscale --level builder"}</div>)}
-      {line("setup-approve", 424, <div style={T.detail}>Approve this machine in your browser</div>)}
-      {line("setup-approved", 492, <div style={T.detail}>Approved · future connections use keys</div>)}
+      <div style={{ ...T.detail, color: C.dim, whiteSpace: "nowrap" }}>On your machine</div>
+      {line("setup-command", 332, <div style={T.mono}>{"./install.sh --runtime claude-code \\\n  --transport tailscale --level builder"}</div>)}
+      {line("setup-approve", 452, <div style={T.detail}>Approve this machine in your browser</div>)}
+      {line("setup-approved", 520, <div style={T.detail}>Approved · future connections use keys</div>)}
       {line(
         "setup-complete",
-        560,
+        588,
         <div style={T.detail}>
           {"Service user: agent · builder access to ~/code\nClaude Code connected\nBuild started on your machine."}
         </div>,
