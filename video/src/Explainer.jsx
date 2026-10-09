@@ -1,686 +1,365 @@
-import "@fontsource/inter/400.css";
-import "@fontsource/inter/600.css";
-import "@fontsource/inter/700.css";
-import "@fontsource/jetbrains-mono/400.css";
-import "@fontsource/jetbrains-mono/700.css";
+import "@fontsource/ibm-plex-sans/400.css";
+import "@fontsource/ibm-plex-sans/600.css";
+import "@fontsource/ibm-plex-mono/400.css";
+import "@fontsource/ibm-plex-mono/500.css";
 
-import { useEffect, useState } from "react";
-import {
-  AbsoluteFill,
-  continueRender,
-  delayRender,
-  interpolate,
-  spring,
-  useCurrentFrame,
-  useVideoConfig,
-} from "remotion";
+import React, { useEffect, useState } from "react";
+import { AbsoluteFill, Easing, continueRender, delayRender, interpolate, useCurrentFrame } from "remotion";
 import { PROJECT } from "./project.js";
-import { BEATS, beat } from "./timeline.js";
-import { C, F } from "./theme.js";
+import { REVEAL_EASING, beatAt, event } from "./timeline.js";
+import { C, F, G, T } from "./theme.js";
 
-// Layout: phone in the left third (the through line), work area in the right two thirds.
-const PHONE = { x: 110, y: 100, w: 420, h: 800 };
-const WORK = { x: 620, y: 150, w: 1190, h: 740 };
-const CAPTION_Y = 935;
-
-const clamp = { extrapolateLeft: "clamp", extrapolateRight: "clamp" };
-const fade = (frame, start, dur = 8) => interpolate(frame, [start, start + dur], [0, 1], clamp);
-const fadeOut = (frame, end, dur = 8) => interpolate(frame, [end - dur, end], [1, 0], clamp);
-// Visible from `from` (fading in) until `to` (fading out). Used for whole beats.
-const visible = (frame, from, to, dur = 8) => Math.min(fade(frame, from, dur), fadeOut(frame, to + 1, dur));
-
-const usePop = (start) => {
-  const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
-  return spring({ frame: frame - start, fps, config: { damping: 200, mass: 0.6 } });
-};
+// Wait for every face the design uses (Sans 400/600, Mono 400/500); never fall back silently.
+const FACES = [
+  `400 32px ${F.sans}`,
+  `600 40px ${F.sans}`,
+  `400 32px ${F.mono}`,
+  `500 32px ${F.mono}`,
+];
 
 const useFonts = () => {
   const [handle] = useState(() => delayRender("fonts"));
   useEffect(() => {
-    Promise.all([
-      document.fonts.load('600 60px "Inter"'),
-      document.fonts.load('400 30px "Inter"'),
-      document.fonts.load('700 30px "Inter"'),
-      document.fonts.load('400 30px "JetBrains Mono"'),
-      document.fonts.load('700 30px "JetBrains Mono"'),
-    ]).then(() => continueRender(handle));
+    Promise.all(FACES.map((f) => document.fonts.load(f, "abc·~/ 0")))
+      .then(() => {
+        const missing = FACES.filter((f) => !document.fonts.check(f, "abc·~/ 0"));
+        if (missing.length) throw new Error(`fonts not ready: ${missing.join(", ")}`);
+        continueRender(handle);
+      })
+      .catch((e) => {
+        throw e;
+      });
   }, [handle]);
 };
 
-// ---------- persistent chrome ----------
+// ---------- timing, all read from EVENTS ----------
 
-const BEAT_LABELS = [
-  ["infra", "1 infra"],
-  ["setup", "2 setup"],
-  ["features", "3 ships with"],
-  ["usecases", "4 use cases"],
+const clamp = { extrapolateLeft: "clamp", extrapolateRight: "clamp" };
+const ease = Easing.bezier(...REVEAL_EASING);
+
+// Opacity 0 to 1 over the event's inclusive frame range.
+const revealOf = (frame, id) => {
+  const e = event(id);
+  return interpolate(frame, [e.from, e.to], [0, 1], { ...clamp, easing: ease });
+};
+const startedBy = (frame, id) => frame >= event(id).from;
+// Linear 0 to 1 over the event's range (the dot travel).
+const travelOf = (frame, id) => {
+  const e = event(id);
+  return interpolate(frame, [e.from, e.to], [0, 1], clamp);
+};
+// Among `ids` (replace-by-cut sequence), the latest that has started, with its reveal opacity.
+const currentOf = (frame, ids) => {
+  const started = ids.filter((id) => startedBy(frame, id));
+  const id = started.at(-1);
+  return id ? { id, opacity: revealOf(frame, id) } : { id: null, opacity: 0 };
+};
+
+// ---------- shared pieces ----------
+
+const abs = (x, y, w, h) => ({ position: "absolute", left: x, top: y, width: w, height: h });
+
+// A 2px hairline border sits inside the stated padding so content starts exactly `pad` from the outer edge.
+const surface = (x, y, w, h, radius, pad, extra) => ({
+  ...abs(x, y, w, h),
+  boxSizing: "border-box",
+  background: C.surface,
+  border: `2px solid ${C.hair}`,
+  borderRadius: radius,
+  padding: pad - 2,
+  color: C.text,
+  ...extra,
+});
+
+const Caption = ({ text }) => (
+  <div
+    style={{
+      ...abs(G.caption.x, G.caption.y, G.caption.w, G.caption.h),
+      ...T.caption,
+      color: C.text,
+      textAlign: "center",
+      whiteSpace: "nowrap",
+    }}
+  >
+    {text}
+  </div>
+);
+
+const Label = ({ y, children }) => (
+  <div style={{ position: "absolute", left: 120, top: y, ...T.label, color: C.dim, whiteSpace: "nowrap" }}>
+    {children}
+  </div>
+);
+
+const Check = () => (
+  <svg width="36" height="36" viewBox="0 0 36 36" style={{ flex: "none" }}>
+    <path d="M6 19 L14 27 L30 9" fill="none" stroke={C.text} strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
+const Lock = () => (
+  <svg width="36" height="40" viewBox="0 0 36 40" style={{ flex: "none" }}>
+    <rect x="5" y="17" width="26" height="19" rx="4" fill="none" stroke={C.text} strokeWidth="3" />
+    <path d="M10 17 V12 a8 8 0 0 1 16 0 V17" fill="none" stroke={C.text} strokeWidth="3" />
+  </svg>
+);
+
+// ---------- phone ----------
+
+const bubble = { boxSizing: "border-box", maxWidth: 500, padding: 24, borderRadius: 20, ...T.body, whiteSpace: "nowrap" };
+
+const Phone = ({ outgoingOpacity, incomingOpacity }) => (
+  <div style={surface(G.phone.x, G.phone.y, G.phone.w, G.phone.h, 40, 40)}>
+    <div style={{ ...T.diagramTitle, color: C.text }}>my agent</div>
+    <div style={{ ...T.detail, color: C.dim }}>on your machine</div>
+    <div style={{ marginTop: 32, display: "flex", flexDirection: "column", gap: 24 }}>
+      <div style={{ opacity: outgoingOpacity, alignSelf: "flex-end" }}>
+        <div style={{ ...bubble, background: C.accent, color: "#FFFFFF" }}>
+          fix the flaky login test
+          <br />
+          and push a branch
+        </div>
+      </div>
+      {incomingOpacity !== null && (
+        <div style={{ opacity: incomingOpacity, alignSelf: "flex-start" }}>
+          <div style={{ ...bubble, background: C.surface, border: `2px solid ${C.hair}`, color: C.text }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+              <span>Done. 42 tests pass.</span>
+              <Check />
+            </div>
+            Pushed fix/login-flake.
+          </div>
+        </div>
+      )}
+    </div>
+  </div>
+);
+
+// ---------- diagram ----------
+
+const NODES = [
+  { id: null, title: "your phone", lines: ["your existing remote client"] },
+  { id: "infra-runtime", title: "agent runtime", lines: ["Claude Code ·", "Codex · Pi"] },
+  { id: "infra-tunnel", title: "private tunnel", lines: ["Tailscale ·", "Cloudflare Tunnel", "key-based access"] },
+  { id: "infra-machine", title: "your machine", lines: ["macOS · Linux", "service user: agent", "no administrator rights"] },
 ];
 
-const BeatCounter = () => {
-  const frame = useCurrentFrame();
-  const opacity = visible(frame, beat("infra").from, beat("usecases").to);
+const NODE_EDGE = (i) => [G.nodeXs[i], G.nodeXs[i] + G.node.w];
+const DOT = 16;
+
+const Diagram = ({ frame }) => {
+  const travel = startedBy(frame, "infra-dot") ? travelOf(frame, "infra-dot") : null;
+  // Dot centre runs from the phone's right edge to inside the machine, where its node occludes it.
+  const x0 = NODE_EDGE(0)[1] + DOT / 2;
+  const x1 = NODE_EDGE(3)[0] + DOT / 2 + DOT;
   return (
-    <div style={{ position: "absolute", top: 40, right: 110, display: "flex", gap: 14, opacity }}>
-      {BEAT_LABELS.map(([id, label]) => {
-        const b = beat(id);
-        const active = frame >= b.from && frame <= b.to;
-        return (
-          <div
-            key={id}
-            style={{
-              fontFamily: F.sans,
-              fontWeight: 600,
-              fontSize: 24,
-              padding: "8px 18px",
-              borderRadius: 999,
-              color: active ? C.bg : C.dim,
-              background: active ? C.green : "transparent",
-              border: `2px solid ${active ? C.green : C.hair}`,
-            }}
-          >
-            {label}
-          </div>
-        );
-      })}
-    </div>
-  );
-};
-
-const Caption = () => {
-  const frame = useCurrentFrame();
-  return BEATS.filter((b) => b.caption).map((b) => {
-    const opacity = visible(frame, b.id === "hook" ? 10 : b.from, b.to, 6);
-    const y = interpolate(fade(frame, b.from, 8), [0, 1], [16, 0]);
-    return (
-      <div
-        key={b.id}
-        style={{
-          position: "absolute",
-          left: 0,
-          right: 0,
-          top: CAPTION_Y,
-          textAlign: "center",
-          fontFamily: F.sans,
-          fontWeight: 600,
-          fontSize: 60,
-          letterSpacing: "-0.01em",
-          color: C.ink,
-          opacity,
-          transform: `translateY(${y}px)`,
-        }}
-      >
-        {b.caption}
-      </div>
-    );
-  });
-};
-
-// ---------- phone (through line) ----------
-
-const Bubble = ({ start, out, children }) => {
-  const p = usePop(start);
-  return (
-    <div
-      style={{
-        alignSelf: out ? "flex-end" : "flex-start",
-        maxWidth: 320,
-        padding: "16px 22px",
-        borderRadius: 28,
-        background: out ? C.blue : C.surfaceHi,
-        color: out ? "#FFFFFF" : C.ink,
-        fontFamily: F.sans,
-        fontSize: 30,
-        lineHeight: 1.3,
-        textWrap: "balance",
-        opacity: p,
-        transform: `translateY(${(1 - p) * 24}px) scale(${0.96 + 0.04 * p})`,
-        transformOrigin: out ? "bottom right" : "bottom left",
-      }}
-    >
-      {children}
-    </div>
-  );
-};
-
-const Typing = ({ from, to }) => {
-  const frame = useCurrentFrame();
-  if (frame < from || frame > to) return null;
-  const opacity = visible(frame, from, to, 5);
-  return (
-    <div
-      style={{
-        alignSelf: "flex-start",
-        display: "flex",
-        gap: 10,
-        padding: "20px 24px",
-        borderRadius: 28,
-        background: C.surfaceHi,
-        opacity,
-      }}
-    >
+    <>
       {[0, 1, 2].map((i) => (
         <div
           key={i}
           style={{
-            width: 14,
-            height: 14,
-            borderRadius: 7,
-            background: C.dim,
-            opacity: 0.4 + 0.6 * Math.abs(Math.sin((frame + i * 5) / 6)),
+            ...abs(NODE_EDGE(i)[1], G.connectorY - 1, G.nodeXs[i + 1] - NODE_EDGE(i)[1], 2),
+            background: C.hair,
           }}
         />
       ))}
-    </div>
-  );
-};
-
-const OUTGOING = "fix the flaky login test and push a branch";
-
-const Phone = () => {
-  const frame = useCurrentFrame();
-  const opacity = fadeOut(frame, beat("end").from + 6, 10);
-  const enter = usePop(0);
-  // Message types into the compose field, then sends at frame 22.
-  const typed = Math.round(interpolate(frame, [2, 20], [0, OUTGOING.length], clamp));
-  const sent = frame >= 22;
-  const usecases = beat("usecases").from;
-  return (
-    <div
-      style={{
-        position: "absolute",
-        left: PHONE.x,
-        top: PHONE.y,
-        width: PHONE.w,
-        height: PHONE.h,
-        borderRadius: 64,
-        border: `3px solid ${C.hair}`,
-        background: C.surface,
-        boxShadow: "0 40px 120px rgba(0,0,0,0.55)",
-        opacity: opacity * enter,
-        transform: `translateY(${(1 - enter) * 30}px)`,
-        display: "flex",
-        flexDirection: "column",
-        overflow: "hidden",
-      }}
-    >
-      <div
-        style={{
-          padding: "44px 28px 22px",
-          borderBottom: `2px solid ${C.hair}`,
-          display: "flex",
-          alignItems: "center",
-          gap: 16,
-        }}
-      >
+      {travel !== null && (
         <div
           style={{
-            width: 52,
-            height: 52,
-            borderRadius: 26,
-            background: C.green,
-            color: C.bg,
-            fontFamily: F.mono,
-            fontWeight: 700,
-            fontSize: 26,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
+            ...abs(x0 + (x1 - x0) * travel - DOT / 2, G.connectorY - DOT / 2, DOT, DOT),
+            borderRadius: DOT / 2,
+            background: C.accent,
+          }}
+        />
+      )}
+      {NODES.map((n, i) => (
+        <div
+          key={n.title}
+          style={{
+            ...surface(G.nodeXs[i], G.node.y, G.node.w, G.node.h, 24, 24),
+            opacity: n.id ? revealOf(frame, n.id) : 1,
           }}
         >
-          {">_"}
+          <div style={{ ...T.diagramTitle }}>{n.title}</div>
+          {n.lines.map((l) => (
+            <div key={l} style={{ ...T.detail, color: C.dim }}>
+              {l}
+            </div>
+          ))}
         </div>
-        <div>
-          <div style={{ fontFamily: F.sans, fontWeight: 600, fontSize: 30, color: C.ink }}>my agent</div>
-          <div style={{ fontFamily: F.sans, fontSize: 24, color: C.green }}>on your machine</div>
-        </div>
-      </div>
-      <div style={{ flex: 1, padding: 24, display: "flex", flexDirection: "column", justifyContent: "flex-end", gap: 16 }}>
-        {sent && <Bubble start={22} out>{OUTGOING}</Bubble>}
-        <Typing from={beat("features").from + 6} to={usecases - 1} />
-        {frame >= usecases + 4 && (
-          <Bubble start={usecases + 4}>
-            <span style={{ color: C.green, fontWeight: 700 }}>✓ Done.</span> 42 tests pass. Pushed{" "}
-            <span style={{ fontFamily: F.mono, fontSize: 26 }}>fix/login-flake</span>
-          </Bubble>
-        )}
-      </div>
-      <div
-        style={{
-          margin: "0 20px 30px",
-          padding: "16px 22px",
-          borderRadius: 30,
-          border: `2px solid ${C.hair}`,
-          fontFamily: F.sans,
-          fontSize: 26,
-          color: sent ? C.dim : C.ink,
-          minHeight: 34,
-          lineHeight: 1.3,
-        }}
-      >
-        {sent ? "Message" : OUTGOING.slice(0, typed)}
-        {!sent && <span style={{ color: C.blue }}>|</span>}
-      </div>
+      ))}
+    </>
+  );
+};
+
+// ---------- setup command sheet ----------
+
+const Sheet = ({ frame }) => {
+  const line = (id, top, children) => (
+    <div style={{ position: "absolute", left: 46, top: top - G.sheet.y - 2, opacity: revealOf(frame, id), whiteSpace: "pre" }}>
+      {children}
+    </div>
+  );
+  return (
+    <div style={surface(G.sheet.x, G.sheet.y, G.sheet.w, G.sheet.h, 24, 48)}>
+      <div style={{ ...T.detail, lineHeight: "32px", color: C.dim, whiteSpace: "nowrap" }}>On your machine</div>
+      {line("setup-command", 296, <div style={T.mono}>{"./install.sh --runtime claude-code \\\n  --transport tailscale --level builder"}</div>)}
+      {line("setup-approve", 424, <div style={T.detail}>Approve this machine in your browser</div>)}
+      {line("setup-approved", 492, <div style={T.detail}>Approved · future connections use keys</div>)}
+      {line(
+        "setup-complete",
+        560,
+        <div style={T.detail}>
+          {"Service user: agent · builder access to ~/code\nClaude Code connected\nBuild started on your machine."}
+        </div>,
+      )}
     </div>
   );
 };
 
-// ---------- beat 1: infra ----------
+// ---------- cards ----------
 
-const NODES = [
-  { title: "agent runtime", lines: ["Claude Code", "Codex · Pi"] },
-  { title: "private tunnel", lines: ["Tailscale", "Cloudflare Tunnel"] },
-  { title: "your machine", lines: ["macOS", "Linux"] },
-];
-const NODE_W = 340;
-const NODE_H = 200;
-const NODE_GAP = (WORK.w - NODE_W * 3) / 2;
-const ROW_Y = 230; // relative to WORK
-const LINE_Y = ROW_Y + NODE_H / 2;
-
-const Infra = () => {
-  const frame = useCurrentFrame();
-  const { from, to } = beat("infra");
-  const opacity = visible(frame, from, to);
-  // The path starts at the phone's right edge (in work-area coordinates) and ends at the machine.
-  // The dot runs beneath the nodes, so it never covers their text; each node lights as it passes.
-  const startX = PHONE.x + PHONE.w - WORK.x;
-  const nodeX = (i) => i * (NODE_W + NODE_GAP);
-  const endX = nodeX(2) + NODE_W / 2;
-  const draw = interpolate(frame, [from + 2, from + 30], [0, 1], clamp);
-  const dot = interpolate(frame, [from + 30, from + 60], [startX, endX], {
-    ...clamp,
-    easing: (t) => 1 - Math.pow(1 - t, 3),
-  });
-  const moving = frame >= from + 30;
-  const arrived = frame >= from + 60;
-  return (
-    <AbsoluteFill style={{ left: WORK.x, top: WORK.y, width: WORK.w, height: WORK.h, opacity }}>
-      <div
-        style={{
-          position: "absolute",
-          left: startX,
-          top: LINE_Y - 2,
-          height: 4,
-          width: (endX - startX) * draw,
-          background: `linear-gradient(90deg, ${C.blue}, ${C.green})`,
-          borderRadius: 2,
-        }}
-      />
-      <div
-        style={{
-          position: "absolute",
-          left: dot - 14,
-          top: LINE_Y - 14,
-          width: 28,
-          height: 28,
-          borderRadius: 14,
-          background: C.green,
-          boxShadow: `0 0 30px ${C.green}`,
-          opacity: moving && !arrived ? 1 : 0,
-        }}
-      />
-      {NODES.map((n, i) => {
-        const p = interpolate(frame, [from + 6 + i * 7, from + 16 + i * 7], [0, 1], clamp);
-        const lit = moving && dot >= nodeX(i);
-        return (
-          <div
-            key={n.title}
-            style={{
-              position: "absolute",
-              left: nodeX(i),
-              top: ROW_Y,
-              width: NODE_W,
-              height: NODE_H,
-              boxSizing: "border-box",
-              borderRadius: 24,
-              background: C.surface,
-              border: `3px solid ${lit ? C.green : C.hair}`,
-              padding: "28px 30px",
-              opacity: p,
-              transform: `translateY(${(1 - p) * 20}px)`,
-            }}
-          >
-            <div
-              style={{ fontFamily: F.sans, fontWeight: 700, fontSize: 36, color: C.ink, marginBottom: 14, whiteSpace: "nowrap" }}
-            >
-              {n.title}
-            </div>
-            {n.lines.map((l) => (
-              <div key={l} style={{ fontFamily: F.sans, fontSize: 28, color: C.dim, lineHeight: 1.35 }}>
-                {l}
-              </div>
-            ))}
-          </div>
-        );
-      })}
-      <div
-        style={{
-          position: "absolute",
-          // Centered under the tunnel node, wider than it so the label stays on one line.
-          left: nodeX(1) + NODE_W / 2 - 230,
-          width: 460,
-          top: ROW_Y + NODE_H + 28,
-          textAlign: "center",
-          whiteSpace: "nowrap",
-          fontFamily: F.mono,
-          fontSize: 26,
-          color: C.green,
-          opacity: fade(frame, from + 24),
-        }}
-      >
-        key-based · no open ports
-      </div>
-      <div
-        style={{
-          position: "absolute",
-          left: nodeX(2),
-          width: NODE_W,
-          top: ROW_Y + NODE_H + 28,
-          boxSizing: "border-box",
-          padding: "16px 18px",
-          borderRadius: 16,
-          border: `2px dashed ${arrived ? C.green : C.hair}`,
-          fontFamily: F.mono,
-          fontSize: 25,
-          lineHeight: 1.4,
-          color: C.ink,
-          textAlign: "center",
-          opacity: fade(frame, from + 32),
-        }}
-      >
-        service user <b>agent</b>
-        <div style={{ color: C.dim }}>no sudo</div>
-      </div>
-    </AbsoluteFill>
-  );
-};
-
-// ---------- beat 2: setup ----------
-
-const Terminal = ({ title, children, style }) => (
+const Card = ({ opacity, children, center }) => (
   <div
     style={{
-      borderRadius: 22,
-      background: "#0F1216",
-      border: `2px solid ${C.hair}`,
-      boxShadow: "0 30px 90px rgba(0,0,0,0.5)",
-      overflow: "hidden",
-      ...style,
-    }}
-  >
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 10,
-        padding: "16px 22px",
-        background: C.surface,
-        borderBottom: `2px solid ${C.hair}`,
-      }}
-    >
-      {["#FF5F57", "#FEBC2E", "#28C840"].map((c) => (
-        <div key={c} style={{ width: 16, height: 16, borderRadius: 8, background: c }} />
-      ))}
-      <div style={{ marginLeft: 14, fontFamily: F.mono, fontSize: 24, color: C.dim }}>{title}</div>
-    </div>
-    <div style={{ padding: "26px 32px", fontFamily: F.mono, fontSize: 30, lineHeight: 1.55, color: C.ink, whiteSpace: "pre" }}>
-      {children}
-    </div>
-  </div>
-);
-
-const CMD1 = "./install.sh --runtime claude-code \\";
-const CMD2 = "    --transport tailscale --level builder";
-
-const SETUP_LINES = [
-  { at: 16, text: "one-time: approve this machine in your browser", interactive: true },
-  { at: 30, text: "tunnel up · auth key stored, key-based from now on" },
-  { at: 34, text: "created service user  agent" },
-  { at: 38, text: "applied level  builder  to ~/code" },
-  { at: 42, text: "runtime  claude-code  connected" },
-];
-
-const Setup = () => {
-  const frame = useCurrentFrame();
-  const { from, to } = beat("setup");
-  const t = frame - from;
-  const opacity = visible(frame, from, to);
-  const typed = Math.round(interpolate(t, [1, 14], [0, CMD1.length + CMD2.length], clamp));
-  const l1 = CMD1.slice(0, typed);
-  const l2 = CMD2.slice(0, Math.max(0, typed - CMD1.length));
-  const approved = t >= 30;
-  return (
-    <div style={{ position: "absolute", left: WORK.x, top: WORK.y + 40, width: WORK.w, opacity }}>
-      <Terminal title="you@your-machine: ~">
-        <div>
-          <span style={{ color: C.green }}>$ </span>
-          {l1}
-        </div>
-        <div style={{ minHeight: 46 }}>{l2}</div>
-        <div style={{ height: 18 }} />
-        {SETUP_LINES.map((l) => {
-          const show = fade(t, l.at, 4);
-          const pending = l.interactive && !approved;
-          return (
-            <div key={l.text} style={{ opacity: show, color: pending ? C.amber : C.ink }}>
-              <span style={{ color: pending ? C.amber : C.green, fontWeight: 700 }}>{pending ? "◆" : "✓"} </span>
-              {l.text}
-            </div>
-          );
-        })}
-      </Terminal>
-    </div>
-  );
-};
-
-// ---------- beat 3: features ----------
-
-const Tile = ({ start, title, children, style }) => {
-  const p = usePop(start);
-  return (
-    <div
-      style={{
-        position: "absolute",
-        boxSizing: "border-box",
-        borderRadius: 24,
-        background: C.surface,
-        border: `2px solid ${C.hair}`,
-        padding: "26px 32px",
-        opacity: p,
-        transform: `translateY(${(1 - p) * 26}px)`,
-        ...style,
-      }}
-    >
-      <div
-        style={{
-          fontFamily: F.sans,
-          fontWeight: 600,
-          fontSize: 24,
-          letterSpacing: "0.12em",
-          textTransform: "uppercase",
-          color: C.dim,
-          marginBottom: 18,
-        }}
-      >
-        {title}
-      </div>
-      {children}
-    </div>
-  );
-};
-
-const Chip = ({ on, children }) => (
-  <span
-    style={{
-      display: "inline-block",
-      marginRight: 14,
-      padding: "8px 18px",
-      borderRadius: 999,
-      fontFamily: F.mono,
-      fontSize: 28,
-      color: on ? C.bg : C.dim,
-      background: on ? C.green : "transparent",
-      border: `2px solid ${on ? C.green : C.hair}`,
+      ...surface(G.card.x, G.card.y, G.card.w, G.card.h, 24, 48, { opacity }),
+      ...(center ? { display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center" } : {}),
     }}
   >
     {children}
-  </span>
-);
-
-const Row = ({ left, right, color }) => (
-  <div style={{ display: "flex", justifyContent: "space-between", fontFamily: F.mono, fontSize: 28, lineHeight: 1.6 }}>
-    <span style={{ color: C.ink }}>{left}</span>
-    <span style={{ color }}>{right}</span>
   </div>
 );
 
-const Features = () => {
-  const frame = useCurrentFrame();
-  const { from, to } = beat("features");
-  const opacity = visible(frame, from, to);
-  const levelsW = 650;
-  const pathsW = WORK.w - levelsW - 30;
-  const killOn = frame >= from + 56;
-  return (
-    <div style={{ position: "absolute", left: WORK.x, top: WORK.y, width: WORK.w, height: WORK.h, opacity }}>
-      <Tile start={from + 2} title="Preset levels" style={{ left: 0, top: 0, width: levelsW, height: 210 }}>
+const Title = ({ children }) => <div style={{ ...T.heading, marginBottom: 24 }}>{children}</div>;
+const Body = ({ children }) => <div style={T.body}>{children}</div>;
+
+const Chip = ({ children, selected }) => (
+  <div
+    style={{
+      ...(selected ? T.monoSelected : T.mono),
+      boxSizing: "border-box",
+      padding: "12px 20px",
+      borderRadius: 12,
+      background: C.surface,
+      border: `2px solid ${selected ? C.accent : C.hair}`,
+      color: selected ? C.accent : C.text,
+    }}
+  >
+    {children}
+  </div>
+);
+
+const Row = ({ path, access, lock }) => (
+  <div style={{ display: "flex", alignItems: "center", height: 52 }}>
+    <div style={{ ...T.mono, width: 280 }}>{path}</div>
+    <div style={{ ...T.body, display: "flex", alignItems: "center", gap: 16 }}>
+      {access}
+      {lock && <Lock />}
+    </div>
+  </div>
+);
+
+const FEATURES = {
+  "feature-levels": (
+    <>
+      <Title>Preset levels</Title>
+      <div style={{ display: "flex", gap: 24, marginBottom: 24 }}>
         <Chip>observer</Chip>
-        <Chip on>builder</Chip>
+        <Chip selected>builder</Chip>
         <Chip>operator</Chip>
-      </Tile>
-      <Tile start={from + 8} title="Per-path access" style={{ left: levelsW + 30, top: 0, width: pathsW, height: 210 }}>
-        <Row left="~/code" right="read · write" color={C.green} />
-        <Row left="~/.ssh" right="denied" color={C.red} />
-      </Tile>
-      <Tile start={from + 14} title="Audit log · every action" style={{ left: 0, top: 240, width: WORK.w, height: 220 }}>
-        <div style={{ fontFamily: F.mono, fontSize: 28, lineHeight: 1.6, color: C.ink, whiteSpace: "pre" }}>
-          <div style={{ opacity: fade(frame, from + 22, 4) }}>
-            <span style={{ color: C.dim }}>12:04:07 agent </span> git checkout -b fix/login-flake
-            <span style={{ color: C.green }}>  ok</span>
-          </div>
-          <div style={{ opacity: fade(frame, from + 34, 4) }}>
-            <span style={{ color: C.dim }}>12:04:09 agent </span> read ~/.ssh/id_ed25519
-            <span style={{ color: C.red, fontWeight: 700 }}>  DENIED</span>
-          </div>
-        </div>
-      </Tile>
-      <Tile
-        start={from + 20}
-        title="Kill switch"
-        style={{ left: 0, top: 490, width: WORK.w, height: 170, display: "flex", flexDirection: "column" }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 26 }}>
-          <div
-            style={{
-              width: 84,
-              height: 44,
-              borderRadius: 22,
-              background: killOn ? C.red : C.hair,
-              position: "relative",
-            }}
-          >
-            <div
-              style={{
-                position: "absolute",
-                top: 5,
-                left: killOn ? 45 : 5,
-                width: 34,
-                height: 34,
-                borderRadius: 17,
-                background: C.ink,
-              }}
-            />
-          </div>
-          <span style={{ fontFamily: F.sans, fontSize: 32, color: C.ink }}>
-            One command revokes every key and stops the agent.
-          </span>
-        </div>
-      </Tile>
-    </div>
-  );
-};
-
-// ---------- beat 4: use cases ----------
-
-const USE_CASES = [
-  ["Ship a fix from your phone", "the build runs on your own machine"],
-  ["Run the nightly build", "on the box under your desk"],
-  ["Lend a friend's agent access", "read-only, one path, revocable"],
-  ["Triage logs on your server", "observer level, nothing writable"],
-];
-
-const UseCases = () => {
-  const frame = useCurrentFrame();
-  const { from, to } = beat("usecases");
-  const opacity = visible(frame, from, to);
-  const w = (WORK.w - 30) / 2;
-  const h = 200;
-  return (
-    <div style={{ position: "absolute", left: WORK.x, top: WORK.y + 120, width: WORK.w, opacity }}>
-      {USE_CASES.map(([title, sub], i) => (
-        <Tile
-          key={title}
-          start={from + i * 5}
-          title={`use case ${i + 1}`}
-          style={{ left: (i % 2) * (w + 30), top: Math.floor(i / 2) * (h + 30), width: w, height: h }}
-        >
-          <div style={{ fontFamily: F.sans, fontWeight: 700, fontSize: 36, color: C.ink, lineHeight: 1.2 }}>{title}</div>
-          <div style={{ fontFamily: F.sans, fontSize: 26, color: C.dim, marginTop: 8 }}>{sub}</div>
-        </Tile>
-      ))}
-    </div>
-  );
-};
-
-// ---------- beat 5: end card ----------
-
-const EndCard = () => {
-  const frame = useCurrentFrame();
-  const { from } = beat("end");
-  const p = usePop(from + 6);
-  const cursorOn = Math.floor((frame - from) / 8) % 2 === 0;
-  return (
-    <AbsoluteFill
-      style={{
-        alignItems: "center",
-        justifyContent: "center",
-        flexDirection: "column",
-        opacity: p,
-        transform: `scale(${0.97 + 0.03 * p})`,
-      }}
-    >
-      <div style={{ fontFamily: F.mono, fontWeight: 700, fontSize: 160, color: C.ink, letterSpacing: "-0.02em" }}>
-        <span style={{ color: C.green }}>{">"} </span>
-        {PROJECT.name}
-        <span style={{ color: C.green, opacity: cursorOn ? 1 : 0 }}>█</span>
       </div>
-      <div style={{ fontFamily: F.sans, fontSize: 44, color: C.ink, marginTop: 30 }}>{PROJECT.subtitle}</div>
-      <div style={{ fontFamily: F.sans, fontSize: 30, color: C.dim, marginTop: 26 }}>
-        open source · macOS + Linux · Claude Code, Codex, Pi
+      <Body>Choose a level. Scope it to a path.</Body>
+    </>
+  ),
+  "feature-paths": (
+    <>
+      <Title>Per-path access</Title>
+      <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+        <Row path="~/code" access="read · write" />
+        <Row path="~/.ssh" access="denied" lock />
       </div>
-    </AbsoluteFill>
-  );
+    </>
+  ),
+  "feature-audit": (
+    <>
+      <Title>Audit log</Title>
+      <div style={{ marginBottom: 24 }}>
+        <Body>Sessions and submitted commands, recorded.</Body>
+      </div>
+      <div style={{ ...T.mono, whiteSpace: "pre" }}>{"12:04:07 agent\ngit checkout -b fix/login-flake"}</div>
+    </>
+  ),
+  "feature-kill": (
+    <>
+      <Title>Kill switch</Title>
+      <div style={{ ...T.mono, marginBottom: 24 }}>revoke --all</div>
+      <div style={{ ...T.body, whiteSpace: "pre" }}>{"Revoke every key. End every session.\nLock the service user."}</div>
+    </>
+  ),
 };
+
+const USE_CASES = {
+  "use-ship": "Ship a fix from your phone",
+  "use-nightly": "Run the nightly build on your own machine",
+  "use-friend": "Lend a friend's agent read-only access",
+  "use-triage": "Triage logs on your home server",
+};
+
+// ---------- composition ----------
 
 export const Explainer = () => {
   useFonts();
   const frame = useCurrentFrame();
+  const b = beatAt(frame);
+  const showReply = b.id === "usecases" && startedBy(frame, "use-reply");
+  const featureNow = currentOf(frame, Object.keys(FEATURES));
+  const useNow = currentOf(frame, Object.keys(USE_CASES));
+
+  let stage = null;
+  if (b.id === "hook") stage = <Phone outgoingOpacity={revealOf(frame, "hook-bubble")} incomingOpacity={null} />;
+  else if (b.id === "infra") stage = <Diagram frame={frame} />;
+  else if (b.id === "setup") stage = <Sheet frame={frame} />;
+  else if (b.id === "features" && featureNow.id) stage = <Card opacity={featureNow.opacity}>{FEATURES[featureNow.id]}</Card>;
+  else if (showReply) stage = <Phone outgoingOpacity={1} incomingOpacity={revealOf(frame, "use-reply")} />;
+  else if (b.id === "usecases" && useNow.id) {
+    stage = (
+      <Card opacity={useNow.opacity} center>
+        <div style={{ ...T.heading, textWrap: "balance" }}>{USE_CASES[useNow.id]}</div>
+      </Card>
+    );
+  }
+
   return (
-    <AbsoluteFill style={{ background: C.bg }}>
-      <AbsoluteFill
-        style={{
-          background: `radial-gradient(1200px 700px at 70% 40%, rgba(61,220,132,0.07), transparent 70%)`,
-        }}
-      />
-      {frame < beat("end").from + 16 && <Phone />}
-      {frame >= beat("infra").from && frame <= beat("infra").to && <Infra />}
-      {frame >= beat("setup").from && frame <= beat("setup").to && <Setup />}
-      {frame >= beat("features").from && frame <= beat("features").to && <Features />}
-      {frame >= beat("usecases").from && frame <= beat("usecases").to && <UseCases />}
-      {frame >= beat("end").from && <EndCard />}
-      <BeatCounter />
-      <Caption />
+    <AbsoluteFill style={{ background: C.bg, fontFamily: F.sans, color: C.text }}>
+      {b.n <= 4 && (
+        <div style={{ position: "absolute", left: G.concept.x, top: G.concept.y, ...T.label, color: C.dim, whiteSpace: "nowrap" }}>
+          Concept preview
+        </div>
+      )}
+      {b.chapter && <Label y={G.chapter.y}>{b.chapter}</Label>}
+      {b.caption && <Caption text={b.caption} />}
+      {stage}
+      {b.id === "slogan" && (
+        <div
+          style={{
+            ...abs(G.slogan.x, G.slogan.y, G.slogan.w, G.slogan.h),
+            display: "flex",
+            justifyContent: "center",
+            opacity: revealOf(frame, "slogan"),
+          }}
+        >
+          <div style={{ ...T.slogan, width: G.slogan.wrap, textAlign: "center" }}>{PROJECT.slogan}</div>
+        </div>
+      )}
+      {b.id === "end" && (
+        <div style={{ position: "absolute", inset: 0, opacity: revealOf(frame, "endcard"), textAlign: "center" }}>
+          <div style={{ position: "absolute", left: 0, right: 0, top: G.endName.y, ...T.endName }}>{PROJECT.name}</div>
+          <div style={{ position: "absolute", left: 0, right: 0, top: G.endSubtitle.y, ...T.endSubtitle }}>{PROJECT.subtitle}</div>
+          <div style={{ position: "absolute", left: 0, right: 0, top: G.endPlatform.y, ...T.detail, color: C.dim }}>
+            open source · macOS + Linux · Claude Code, Codex, Pi
+          </div>
+        </div>
+      )}
     </AbsoluteFill>
   );
 };
