@@ -1,0 +1,6 @@
+{
+  "name": "agent-access",
+  "tagline": "Secure, scoped, auditable agent access to your own machine.",
+  "repository": "Joesirven/agent-access",
+  "license": "MIT"
+}
