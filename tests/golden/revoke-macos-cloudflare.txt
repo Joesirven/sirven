@@ -1,4 +1,4 @@
-sirv revoke plan
+sirven revoke plan
   operating system: macos
   service user: agent
   owner: example
@@ -8,7 +8,7 @@ sirv revoke plan
 
 kill switch: revoke --all
     1. write revoke_started to the audit log (plan only)
-       $ printf '{"time": "%s", "event": "revoke_started", "user": "agent", "principal": "owner"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> <prefix>/var/log/sirv/audit.jsonl
+       $ printf '{"time": "%s", "event": "revoke_started", "user": "agent", "principal": "owner"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> <prefix>/var/log/sirven/audit.jsonl
        not yet: the kill switch is plan output in the alpha cut; apply comes in alpha + 1
     2. remove every authorized key for agent (plan only)
        $ : > <prefix>/Users/agent/.ssh/authorized_keys
@@ -38,7 +38,7 @@ kill switch: access control lists
        $ /bin/chmod -a 'agent allow search' <prefix>/Users/example/code
        not yet: the kill switch is plan output in the alpha cut; apply comes in alpha + 1
    10. mark the grant record revoked (plan only)
-       $ mv <prefix>/etc/sirv/grants/agent.json <prefix>/etc/sirv/grants/agent.json.revoked
+       $ mv <prefix>/etc/sirven/grants/agent.json <prefix>/etc/sirven/grants/agent.json.revoked
        not yet: the kill switch is plan output in the alpha cut; apply comes in alpha + 1
 
 kill switch: transport
@@ -50,7 +50,7 @@ kill switch: transport
 
 kill switch: finish
    13. write revoke_finished to the audit log (plan only)
-       $ printf '{"time": "%s", "event": "revoke_finished", "user": "agent", "principal": "owner"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> <prefix>/var/log/sirv/audit.jsonl
+       $ printf '{"time": "%s", "event": "revoke_finished", "user": "agent", "principal": "owner"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> <prefix>/var/log/sirven/audit.jsonl
        not yet: the kill switch is plan output in the alpha cut; apply comes in alpha + 1
      note: undo is a fresh install. nothing here is reversed automatically.
 

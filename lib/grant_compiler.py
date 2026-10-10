@@ -427,7 +427,7 @@ def parser():
         command.add_argument("--user", default="agent")
         command.add_argument("--os", choices=("linux", "macos"), default="linux")
         command.add_argument("--prefix", default="")
-        command.add_argument("--package", default="sirv")
+        command.add_argument("--package", default="sirven")
         command.add_argument("--path", action="append", default=[])
         if name == "revoke":
             command.add_argument("--record", default="")

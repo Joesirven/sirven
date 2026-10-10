@@ -1,14 +1,14 @@
 # Scope
 
-Status: draft for Jose's review, 2026-10-09. Working name **Sirv**, subtitle "secure agent access".
-The name lives only in `project.json`; this document says "Sirv" or "the package".
+Status: draft for Jose's review, 2026-10-09. Working name **Sirven**, subtitle "secure agent access".
+The name lives only in `project.json`; this document says "Sirven" or "the package".
 
 ## Name
 
-- **Sirv is a working name.** Known public-name collisions: sirv.com (an image content delivery
-  network) and getsirv.com. Revisit the name before any public launch.
+- **Sirven is a working name.** Known public-name collisions: sirven.com (an image content delivery
+  network) and getsirven.com. Revisit the name before any public launch.
 - Positioning: "the shadcn of agent access": install it, own it, no hosted middleman.
-- The GitHub repository is still `Joesirven/secure-agent-access`. Renaming it to `Joesirven/sirv`
+- The GitHub repository is still `Joesirven/secure-agent-access`. Renaming it to `Joesirven/sirven`
   is pending Jose's GitHub authentication fix on the MacBook; update `repository` in
   `project.json` when it happens.
 

@@ -9,7 +9,7 @@
 setup_fake_root() {
   ROOT="$TEST_TMP/root"
   PLAN_PREFIX="$ROOT"
-  PLAN_SIMULATION_LOG="$ROOT/var/lib/sirv/simulated-system-commands.log"
+  PLAN_SIMULATION_LOG="$ROOT/var/lib/sirven/simulated-system-commands.log"
   PLAN_OPERATING_SYSTEM=linux
   plan_reset
 }
@@ -38,30 +38,30 @@ test_steps_are_numbered_and_sections_are_not() {
 
 test_dry_run_print_changes_nothing() {
   setup_fake_root
-  add_directory_step /etc/sirv
+  add_directory_step /etc/sirven
   plan_step system "make a user" "" "useradd example"
   plan_evaluate
   capture plan_print
-  assert_contains "$CAPTURED_STDOUT" "\$ mkdir -p $ROOT/etc/sirv"
+  assert_contains "$CAPTURED_STDOUT" "\$ mkdir -p $ROOT/etc/sirven"
   assert_no_file "$ROOT"
 }
 
 test_apply_runs_steps_then_rerun_skips_them() {
   setup_fake_root
-  add_directory_step /etc/sirv
-  add_directory_step /var/log/sirv
+  add_directory_step /etc/sirven
+  add_directory_step /var/log/sirven
   plan_evaluate
   assert_status 0 plan_apply
-  assert_file_exists "$ROOT/etc/sirv"
-  assert_file_exists "$ROOT/var/log/sirv"
+  assert_file_exists "$ROOT/etc/sirven"
+  assert_file_exists "$ROOT/var/log/sirven"
   assert_contains "$CAPTURED_STDOUT" "applied 2 steps, skipped 0 already done."
 
   plan_reset
-  add_directory_step /etc/sirv
-  add_directory_step /var/log/sirv
+  add_directory_step /etc/sirven
+  add_directory_step /var/log/sirven
   plan_evaluate
   capture plan_print
-  assert_contains "$CAPTURED_STDOUT" "create /etc/sirv (already done)"
+  assert_contains "$CAPTURED_STDOUT" "create /etc/sirven (already done)"
   assert_status 0 plan_apply
   assert_contains "$CAPTURED_STDOUT" "applied 0 steps, skipped 2 already done."
 }
@@ -82,13 +82,13 @@ test_system_steps_are_recorded_not_run_under_prefix() {
 
 test_plan_only_step_blocks_apply_before_any_change() {
   setup_fake_root
-  add_directory_step /etc/sirv
+  add_directory_step /etc/sirven
   plan_planonly "join the tailnet" "tailscale up" "tailscale is plan only"
   plan_evaluate
   assert_status 3 plan_apply
   assert_contains "$CAPTURED_STDERR" "not yet"
   assert_contains "$CAPTURED_STDERR" "step 2, join the tailnet: tailscale is plan only"
-  assert_no_file "$ROOT/etc/sirv"
+  assert_no_file "$ROOT/etc/sirven"
 }
 
 test_failed_step_stops_the_apply() {
@@ -124,11 +124,11 @@ test_real_apply_is_refused_outside_a_container() {
   fi
   setup_fake_root
   PLAN_PREFIX=""
-  add_directory_step /etc/sirv
+  add_directory_step /etc/sirven
   plan_evaluate
   assert_status 3 plan_apply
   assert_contains "$CAPTURED_STDERR" "throwaway container"
-  assert_no_file "$ROOT/etc/sirv"
+  assert_no_file "$ROOT/etc/sirven"
 }
 
 test_real_apply_on_macos_is_refused() {

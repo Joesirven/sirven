@@ -54,7 +54,7 @@ test_odd_user_names_are_refused() {
 
 test_whole_system_folders_are_refused() {
   local path
-  for path in / /etc /usr/local/bin /home /Users /var/lib/sirv /root/project; do
+  for path in / /etc /usr/local/bin /home /Users /var/lib/sirven /root/project; do
     assert_status 2 compiler compile --level "$LEVEL_BUILDER" --os linux --path "$path"
   done
 }

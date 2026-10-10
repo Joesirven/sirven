@@ -60,10 +60,10 @@ test_tool_new_enough_passes() {
 
 test_missing_command_counts_when_strict() {
   PREFLIGHT_PROBLEMS=0
-  preflight_commands yes sh no-such-command-sirv 2>/dev/null
+  preflight_commands yes sh no-such-command-sirven 2>/dev/null
   assert_eq 1 "$PREFLIGHT_PROBLEMS"
   PREFLIGHT_PROBLEMS=0
-  preflight_commands no no-such-command-sirv 2>/dev/null
+  preflight_commands no no-such-command-sirven 2>/dev/null
   assert_eq 0 "$PREFLIGHT_PROBLEMS"
 }
 
@@ -87,9 +87,9 @@ test_missing_python3_fails_loudly() {
 }
 
 test_detect_os_override() {
-  assert_eq macos "$(SIRV_OS_OVERRIDE=macos detect_os)"
-  assert_eq linux "$(SIRV_OS_OVERRIDE=linux detect_os)"
-  SIRV_OS_OVERRIDE=windows
+  assert_eq macos "$(SIRVEN_OS_OVERRIDE=macos detect_os)"
+  assert_eq linux "$(SIRVEN_OS_OVERRIDE=linux detect_os)"
+  SIRVEN_OS_OVERRIDE=windows
   assert_status 1 detect_os
   assert_contains "$CAPTURED_STDERR" "must be linux or macos"
 }
@@ -102,7 +102,7 @@ test_detect_os_on_this_machine() {
 }
 
 test_package_name_comes_from_project_json() {
-  assert_eq sirv "$(package_name "$REPO_DIR/project.json")"
+  assert_eq sirven "$(package_name "$REPO_DIR/project.json")"
   printf '{\n  "name": "Other Name"\n}\n' > "$TEST_TMP/project.json"
   assert_eq "other name" "$(package_name "$TEST_TMP/project.json")"
 }

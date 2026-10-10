@@ -5,7 +5,7 @@
 # the fake root changes every run, so it is written as <prefix> before comparing.
 #
 #   bash tests/golden/run.sh                      compare, print a diff on mismatch
-#   SIRV_UPDATE_GOLDEN=1 bash tests/golden/run.sh  regenerate every golden file
+#   SIRVEN_UPDATE_GOLDEN=1 bash tests/golden/run.sh  regenerate every golden file
 #
 # review a regenerated diff with git before committing it: it is the behavior change.
 
@@ -13,7 +13,7 @@ set -uo pipefail
 
 GOLDEN_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$GOLDEN_DIR/../.." && pwd)"
-WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/sirv-golden.XXXXXX")"
+WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/sirven-golden.XXXXXX")"
 trap 'rm -rf "$WORK_DIR"' EXIT
 
 INSTALL="$REPO_DIR/install.sh"
@@ -34,16 +34,16 @@ golden_case() {
   prefix="$(case_prefix "$name")"
   actual="$WORK_DIR/$name.txt"
   expected="$GOLDEN_DIR/$name.txt"
-  SIRV_OS_OVERRIDE="$os" "$@" > "$actual.raw" 2> "$actual.error" || status=$?
+  SIRVEN_OS_OVERRIDE="$os" "$@" > "$actual.raw" 2> "$actual.error" || status=$?
   {
     sed "s|$prefix|<prefix>|g" "$actual.raw"
     printf 'exit status: %s\n' "$status"
   } > "$actual"
-  if [ -n "${SIRV_UPDATE_GOLDEN:-}" ]; then
+  if [ -n "${SIRVEN_UPDATE_GOLDEN:-}" ]; then
     cp "$actual" "$expected"
     printf 'ok %s (regenerated)\n' "$name"
   elif [ ! -f "$expected" ]; then
-    printf 'not ok %s: no golden file; run with SIRV_UPDATE_GOLDEN=1 to create it\n' "$name"
+    printf 'not ok %s: no golden file; run with SIRVEN_UPDATE_GOLDEN=1 to create it\n' "$name"
     failures=$((failures + 1))
   elif diff -u "$expected" "$actual" > "$WORK_DIR/$name.diff"; then
     printf 'ok %s\n' "$name"

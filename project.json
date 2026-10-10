@@ -1,8 +1,8 @@
 {
-  "name": "Sirv",
+  "name": "Sirven",
   "subtitle": "secure agent access",
   "slogan": "unlock your personal agent's full potential",
   "positioning": "the shadcn of agent access: install it, own it, no hosted middleman",
-  "repository": "Joesirven/secure-agent-access",
+  "repository": "Joesirven/sirven",
   "license": "MIT"
 }

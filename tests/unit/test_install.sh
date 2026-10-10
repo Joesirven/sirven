@@ -2,7 +2,7 @@
 # install.sh end to end on a fake root: flags, dry run, apply, re-run, refusals.
 
 install_sh() {
-  SIRV_OS_OVERRIDE="${TEST_OS:-linux}" "$REPO_DIR/install.sh" "$@" --owner example
+  SIRVEN_OS_OVERRIDE="${TEST_OS:-linux}" "$REPO_DIR/install.sh" "$@" --owner example
 }
 
 # the plan part of the output: everything before the summary, without the mode line.
@@ -62,20 +62,20 @@ test_dry_run_and_apply_print_the_same_plan() {
 test_apply_on_fake_root_then_rerun_is_idempotent() {
   local root="$TEST_TMP/root"
   assert_status 0 install_sh --prefix "$root" --level builder --path /home/example/project --transport none
-  assert_file_exists "$root/etc/sirv/levels/builder.json"
-  assert_file_exists "$root/etc/sirv/grants/agent.json"
-  assert_file_exists "$root/etc/sirv/audit-format.json"
-  assert_file_exists "$root/var/log/sirv/audit.jsonl"
-  assert_contains "$(cat "$root/var/lib/sirv/simulated-system-commands.log")" "useradd --create-home --home-dir $root/home/agent"
-  assert_contains "$(cat "$root/var/lib/sirv/simulated-system-commands.log")" "setfacl -R -P -m u:agent:rwX $root/home/example/project"
-  assert_contains "$(cat "$root/etc/sirv/grants/agent.json")" '"can_grant": false'
+  assert_file_exists "$root/etc/sirven/levels/builder.json"
+  assert_file_exists "$root/etc/sirven/grants/agent.json"
+  assert_file_exists "$root/etc/sirven/audit-format.json"
+  assert_file_exists "$root/var/log/sirven/audit.jsonl"
+  assert_contains "$(cat "$root/var/lib/sirven/simulated-system-commands.log")" "useradd --create-home --home-dir $root/home/agent"
+  assert_contains "$(cat "$root/var/lib/sirven/simulated-system-commands.log")" "setfacl -R -P -m u:agent:rwX $root/home/example/project"
+  assert_contains "$(cat "$root/etc/sirven/grants/agent.json")" '"can_grant": false'
   # ls shows modes the same way on linux and macos, unlike stat
   # shellcheck disable=SC2012
-  assert_eq "-rw-r-----" "$(ls -l "$root/var/log/sirv/audit.jsonl" | cut -c1-10)" "audit log mode"
+  assert_eq "-rw-r-----" "$(ls -l "$root/var/log/sirven/audit.jsonl" | cut -c1-10)" "audit log mode"
   # shellcheck disable=SC2012
-  assert_eq "drwxr-x---" "$(ls -ld "$root/var/log/sirv" | cut -c1-10)" "audit directory mode"
+  assert_eq "drwxr-x---" "$(ls -ld "$root/var/log/sirven" | cut -c1-10)" "audit directory mode"
   # shellcheck disable=SC2012
-  assert_eq "drwx------" "$(ls -ld "$root/var/lib/sirv" | cut -c1-10)" "state directory mode"
+  assert_eq "drwx------" "$(ls -ld "$root/var/lib/sirven" | cut -c1-10)" "state directory mode"
 
   assert_status 0 install_sh --prefix "$root" --level builder --path /home/example/project --transport none
   assert_contains "$CAPTURED_STDOUT" "applied 0 steps"
@@ -121,9 +121,9 @@ test_paths_the_policy_refuses() {
   assert_contains "$CAPTURED_STDERR" "whole home directory"
   assert_status 2 install_sh --dry-run --prefix "$TEST_TMP/root" --path /home/example/.ssh
   assert_contains "$CAPTURED_STDERR" "keys or credentials"
-  assert_status 2 install_sh --dry-run --prefix "$TEST_TMP/root" --path /etc/sirv
+  assert_status 2 install_sh --dry-run --prefix "$TEST_TMP/root" --path /etc/sirven
   assert_contains "$CAPTURED_STDERR" "belongs to the package itself"
-  assert_status 2 install_sh --dry-run --prefix "$TEST_TMP/root" --path /var/log/sirv/audit.jsonl
+  assert_status 2 install_sh --dry-run --prefix "$TEST_TMP/root" --path /var/log/sirven/audit.jsonl
   assert_contains "$CAPTURED_STDERR" "belongs to the package itself"
   assert_status 2 install_sh --dry-run --prefix "$TEST_TMP/root" --path /home/example/../../etc
   assert_contains "$CAPTURED_STDERR" "must not contain"
@@ -171,8 +171,8 @@ test_real_apply_is_refused_outside_a_container() {
 }
 
 test_os_override_needs_dry_run_or_prefix() {
-  assert_status 64 env SIRV_OS_OVERRIDE=macos "$REPO_DIR/install.sh" --transport none
-  assert_contains "$CAPTURED_STDERR" "SIRV_OS_OVERRIDE only works with --dry-run or --prefix"
+  assert_status 64 env SIRVEN_OS_OVERRIDE=macos "$REPO_DIR/install.sh" --transport none
+  assert_contains "$CAPTURED_STDERR" "SIRVEN_OS_OVERRIDE only works with --dry-run or --prefix"
 }
 
 test_plan_never_mentions_passwords_being_set() {

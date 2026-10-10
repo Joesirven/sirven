@@ -30,7 +30,7 @@ project_field() {
   sed -n "s/^[[:space:]]*\"$field\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p" "$file" | head -n 1
 }
 
-# the package name, lowercased, used for directory names like /etc/sirv.
+# the package name, lowercased, used for directory names like /etc/sirven.
 package_name() {
   local file="$1" name
   [ -f "$file" ] || die "cannot find $file; the package name lives there"
@@ -39,13 +39,13 @@ package_name() {
   lowercase "$name"
 }
 
-# print linux or macos. SIRV_OS_OVERRIDE lets tests render the other system's plan.
+# print linux or macos. SIRVEN_OS_OVERRIDE lets tests render the other system's plan.
 detect_os() {
   local kernel
-  if [ -n "${SIRV_OS_OVERRIDE:-}" ]; then
-    case "$SIRV_OS_OVERRIDE" in
-      linux | macos) printf '%s' "$SIRV_OS_OVERRIDE"; return 0 ;;
-      *) die "SIRV_OS_OVERRIDE must be linux or macos, got '$SIRV_OS_OVERRIDE'" ;;
+  if [ -n "${SIRVEN_OS_OVERRIDE:-}" ]; then
+    case "$SIRVEN_OS_OVERRIDE" in
+      linux | macos) printf '%s' "$SIRVEN_OS_OVERRIDE"; return 0 ;;
+      *) die "SIRVEN_OS_OVERRIDE must be linux or macos, got '$SIRVEN_OS_OVERRIDE'" ;;
     esac
   fi
   kernel="$(uname -s)"

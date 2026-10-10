@@ -19,7 +19,7 @@ failed_names=""
 
 run_test() {
   local file="$1" name="$2" log status
-  TEST_TMP="$(mktemp -d "${TMPDIR:-/tmp}/sirv-test.XXXXXX")"
+  TEST_TMP="$(mktemp -d "${TMPDIR:-/tmp}/sirven-test.XXXXXX")"
   log="$TEST_TMP/.log"
   (
     export TEST_TMP

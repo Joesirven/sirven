@@ -143,8 +143,8 @@ parse_arguments() {
   if [ "$COMMAND" = install ] && [ "$REVOKE_ALL" = yes ]; then
     usage_error "--all only goes with revoke"
   fi
-  if [ -n "${SIRV_OS_OVERRIDE:-}" ] && [ "$DRY_RUN" != yes ] && [ -z "$PREFIX" ]; then
-    usage_error "SIRV_OS_OVERRIDE only works with --dry-run or --prefix"
+  if [ -n "${SIRVEN_OS_OVERRIDE:-}" ] && [ "$DRY_RUN" != yes ] && [ -z "$PREFIX" ]; then
+    usage_error "SIRVEN_OS_OVERRIDE only works with --dry-run or --prefix"
   fi
 }
 
