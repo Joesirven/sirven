@@ -17,6 +17,7 @@ WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/sirven-golden.XXXXXX")"
 trap 'rm -rf "$WORK_DIR"' EXIT
 
 INSTALL="$REPO_DIR/install.sh"
+UNINSTALL="$REPO_DIR/uninstall.sh"
 COMPILER="$REPO_DIR/lib/grant_compiler.py"
 LEVELS="$REPO_DIR/levels"
 
@@ -65,6 +66,20 @@ install_case() {
   golden_case "$name" "$os" "$INSTALL" "$@" --dry-run --prefix "$(case_prefix "$name")" --owner example
 }
 
+# uninstall_case NAME OPERATING_SYSTEM INSTALL_ARGUMENT...: apply install.sh to a fake root, then
+# pin the dry run of uninstall.sh on that root.
+uninstall_case() {
+  local name="$1" os="$2" prefix
+  shift 2
+  prefix="$(case_prefix "$name")"
+  if ! SIRVEN_OS_OVERRIDE="$os" "$INSTALL" "$@" --prefix "$prefix" --owner example > /dev/null 2>&1; then
+    printf 'not ok %s: the install before it failed\n' "$name"
+    failures=$((failures + 1))
+    return 0
+  fi
+  golden_case "$name" "$os" "$UNINSTALL" --dry-run --prefix "$prefix"
+}
+
 # compiler_case NAME OPERATING_SYSTEM SUBCOMMAND LEVEL: the grant compiler on a fixed path list,
 # unsorted, with a duplicate, a trailing slash, and a nested path, to pin the normalizing.
 compiler_case() {
@@ -85,6 +100,10 @@ install_case install-macos-builder-tailscale-bb macos --level builder --path /Us
 install_case install-macos-operator-cloudflare macos --level operator --path /Users/example/code/site --transport cloudflare
 install_case revoke-linux-tailscale linux revoke --all --level builder --path /home/example/project --transport tailscale
 install_case revoke-macos-cloudflare macos revoke --all --level observer --path /Users/example/code/app --transport cloudflare
+
+# removal plans: after an install, and with nothing recorded
+uninstall_case uninstall-linux-builder-none linux --level builder --path /home/example/project --path /srv/app --transport none
+golden_case uninstall-nothing-recorded linux "$UNINSTALL" --dry-run --prefix "$(case_prefix uninstall-nothing-recorded)"
 
 # grant compiler fragments, both operating systems, every level
 for os in linux macos; do

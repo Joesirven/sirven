@@ -1,0 +1,10 @@
+sirven uninstall plan
+  operating system: linux
+  install record: /var/lib/sirven/install-record.tsv, not found
+  audit log: kept
+  prefix: <prefix>
+  mode: dry run: nothing will be changed
+
+no install record at <prefix>/var/lib/sirven/install-record.tsv.
+this package has applied nothing here that it recorded, so there is nothing it may remove.
+exit status: 0

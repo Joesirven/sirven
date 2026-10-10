@@ -1,0 +1,124 @@
+# shellcheck shell=bash
+# uninstall.sh on a fake root: it reverses only what the install record lists, in reverse order.
+
+install_sh() {
+  SIRVEN_OS_OVERRIDE=linux "$REPO_DIR/install.sh" "$@" --owner example
+}
+
+uninstall_sh() {
+  SIRVEN_OS_OVERRIDE=linux "$REPO_DIR/uninstall.sh" "$@"
+}
+
+install_on_fake_root() {
+  ROOT="$TEST_TMP/root"
+  assert_status 0 install_sh --prefix "$ROOT" --level builder --path /home/example/project --transport none
+}
+
+test_help_prints_usage() {
+  assert_status 0 uninstall_sh --help
+  assert_contains "$CAPTURED_STDOUT" "--remove-audit-log"
+  assert_status 64 uninstall_sh --sideways
+  assert_status 64 uninstall_sh --prefix relative/root
+}
+
+test_nothing_recorded_means_nothing_removed() {
+  assert_status 0 uninstall_sh --prefix "$TEST_TMP/root"
+  assert_contains "$CAPTURED_STDOUT" "there is nothing it may remove"
+  assert_no_file "$TEST_TMP/root"
+}
+
+test_dry_run_prints_the_reverse_and_changes_nothing() {
+  local grant_line user_line directory_line
+  install_on_fake_root
+  assert_status 0 uninstall_sh --dry-run --prefix "$ROOT"
+  assert_contains "$CAPTURED_STDOUT" "dry run: nothing was changed."
+  assert_contains "$CAPTURED_STDOUT" "setfacl -R -P -x u:agent $ROOT/home/example/project"
+  assert_contains "$CAPTURED_STDOUT" "userdel agent"
+  grant_line="$(printf '%s\n' "$CAPTURED_STDOUT" | grep -n 'remove agent from /home/example/project' | cut -d: -f1)"
+  user_line="$(printf '%s\n' "$CAPTURED_STDOUT" | grep -n 'remove the account' | cut -d: -f1)"
+  directory_line="$(printf '%s\n' "$CAPTURED_STDOUT" | grep -n 'remove /etc/sirven if' | cut -d: -f1)"
+  [ "$grant_line" -lt "$user_line" ] || fail "access is removed before the account"
+  [ "$user_line" -lt "$directory_line" ] || fail "the account is removed before the package directories"
+  assert_file_exists "$ROOT/etc/sirven/grants/agent.json"
+  assert_file_exists "$ROOT/var/lib/sirven/install-record.tsv"
+}
+
+test_apply_removes_what_install_created_and_keeps_the_audit_log() {
+  install_on_fake_root
+  assert_status 0 uninstall_sh --prefix "$ROOT"
+  assert_no_file "$ROOT/etc/sirven"
+  assert_no_file "$ROOT/var/lib/sirven"
+  assert_file_exists "$ROOT/var/log/sirven/audit.jsonl"
+  assert_contains "$(tail -n 1 "$ROOT/var/log/sirven/audit.jsonl")" '"event": "uninstall"'
+  assert_contains "$CAPTURED_STDOUT" "kept on purpose: the service user's home folder"
+  assert_status 0 uninstall_sh --prefix "$ROOT"
+  assert_contains "$CAPTURED_STDOUT" "there is nothing it may remove"
+}
+
+test_remove_audit_log_removes_it_too() {
+  install_on_fake_root
+  assert_status 0 uninstall_sh --prefix "$ROOT" --remove-audit-log
+  assert_no_file "$ROOT/var/log/sirven"
+  assert_no_file "$ROOT/etc/sirven"
+}
+
+test_what_was_there_before_the_install_stays() {
+  ROOT="$TEST_TMP/root"
+  mkdir -p "$ROOT/etc/sirven"
+  printf 'the owner wrote this\n' > "$ROOT/etc/sirven/owner-notes.txt"
+  install_on_fake_root
+  assert_not_contains "$(cat "$ROOT/var/lib/sirven/install-record.tsv")" "remove /etc/sirven if"
+  assert_status 0 uninstall_sh --prefix "$ROOT"
+  assert_not_contains "$CAPTURED_STDOUT" "remove /etc/sirven if"
+  assert_file_exists "$ROOT/etc/sirven/owner-notes.txt"
+  assert_no_file "$ROOT/etc/sirven/levels"
+  assert_no_file "$ROOT/etc/sirven/grants"
+}
+
+test_a_created_directory_with_foreign_files_is_kept() {
+  install_on_fake_root
+  printf 'not from the package\n' > "$ROOT/etc/sirven/grants/someone-else.json"
+  assert_status 0 uninstall_sh --prefix "$ROOT"
+  assert_contains "$CAPTURED_STDOUT" "kept $ROOT/etc/sirven/grants: it holds files this package did not create"
+  assert_file_exists "$ROOT/etc/sirven/grants/someone-else.json"
+  assert_no_file "$ROOT/etc/sirven/grants/agent.json"
+}
+
+test_a_damaged_record_is_refused_before_any_change() {
+  install_on_fake_root
+  printf 'sideways\tx\n' >> "$ROOT/var/lib/sirven/install-record.tsv"
+  assert_status 2 uninstall_sh --prefix "$ROOT"
+  assert_contains "$CAPTURED_STDERR" "unknown kind 'sideways'"
+  assert_file_exists "$ROOT/etc/sirven/grants/agent.json"
+}
+
+test_a_record_not_owned_by_root_is_refused_on_a_real_root() {
+  if [ "$(id -u)" = 0 ]; then
+    return 0
+  fi
+  printf 'run\t-\t-\t-\tx\t-\ttrue\ttrue\n' > "$TEST_TMP/record.tsv"
+  # shellcheck disable=SC1091
+  . "$REPO_DIR/uninstall.sh"
+  PREFIX=""
+  RECORD_FILE="$TEST_TMP/record.tsv"
+  assert_status 2 check_record_ownership
+  assert_contains "$CAPTURED_STDERR" "does not belong to root"
+}
+
+test_real_apply_is_refused_outside_a_container() {
+  if [ -f /.dockerenv ] || [ -f /run/.containerenv ]; then
+    return 0
+  fi
+  assert_status 3 "$REPO_DIR/uninstall.sh"
+  assert_contains "$CAPTURED_STDERR" "not applied"
+}
+
+test_install_after_uninstall_records_again() {
+  install_on_fake_root
+  assert_status 0 uninstall_sh --prefix "$ROOT"
+  install_on_fake_root
+  # the kept audit log was already there, so this install did not create it and does not record it
+  assert_contains "$CAPTURED_STDOUT" "applied 17 steps, skipped 2 already done."
+  assert_contains "$(cat "$ROOT/var/lib/sirven/install-record.tsv")" "remove /etc/sirven if"
+  assert_not_contains "$(cat "$ROOT/var/lib/sirven/install-record.tsv")" "remove the audit log"
+}

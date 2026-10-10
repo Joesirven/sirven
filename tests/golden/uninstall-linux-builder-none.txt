@@ -1,0 +1,54 @@
+sirven uninstall plan
+  operating system: linux
+  install record: /var/lib/sirven/install-record.tsv, 19 steps this package created
+  audit log: kept
+  prefix: <prefix>
+  mode: dry run: nothing will be changed
+
+undo: access to paths, level builder
+    1. stop new files in /srv/app inheriting agent (to do, recorded not run under --prefix)
+       $ setfacl -R -P -d -x u:agent <prefix>/srv/app
+    2. remove agent from /srv/app and everything inside (to do, recorded not run under --prefix)
+       $ setfacl -R -P -x u:agent <prefix>/srv/app
+    3. stop new files in /home/example/project inheriting agent (to do, recorded not run under --prefix)
+       $ setfacl -R -P -d -x u:agent <prefix>/home/example/project
+    4. remove agent from /home/example/project and everything inside (to do, recorded not run under --prefix)
+       $ setfacl -R -P -x u:agent <prefix>/home/example/project
+    5. stop agent passing through /srv (to do, recorded not run under --prefix)
+       $ setfacl -x u:agent <prefix>/srv
+    6. stop agent passing through /home/example (to do, recorded not run under --prefix)
+       $ setfacl -x u:agent <prefix>/home/example
+    7. stop agent passing through /home (to do, recorded not run under --prefix)
+       $ setfacl -x u:agent <prefix>/home
+    8. remove /etc/sirven/grants/agent.json (to do)
+       $ rm -f <prefix>/etc/sirven/grants/agent.json
+    9. remove the builder policy copy (to do)
+       $ rm -f <prefix>/etc/sirven/levels/builder.json
+
+undo: service user
+   10. remove every authorized key of agent (to do, recorded not run under --prefix)
+       $ rm -f <prefix>/home/agent/.ssh/authorized_keys
+   11. remove the SSH folder of agent if nothing else is inside (to do, recorded not run under --prefix)
+       $ rmdir <prefix>/home/agent/.ssh   # kept if anything else is inside
+   12. end every process of agent, then remove the account, keeping /home/agent (to do, recorded not run under --prefix)
+       $ { pkill -KILL -u agent || true; } && userdel agent
+
+undo: audit log
+     note: kept, not reversed: remove the audit log /var/log/sirven/audit.jsonl and every entry in it. add --remove-audit-log to remove it too.
+   13. remove /etc/sirven/audit-format.json (to do)
+       $ rm -f <prefix>/etc/sirven/audit-format.json
+     note: kept, not reversed: remove /var/log/sirven if nothing else is inside. add --remove-audit-log to remove it too.
+
+undo: package directories
+   14. remove /etc/sirven/grants if nothing else is inside (to do)
+       $ rmdir <prefix>/etc/sirven/grants   # kept if anything else is inside
+   15. remove /etc/sirven/levels if nothing else is inside (to do)
+       $ rmdir <prefix>/etc/sirven/levels   # kept if anything else is inside
+   16. remove /etc/sirven if nothing else is inside (to do)
+       $ rmdir <prefix>/etc/sirven   # kept if anything else is inside
+   17. remove the install record and the state directory /var/lib/sirven (to do)
+       $ rm -f <prefix>/var/lib/sirven/install-record.tsv && rmdir <prefix>/var/lib/sirven
+
+summary: 17 steps. 17 to do, 0 already done, 0 by the owner, 0 plan only.
+dry run: nothing was changed. run the same command without --dry-run to apply this plan.
+exit status: 0
