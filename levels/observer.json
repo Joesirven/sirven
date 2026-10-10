@@ -1,0 +1,122 @@
+{
+  "schema_version": 1,
+  "level": "observer",
+  "summary": "read only inside granted paths. sees files, changes nothing.",
+  "write_allowed": false,
+  "capabilities": {
+    "allowed": [
+      "list_directories_in_granted_paths",
+      "read_files_in_granted_paths",
+      "run_commands_as_the_service_user"
+    ],
+    "designed_not_built": [],
+    "denied": [
+      "root",
+      "sudo",
+      "write_outside_home_and_granted_paths",
+      "restart_system_services",
+      "change_transport_configuration",
+      "change_ssh_server_configuration",
+      "change_accounts",
+      "edit_own_policy",
+      "edit_audit_log",
+      "touch_kill_switch",
+      "grant_further_access"
+    ]
+  },
+  "access_control": {
+    "linux": {
+      "grant": "rX",
+      "traverse": "x"
+    },
+    "macos": {
+      "directories": "list,search,readattr,readextattr,readsecurity,file_inherit,directory_inherit",
+      "files": "read,readattr,readextattr,readsecurity",
+      "traverse": "search"
+    }
+  },
+  "paths": {
+    "default_grants": [],
+    "require_explicit_paths": true,
+    "deny_exact": [
+      "/",
+      "/home",
+      "/Users",
+      "/var",
+      "/opt",
+      "/private",
+      "/Volumes",
+      "/mnt",
+      "/srv",
+      "/tmp"
+    ],
+    "deny_within": [
+      "/etc",
+      "/root",
+      "/boot",
+      "/bin",
+      "/sbin",
+      "/usr",
+      "/lib",
+      "/lib64",
+      "/proc",
+      "/sys",
+      "/dev",
+      "/run",
+      "/System",
+      "/Library",
+      "/Applications",
+      "/private/etc",
+      "/private/var",
+      "/var/root",
+      "/var/log",
+      "/var/lib"
+    ],
+    "deny_components": [
+      ".ssh",
+      ".gnupg",
+      ".aws",
+      ".azure",
+      ".kube",
+      ".docker",
+      ".password-store",
+      ".netrc",
+      "Keychains",
+      ".config/gh",
+      ".config/gcloud"
+    ],
+    "deny_home_root": true,
+    "macos_privacy_folders": [
+      "Desktop",
+      "Documents",
+      "Downloads"
+    ]
+  },
+  "expiry": {
+    "owner_grant": {
+      "required": false
+    },
+    "friend_invite": {
+      "allowed": true,
+      "default_level": true,
+      "required": true,
+      "default_days": 7,
+      "maximum_days": 30
+    }
+  },
+  "audit": {
+    "session_start_and_end": true,
+    "every_command": true,
+    "file_changes": false,
+    "agent_can_read_log": false,
+    "agent_can_write_log": false,
+    "retention_days": 90
+  },
+  "widening": {
+    "can_grant": false,
+    "can_edit_own_policy": false,
+    "can_edit_audit_log": false,
+    "can_touch_kill_switch": false,
+    "root_or_sudo": false
+  }
+}

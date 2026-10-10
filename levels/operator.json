@@ -1,0 +1,133 @@
+{
+  "schema_version": 1,
+  "level": "operator",
+  "summary": "builder, plus restarts the services and reads the logs the owner lists. never root.",
+  "write_allowed": true,
+  "capabilities": {
+    "allowed": [
+      "list_directories_in_granted_paths",
+      "read_files_in_granted_paths",
+      "write_files_in_granted_paths",
+      "run_commands_as_the_service_user",
+      "run_builds_and_tests_in_granted_paths",
+      "restart_owner_listed_services",
+      "read_owner_listed_logs"
+    ],
+    "designed_not_built": [
+      "restart_owner_listed_services",
+      "read_owner_listed_logs"
+    ],
+    "denied": [
+      "root",
+      "sudo",
+      "write_outside_home_and_granted_paths",
+      "restart_system_services",
+      "change_transport_configuration",
+      "change_ssh_server_configuration",
+      "change_accounts",
+      "edit_own_policy",
+      "edit_audit_log",
+      "touch_kill_switch",
+      "grant_further_access"
+    ]
+  },
+  "access_control": {
+    "linux": {
+      "grant": "rwX",
+      "traverse": "x"
+    },
+    "macos": {
+      "directories": "list,search,add_file,add_subdirectory,delete_child,readattr,writeattr,readextattr,writeextattr,readsecurity,file_inherit,directory_inherit",
+      "files": "read,write,append,readattr,writeattr,readextattr,writeextattr,readsecurity",
+      "traverse": "search"
+    }
+  },
+  "paths": {
+    "default_grants": [],
+    "require_explicit_paths": true,
+    "deny_exact": [
+      "/",
+      "/home",
+      "/Users",
+      "/var",
+      "/opt",
+      "/private",
+      "/Volumes",
+      "/mnt",
+      "/srv",
+      "/tmp"
+    ],
+    "deny_within": [
+      "/etc",
+      "/root",
+      "/boot",
+      "/bin",
+      "/sbin",
+      "/usr",
+      "/lib",
+      "/lib64",
+      "/proc",
+      "/sys",
+      "/dev",
+      "/run",
+      "/System",
+      "/Library",
+      "/Applications",
+      "/private/etc",
+      "/private/var",
+      "/var/root",
+      "/var/log",
+      "/var/lib"
+    ],
+    "deny_components": [
+      ".ssh",
+      ".gnupg",
+      ".aws",
+      ".azure",
+      ".kube",
+      ".docker",
+      ".password-store",
+      ".netrc",
+      "Keychains",
+      ".config/gh",
+      ".config/gcloud"
+    ],
+    "deny_home_root": true,
+    "macos_privacy_folders": [
+      "Desktop",
+      "Documents",
+      "Downloads"
+    ]
+  },
+  "expiry": {
+    "owner_grant": {
+      "required": false
+    },
+    "friend_invite": {
+      "allowed": false,
+      "default_level": false,
+      "required": true,
+      "default_days": 0,
+      "maximum_days": 0
+    }
+  },
+  "audit": {
+    "session_start_and_end": true,
+    "every_command": true,
+    "file_changes": false,
+    "agent_can_read_log": false,
+    "agent_can_write_log": false,
+    "retention_days": 90
+  },
+  "widening": {
+    "can_grant": false,
+    "can_edit_own_policy": false,
+    "can_edit_audit_log": false,
+    "can_touch_kill_switch": false,
+    "root_or_sudo": false
+  },
+  "owner_listed": {
+    "services": [],
+    "logs": []
+  }
+}
