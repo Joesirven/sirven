@@ -46,13 +46,15 @@ plan_tailscale() {
     "tailscale admin console, access controls: merge $CONFIG_DIR/tailscale-policy-snippet.hujson and put your login in place of you@example.com."
   plan_owner "make one tagged auth key, once, in the browser" \
     "tailscale admin console, settings, keys: generate an auth key with tag:agent, pre-approved, not reusable.
-save it as $(tailscale_auth_key_file), owned by root, mode 0600. this is the only interactive step."
+save it as $(tailscale_auth_key_file), owned by root, mode 0600. this is the only interactive step." \
+    "[ -f $key_file ] || tailscale status --self --json 2>/dev/null | grep -q '\"tag:agent\"'"
   plan_planonly "join the tailnet as a tagged device with that key" \
     "tailscale up --auth-key=file:$key_file --advertise-tags=tag:agent" \
     "$TAILSCALE_REASON" \
     "tailscale status --self --json 2>/dev/null | grep -q '\"tag:agent\"'"
   plan_planonly "remove the used auth key from disk" \
     "rm -f $key_file" \
-    "$TAILSCALE_REASON"
+    "$TAILSCALE_REASON" \
+    "[ ! -e $key_file ]"
   plan_note "the agent client connects with: ssh $SERVICE_USER@<this machine's tailnet name>. tailscale ssh stays off; the machine's own SSH server and keys are used."
 }

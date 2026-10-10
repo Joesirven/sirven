@@ -15,7 +15,9 @@
 #   note      a line of context under the current section
 #
 # a step can also carry
-#   a tag     plan_tag TAG, a word other modules match on (state, audit, grant, always)
+#   a tag     plan_tag TAG, a word other modules match on: state, audit, and grant mark the
+#             steps uninstall.sh and the audit writer treat specially; always marks a step that
+#             has no read-only probe for its end state, so it runs every time
 #   an undo   plan_undo TITLE CHECK ACTION [SHOWN], or plan_undo_owner TITLE TEXT: how to
 #             reverse the step. when apply really runs a step that has an undo, the undo is
 #             appended to PLAN_RECORD_FILE, the install record. uninstall.sh reverses only what

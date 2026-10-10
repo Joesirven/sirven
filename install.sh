@@ -5,6 +5,12 @@
 # --dry-run the identical plan is printed and then applied. re-runs skip finished steps.
 # runs on macos bash 3.2 and on linux bash.
 
+# stop early, and readably, when started by sh or zsh instead of bash.
+if [ -z "${BASH_VERSION:-}" ]; then
+  echo "error: run this with bash, for example: bash $0" >&2
+  exit 1
+fi
+
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -168,6 +174,7 @@ plan_with_bb() {
   plan_planonly "install bb for $SERVICE_USER" \
     "# no command yet. alpha relies on bb or the runtime's own remote mode, over the transport above." \
     "$WITH_BB_REASON"
+  plan_tag always
 }
 
 build_install_plan() {
@@ -211,6 +218,17 @@ apply_for_real() {
   fi
   audit_flush
   return "$status"
+}
+
+# build_plan: the plan for the parsed command, not yet evaluated.
+build_plan() {
+  load_level
+  plan_reset
+  if [ "$COMMAND" = revoke ]; then
+    plan_kill_switch
+  else
+    build_install_plan
+  fi
 }
 
 finish() {
@@ -259,13 +277,7 @@ main() {
     PLAN_SIMULATION_LOG="$PREFIX$(layout_simulation_log)"
   fi
 
-  load_level
-  plan_reset
-  if [ "$COMMAND" = revoke ]; then
-    plan_kill_switch
-  else
-    build_install_plan
-  fi
+  build_plan
   plan_evaluate
   plan_header
   finish

@@ -10,6 +10,12 @@
 # printed and then applied. the audit log is kept unless --remove-audit-log is given.
 # runs on macos bash 3.2 and on linux bash. needs no python.
 
+# stop early, and readably, when started by sh or zsh instead of bash.
+if [ -z "${BASH_VERSION:-}" ]; then
+  echo "error: run this with bash, for example: bash $0" >&2
+  exit 1
+fi
+
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

@@ -106,3 +106,68 @@ test_package_name_comes_from_project_json() {
   printf '{\n  "name": "Other Name"\n}\n' > "$TEST_TMP/project.json"
   assert_eq "other name" "$(package_name "$TEST_TMP/project.json")"
 }
+
+test_bash_floor_is_the_macos_bash() {
+  assert_eq 3.2 "$PREFLIGHT_MINIMUM_BASH"
+  capture preflight_bash 3.2
+  assert_eq 0 "$CAPTURED_STATUS"
+  assert_status 1 preflight_bash 3.1
+  assert_contains "$CAPTURED_STDERR" "bash 3.1 is too old"
+  assert_contains "$CAPTURED_STDERR" "the version macos ships as /bin/bash"
+}
+
+test_install_started_by_sh_says_to_use_bash() {
+  assert_status 1 sh "$REPO_DIR/install.sh" --help
+  assert_contains "$CAPTURED_STDERR" "run this with bash"
+  assert_status 1 sh "$REPO_DIR/uninstall.sh" --help
+  assert_contains "$CAPTURED_STDERR" "run this with bash"
+}
+
+# fake_ssh STATUS MESSAGE: an ssh that records its arguments, prints MESSAGE, and exits STATUS.
+fake_ssh() {
+  mkdir -p "$TEST_TMP/bin"
+  printf '#!/bin/sh\necho "$@" > "%s/ssh-arguments"\necho "%s" >&2\nexit %s\n' "$TEST_TMP" "$2" "$1" > "$TEST_TMP/bin/ssh"
+  chmod +x "$TEST_TMP/bin/ssh"
+  PREFLIGHT_SSH_COMMAND="$TEST_TMP/bin/ssh"
+}
+
+test_ssh_probe_reads_what_the_server_said() {
+  fake_ssh 255 "Host key verification failed."
+  assert_eq reachable "$(preflight_ssh_probe example.com)"
+  fake_ssh 255 "probe@example.com: Permission denied (publickey)."
+  assert_eq reachable "$(preflight_ssh_probe example.com)"
+  fake_ssh 255 "ssh: connect to host example.com port 22: Connection refused"
+  assert_eq refused "$(preflight_ssh_probe example.com)"
+  fake_ssh 255 "ssh: connect to host 10.9.9.9 port 22: Connection timed out"
+  assert_eq timeout "$(preflight_ssh_probe 10.9.9.9)"
+  fake_ssh 255 "ssh: Could not resolve hostname nowhere.invalid: Name or service not known"
+  assert_eq unresolved "$(preflight_ssh_probe nowhere.invalid)"
+  if preflight_ssh_probe nowhere.invalid >/dev/null; then fail "only reachable returns 0"; fi
+}
+
+test_ssh_probe_never_authenticates_or_saves_a_host_key() {
+  fake_ssh 255 "Host key verification failed."
+  preflight_ssh_probe example.com 2222 4 >/dev/null
+  assert_contains "$(cat "$TEST_TMP/ssh-arguments")" "-o BatchMode=yes -o ConnectTimeout=4 -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/dev/null -o GlobalKnownHostsFile=/dev/null -p 2222 probe@example.com"
+}
+
+test_ssh_probe_refuses_hosts_that_look_like_options() {
+  fake_ssh 0 ""
+  assert_status 2 preflight_ssh_probe -oProxyCommand=touch
+  assert_status 2 preflight_ssh_probe 'host;reboot'
+  assert_status 2 preflight_ssh_probe example.com 22x
+  assert_no_file "$TEST_TMP/ssh-arguments"
+}
+
+test_ssh_server_probe_is_skipped_in_a_dry_run_and_only_warns() {
+  fake_ssh 255 "Connection refused"
+  capture preflight_ssh_server no
+  assert_contains "$CAPTURED_STDERR" "skipped the SSH server probe"
+  assert_no_file "$TEST_TMP/ssh-arguments"
+  PREFLIGHT_PROBLEMS=0
+  capture preflight_ssh_server yes
+  assert_eq 0 "$CAPTURED_STATUS"
+  assert_contains "$CAPTURED_STDERR" "no SSH server answered on this machine (refused)"
+  preflight_ssh_server yes 2>/dev/null
+  assert_eq 0 "$PREFLIGHT_PROBLEMS" "a missing SSH server is never a blocking problem"
+}
