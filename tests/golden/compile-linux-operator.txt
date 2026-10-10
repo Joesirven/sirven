@@ -1,0 +1,14 @@
+# compile operator for agent on linux
+# paths: /home/example/my-project /home/example/my-project/vendor /srv/a /srv/b
+let agent pass through /home	getfacl --absolute-names --omit-header <prefix>/home 2>/dev/null | grep -q '^user:agent:..x$'	setfacl -m u:agent:x <prefix>/home
+let agent pass through /home/example	getfacl --absolute-names --omit-header <prefix>/home/example 2>/dev/null | grep -q '^user:agent:..x$'	setfacl -m u:agent:x <prefix>/home/example
+let agent pass through /srv	getfacl --absolute-names --omit-header <prefix>/srv 2>/dev/null | grep -q '^user:agent:..x$'	setfacl -m u:agent:x <prefix>/srv
+grant agent rwX on /home/example/my-project and everything inside	getfacl --absolute-names --omit-header <prefix>/home/example/my-project 2>/dev/null | grep -qx 'user:agent:rwx'	setfacl -R -P -m u:agent:rwX <prefix>/home/example/my-project
+make new files in /home/example/my-project inherit the grant	getfacl --absolute-names --omit-header <prefix>/home/example/my-project 2>/dev/null | grep -qx 'default:user:agent:rwx'	setfacl -R -P -d -m u:agent:rwX <prefix>/home/example/my-project
+grant agent rwX on /home/example/my-project/vendor and everything inside	getfacl --absolute-names --omit-header <prefix>/home/example/my-project/vendor 2>/dev/null | grep -qx 'user:agent:rwx'	setfacl -R -P -m u:agent:rwX <prefix>/home/example/my-project/vendor
+make new files in /home/example/my-project/vendor inherit the grant	getfacl --absolute-names --omit-header <prefix>/home/example/my-project/vendor 2>/dev/null | grep -qx 'default:user:agent:rwx'	setfacl -R -P -d -m u:agent:rwX <prefix>/home/example/my-project/vendor
+grant agent rwX on /srv/a and everything inside	getfacl --absolute-names --omit-header <prefix>/srv/a 2>/dev/null | grep -qx 'user:agent:rwx'	setfacl -R -P -m u:agent:rwX <prefix>/srv/a
+make new files in /srv/a inherit the grant	getfacl --absolute-names --omit-header <prefix>/srv/a 2>/dev/null | grep -qx 'default:user:agent:rwx'	setfacl -R -P -d -m u:agent:rwX <prefix>/srv/a
+grant agent rwX on /srv/b and everything inside	getfacl --absolute-names --omit-header <prefix>/srv/b 2>/dev/null | grep -qx 'user:agent:rwx'	setfacl -R -P -m u:agent:rwX <prefix>/srv/b
+make new files in /srv/b inherit the grant	getfacl --absolute-names --omit-header <prefix>/srv/b 2>/dev/null | grep -qx 'default:user:agent:rwx'	setfacl -R -P -d -m u:agent:rwX <prefix>/srv/b
+exit status: 0

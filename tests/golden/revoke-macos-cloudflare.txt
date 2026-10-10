@@ -1,0 +1,60 @@
+sirv revoke plan
+  operating system: macos
+  service user: agent
+  owner: example
+  transport: cloudflare
+  prefix: <prefix>
+  mode: dry run: nothing will be changed
+
+kill switch: revoke --all
+    1. write revoke_started to the audit log (plan only)
+       $ printf '{"time": "%s", "event": "revoke_started", "user": "agent", "principal": "owner"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> <prefix>/var/log/sirv/audit.jsonl
+       not yet: the kill switch is plan output in the alpha cut; apply comes in alpha + 1
+    2. remove every authorized key for agent (plan only)
+       $ : > <prefix>/Users/agent/.ssh/authorized_keys
+       not yet: the kill switch is plan output in the alpha cut; apply comes in alpha + 1
+    3. lock agent so no new session starts (plan only)
+       $ dscl . -create /Users/agent UserShell /usr/bin/false
+       $ pwpolicy -u agent -disableuser
+       not yet: the kill switch is plan output in the alpha cut; apply comes in alpha + 1
+    4. end every running session and process of agent (plan only)
+       $ pkill -KILL -u agent
+       not yet: the kill switch is plan output in the alpha cut; apply comes in alpha + 1
+
+kill switch: access control lists
+    5. remove agent file rights in /Users/example/code/app (plan only)
+       $ /usr/bin/find <prefix>/Users/example/code/app -type f -exec /bin/chmod -a 'agent allow read,readattr,readextattr,readsecurity' {} +
+       not yet: the kill switch is plan output in the alpha cut; apply comes in alpha + 1
+    6. remove agent folder rights on /Users/example/code/app (plan only)
+       $ /usr/bin/find <prefix>/Users/example/code/app -type d -exec /bin/chmod -a 'agent allow list,search,readattr,readextattr,readsecurity,file_inherit,directory_inherit' {} +
+       not yet: the kill switch is plan output in the alpha cut; apply comes in alpha + 1
+    7. stop agent passing through /Users (plan only)
+       $ /bin/chmod -a 'agent allow search' <prefix>/Users
+       not yet: the kill switch is plan output in the alpha cut; apply comes in alpha + 1
+    8. stop agent passing through /Users/example (plan only)
+       $ /bin/chmod -a 'agent allow search' <prefix>/Users/example
+       not yet: the kill switch is plan output in the alpha cut; apply comes in alpha + 1
+    9. stop agent passing through /Users/example/code (plan only)
+       $ /bin/chmod -a 'agent allow search' <prefix>/Users/example/code
+       not yet: the kill switch is plan output in the alpha cut; apply comes in alpha + 1
+   10. mark the grant record revoked (plan only)
+       $ mv <prefix>/etc/sirv/grants/agent.json <prefix>/etc/sirv/grants/agent.json.revoked
+       not yet: the kill switch is plan output in the alpha cut; apply comes in alpha + 1
+
+kill switch: transport
+   11. stop the tunnel service (plan only)
+       $ cloudflared service uninstall
+       not yet: the kill switch is plan output in the alpha cut; apply comes in alpha + 1
+   12. revoke the service token (owner, by hand)
+       cloudflare dashboard, access, service auth: revoke the agent client's service token.
+
+kill switch: finish
+   13. write revoke_finished to the audit log (plan only)
+       $ printf '{"time": "%s", "event": "revoke_finished", "user": "agent", "principal": "owner"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> <prefix>/var/log/sirv/audit.jsonl
+       not yet: the kill switch is plan output in the alpha cut; apply comes in alpha + 1
+     note: undo is a fresh install. nothing here is reversed automatically.
+
+summary: 13 steps. 0 to do, 0 already done, 1 by the owner, 12 plan only.
+dry run: nothing was changed. run the same command without --dry-run to apply this plan.
+applying would stop before any change: the plan has plan-only steps the alpha cut does not apply yet.
+exit status: 0

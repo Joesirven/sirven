@@ -1,0 +1,14 @@
+# revoke builder for agent on linux
+# paths: /home/example/my-project /home/example/my-project/vendor /srv/a /srv/b
+remove agent from /home/example/my-project and everything inside	! getfacl --absolute-names --omit-header <prefix>/home/example/my-project 2>/dev/null | grep -q '^user:agent:'	setfacl -R -P -x u:agent <prefix>/home/example/my-project
+stop new files in /home/example/my-project inheriting agent	! getfacl --absolute-names --omit-header <prefix>/home/example/my-project 2>/dev/null | grep -q '^default:user:agent:'	setfacl -R -P -d -x u:agent <prefix>/home/example/my-project
+remove agent from /home/example/my-project/vendor and everything inside	! getfacl --absolute-names --omit-header <prefix>/home/example/my-project/vendor 2>/dev/null | grep -q '^user:agent:'	setfacl -R -P -x u:agent <prefix>/home/example/my-project/vendor
+stop new files in /home/example/my-project/vendor inheriting agent	! getfacl --absolute-names --omit-header <prefix>/home/example/my-project/vendor 2>/dev/null | grep -q '^default:user:agent:'	setfacl -R -P -d -x u:agent <prefix>/home/example/my-project/vendor
+remove agent from /srv/a and everything inside	! getfacl --absolute-names --omit-header <prefix>/srv/a 2>/dev/null | grep -q '^user:agent:'	setfacl -R -P -x u:agent <prefix>/srv/a
+stop new files in /srv/a inheriting agent	! getfacl --absolute-names --omit-header <prefix>/srv/a 2>/dev/null | grep -q '^default:user:agent:'	setfacl -R -P -d -x u:agent <prefix>/srv/a
+remove agent from /srv/b and everything inside	! getfacl --absolute-names --omit-header <prefix>/srv/b 2>/dev/null | grep -q '^user:agent:'	setfacl -R -P -x u:agent <prefix>/srv/b
+stop new files in /srv/b inheriting agent	! getfacl --absolute-names --omit-header <prefix>/srv/b 2>/dev/null | grep -q '^default:user:agent:'	setfacl -R -P -d -x u:agent <prefix>/srv/b
+stop agent passing through /home	! getfacl --absolute-names --omit-header <prefix>/home 2>/dev/null | grep -q '^user:agent:'	setfacl -x u:agent <prefix>/home
+stop agent passing through /home/example	! getfacl --absolute-names --omit-header <prefix>/home/example 2>/dev/null | grep -q '^user:agent:'	setfacl -x u:agent <prefix>/home/example
+stop agent passing through /srv	! getfacl --absolute-names --omit-header <prefix>/srv 2>/dev/null | grep -q '^user:agent:'	setfacl -x u:agent <prefix>/srv
+exit status: 0

@@ -1,0 +1,155 @@
+# shellcheck shell=bash
+# plan engine: numbering, dry run, apply, idempotency, refusals. all on a fake root.
+
+# shellcheck source=lib/common.sh
+. "$REPO_DIR/lib/common.sh"
+# shellcheck source=lib/plan.sh
+. "$REPO_DIR/lib/plan.sh"
+
+setup_fake_root() {
+  ROOT="$TEST_TMP/root"
+  PLAN_PREFIX="$ROOT"
+  PLAN_SIMULATION_LOG="$ROOT/var/lib/sirv/simulated-system-commands.log"
+  PLAN_OPERATING_SYSTEM=linux
+  plan_reset
+}
+
+add_directory_step() {
+  plan_step run "create $1" "[ -d $ROOT$1 ]" "mkdir -p $ROOT$1"
+}
+
+test_steps_are_numbered_and_sections_are_not() {
+  setup_fake_root
+  plan_section "first section"
+  plan_note "context"
+  add_directory_step /one
+  plan_owner "do a thing by hand" "click the button"
+  plan_section "second section"
+  plan_planonly "a later feature" "later-command" "not built yet"
+  plan_evaluate
+  capture plan_print
+  assert_contains "$CAPTURED_STDOUT" "first section"
+  assert_contains "$CAPTURED_STDOUT" "    1. create /one (to do)"
+  assert_contains "$CAPTURED_STDOUT" "    2. do a thing by hand (owner, by hand)"
+  assert_contains "$CAPTURED_STDOUT" "    3. a later feature (plan only)"
+  assert_contains "$CAPTURED_STDOUT" "not yet: not built yet"
+  assert_contains "$CAPTURED_STDOUT" "note: context"
+}
+
+test_dry_run_print_changes_nothing() {
+  setup_fake_root
+  add_directory_step /etc/sirv
+  plan_step system "make a user" "" "useradd example"
+  plan_evaluate
+  capture plan_print
+  assert_contains "$CAPTURED_STDOUT" "\$ mkdir -p $ROOT/etc/sirv"
+  assert_no_file "$ROOT"
+}
+
+test_apply_runs_steps_then_rerun_skips_them() {
+  setup_fake_root
+  add_directory_step /etc/sirv
+  add_directory_step /var/log/sirv
+  plan_evaluate
+  assert_status 0 plan_apply
+  assert_file_exists "$ROOT/etc/sirv"
+  assert_file_exists "$ROOT/var/log/sirv"
+  assert_contains "$CAPTURED_STDOUT" "applied 2 steps, skipped 0 already done."
+
+  plan_reset
+  add_directory_step /etc/sirv
+  add_directory_step /var/log/sirv
+  plan_evaluate
+  capture plan_print
+  assert_contains "$CAPTURED_STDOUT" "create /etc/sirv (already done)"
+  assert_status 0 plan_apply
+  assert_contains "$CAPTURED_STDOUT" "applied 0 steps, skipped 2 already done."
+}
+
+test_system_steps_are_recorded_not_run_under_prefix() {
+  setup_fake_root
+  plan_step system "touch outside the fake root" "" "touch $TEST_TMP/outside"
+  plan_evaluate
+  assert_status 0 plan_apply
+  assert_no_file "$TEST_TMP/outside"
+  assert_eq "touch $TEST_TMP/outside" "$(cat "$PLAN_SIMULATION_LOG")" "the simulation log holds the command"
+
+  plan_reset
+  plan_step system "touch outside the fake root" "" "touch $TEST_TMP/outside"
+  plan_evaluate
+  assert_eq "done" "${PLAN_STATUS[0]}" "a recorded system step counts as done on the next run"
+}
+
+test_plan_only_step_blocks_apply_before_any_change() {
+  setup_fake_root
+  add_directory_step /etc/sirv
+  plan_planonly "join the tailnet" "tailscale up" "tailscale is plan only"
+  plan_evaluate
+  assert_status 3 plan_apply
+  assert_contains "$CAPTURED_STDERR" "not yet"
+  assert_contains "$CAPTURED_STDERR" "step 2, join the tailnet: tailscale is plan only"
+  assert_no_file "$ROOT/etc/sirv"
+}
+
+test_failed_step_stops_the_apply() {
+  setup_fake_root
+  plan_step run "always fails" "" "false"
+  add_directory_step /after
+  plan_evaluate
+  assert_status 4 plan_apply
+  assert_contains "$CAPTURED_STDERR" "step 1 failed: always fails"
+  assert_no_file "$ROOT/after"
+}
+
+test_checks_ignore_pipefail_from_early_exit() {
+  setup_fake_root
+  set -o pipefail
+  plan_step run "already done through a pipe" "yes | head -n 1 | grep -q y" "false"
+  plan_evaluate
+  assert_eq "done" "${PLAN_STATUS[0]}"
+}
+
+test_owner_steps_are_shown_but_not_run() {
+  setup_fake_root
+  plan_owner "paste the policy" "touch $TEST_TMP/never"
+  plan_evaluate
+  assert_status 0 plan_apply
+  assert_contains "$CAPTURED_STDOUT" "yours to do by hand: paste the policy"
+  assert_no_file "$TEST_TMP/never"
+}
+
+test_real_apply_is_refused_outside_a_container() {
+  if in_container; then
+    return 0
+  fi
+  setup_fake_root
+  PLAN_PREFIX=""
+  add_directory_step /etc/sirv
+  plan_evaluate
+  assert_status 3 plan_apply
+  assert_contains "$CAPTURED_STDERR" "throwaway container"
+  assert_no_file "$ROOT/etc/sirv"
+}
+
+test_real_apply_on_macos_is_refused() {
+  setup_fake_root
+  PLAN_PREFIX=""
+  PLAN_OPERATING_SYSTEM=macos
+  assert_contains "$(plan_real_apply_refusal)" "not verified yet"
+}
+
+test_unknown_step_kind_is_an_error() {
+  setup_fake_root
+  assert_status 1 plan_step sideways "bad" "" "true"
+  assert_contains "$CAPTURED_STDERR" "unknown kind"
+}
+
+test_summary_counts_every_kind() {
+  setup_fake_root
+  add_directory_step /a
+  plan_owner "by hand" "text"
+  plan_planonly "later" "command" "reason"
+  plan_evaluate
+  capture plan_summary
+  assert_contains "$CAPTURED_STDOUT" "summary: 3 steps. 1 to do, 0 already done, 1 by the owner, 1 plan only."
+}
