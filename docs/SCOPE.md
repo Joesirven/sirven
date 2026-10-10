@@ -60,7 +60,7 @@ Each workstream lists what it delivers, what it needs first, and its honest stat
 
 | # | Workstream | Delivers | Depends on | Tonight |
 |---|---|---|---|---|
-| W1 | Installer core | `install.sh`: operating system detection, preflight checks, a plan-then-apply engine, `--dry-run`, idempotent re-runs, `--prefix` for a fake root | none | **Build** |
+| W1 | Installer core | `install.sh`: operating system detection, preflight checks, at most two setup questions with visible defaults (`--yes` and `SIRVEN_*` for no questions), a plan-then-apply engine, `--dry-run`, idempotent re-runs, `--prefix` for a fake root | none | **Build** |
 | W2 | Service user | Create or reuse `agent` (Linux `useradd`, macOS `sysadminctl`/`dscl`), no administrator group, locked password, SSH key only | W1 | **Build**, verified by dry run and fake-root tests; real creation only in a throwaway container |
 | W3 | Permission model | Levels as data (`levels/*.json` or similar), grant schema, a compiler from grants to access control list commands | none | **Design doc plus reference data and compiler** |
 | W4 | Audit log | Log format (JSON lines), location owned by the owner, append-only from the agent's point of view, session start and end, every command via a forced-command wrapper | W2, W3 | **Format designed; wrapper built if time allows**, otherwise designed |

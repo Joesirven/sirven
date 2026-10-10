@@ -182,6 +182,21 @@ the kill switch reads it to know what to remove.
 
 ## how a grant changes, and how it is reversed
 
+- **setup.** before the plan is built, `install.sh` asks at most two questions, each with its
+  default in brackets: the access level (`observer`) and the one path to grant (the current
+  folder when the level's policy accepts it, otherwise `none`). the plan header then shows the
+  level and paths chosen, and nothing applies without that plan being printed. a flag
+  (`--level`, `--path`) or an environment variable (`SIRVEN_LEVEL`, `SIRVEN_PATH` with paths
+  separated by colons, or `none`) answers a question ahead of time, and flags win. with `--yes`
+  (`--defaults`, `SIRVEN_YES=1`), or with no terminal to ask on, nothing is asked: the level is
+  `observer` and no path is granted, because a grant needs a person to name the path.
+  `curl ... | bash` with a person at the terminal still asks, on the terminal.
+
+  ```
+  sirven setup: press enter to accept the default in brackets.
+  1/2 access level [observer]: builder
+  2/2 path to grant [/home/you/code/app]:
+  ```
 - **install.** `install.sh` writes the grant record and the entries. when it applies for real,
   each step it actually runs appends its undo to the install record,
   `/var/lib/<package>/install-record.tsv`, and a changed grant record writes a `grant` entry to
