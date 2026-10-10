@@ -12,6 +12,9 @@ TESTS_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$TESTS_DIR/.." && pwd)"
 FILTER="${1:-}"
 export REPO_DIR TESTS_DIR
+# the setup questions must never wait on whoever runs the tests: tests get no terminal on
+# standard input and none of the caller's answers.
+unset SIRVEN_LEVEL SIRVEN_PATH SIRVEN_YES SIRVEN_INTERACTIVE
 
 passed=0
 failed=0
@@ -28,7 +31,7 @@ run_test() {
     # shellcheck disable=SC1090
     . "$file"
     "$name"
-  ) > "$log" 2>&1
+  ) < /dev/null > "$log" 2>&1
   status=$?
   if [ "$status" -eq 0 ]; then
     printf 'ok      %s\n' "$name"
@@ -56,7 +59,7 @@ done
 
 if [ -z "$FILTER" ] || [ "$FILTER" = golden ]; then
   printf '\n# tests/golden\n'
-  golden_output="$(bash "$TESTS_DIR/golden/run.sh" 2>&1)"
+  golden_output="$(bash "$TESTS_DIR/golden/run.sh" < /dev/null 2>&1)"
   printf '%s\n' "$golden_output"
   golden_passed="$(printf '%s\n' "$golden_output" | grep -c '^ok ' || true)"
   golden_failed="$(printf '%s\n' "$golden_output" | grep -c '^not ok ' || true)"

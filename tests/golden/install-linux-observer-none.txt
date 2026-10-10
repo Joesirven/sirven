@@ -1,6 +1,7 @@
 sirven install plan
   operating system: linux
   level: observer (write allowed: false)
+  paths: /srv/app, /home/example/notes
   service user: agent
   owner: example
   transport: none

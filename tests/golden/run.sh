@@ -35,7 +35,7 @@ golden_case() {
   prefix="$(case_prefix "$name")"
   actual="$WORK_DIR/$name.txt"
   expected="$GOLDEN_DIR/$name.txt"
-  SIRVEN_OS_OVERRIDE="$os" "$@" > "$actual.raw" 2> "$actual.error" || status=$?
+  SIRVEN_OS_OVERRIDE="$os" "$@" < /dev/null > "$actual.raw" 2> "$actual.error" || status=$?
   {
     sed "s|$prefix|<prefix>|g" "$actual.raw"
     printf 'exit status: %s\n' "$status"

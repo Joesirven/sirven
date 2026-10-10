@@ -35,6 +35,8 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$ROOT_DIR/lib/cloudflare.sh"
 # shellcheck source=lib/kill_switch.sh
 . "$ROOT_DIR/lib/kill_switch.sh"
+# shellcheck source=lib/questions.sh
+. "$ROOT_DIR/lib/questions.sh"
 
 WITH_BB_REASON="--with-bb is plan only in the alpha cut; the orca install is not specified yet"
 
@@ -44,20 +46,34 @@ usage:
   ./install.sh [options]              set up agent access
   ./install.sh revoke --all [options] the kill switch: revoke everything
 
+setup asks at most two questions, the level and the path, each with its default shown. a flag
+or environment variable answers a question ahead of time. with --yes, or with no terminal to
+ask on, nothing is asked: the level is observer and no path is granted.
+
 options:
   --dry-run                  print the plan and change nothing
+  --yes, --defaults          ask nothing; use the defaults for anything not given
   --prefix PATH              fake the filesystem root: every path the plan touches goes under
                              PATH, and commands that need root are recorded, not run
   --level LEVEL              observer (default), builder, or operator. see levels/
-  --path PATH                grant the level on this absolute path. repeat for more paths
+  --path PATH                grant the level on this absolute path. repeat for more paths.
+                             asked default: the current folder when it can be granted
   --transport NAME           tailscale (default), cloudflare, or none
   --with-bb                  add the bb install note to the plan (plan only for now)
   --user NAME                service user name (default: agent)
   --owner NAME               owner account that holds the audit log (default: you)
   --help                     show this help
 
+environment:
+  SIRVEN_LEVEL               the level, as --level
+  SIRVEN_PATH                paths to grant, separated by colons, or none
+  SIRVEN_YES=1               as --yes
+  SIRVEN_INTERACTIVE=no      never ask; yes asks on standard input even when it is a pipe
+
 examples:
+  ./install.sh --dry-run
   ./install.sh --dry-run --level builder --path /home/you/code/app
+  SIRVEN_LEVEL=builder SIRVEN_PATH=/srv/app ./install.sh --yes --dry-run
   ./install.sh --dry-run --prefix /tmp/fake-root --level observer --path /srv/app --transport none
   ./install.sh revoke --all --dry-run
 
@@ -83,8 +99,10 @@ parse_arguments() {
   COMMAND=install
   DRY_RUN=no
   PREFIX=""
-  LEVEL=observer
+  LEVEL=""
   GRANT_PATHS=()
+  PATHS_GIVEN=no
+  ASSUME_YES=no
   TRANSPORT=tailscale
   WITH_BB=no
   SERVICE_USER=agent
@@ -98,12 +116,13 @@ parse_arguments() {
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --dry-run) DRY_RUN=yes ;;
+      --yes | --defaults | -y) ASSUME_YES=yes ;;
       --prefix) needs_value "$1" "$#" "${2:-}"; PREFIX="$2"; shift ;;
       --prefix=*) PREFIX="${1#*=}" ;;
       --level) needs_value "$1" "$#" "${2:-}"; LEVEL="$2"; shift ;;
       --level=*) LEVEL="${1#*=}" ;;
-      --path) needs_value "$1" "$#" "${2:-}"; GRANT_PATHS[${#GRANT_PATHS[@]}]="$2"; shift ;;
-      --path=*) GRANT_PATHS[${#GRANT_PATHS[@]}]="${1#*=}" ;;
+      --path) needs_value "$1" "$#" "${2:-}"; GRANT_PATHS[${#GRANT_PATHS[@]}]="$2"; PATHS_GIVEN=yes; shift ;;
+      --path=*) GRANT_PATHS[${#GRANT_PATHS[@]}]="${1#*=}"; PATHS_GIVEN=yes ;;
       --transport) needs_value "$1" "$#" "${2:-}"; TRANSPORT="$2"; shift ;;
       --transport=*) TRANSPORT="${1#*=}" ;;
       --with-bb) WITH_BB=yes ;;
@@ -119,7 +138,7 @@ parse_arguments() {
   done
 
   case "$LEVEL" in
-    observer | builder | operator) ;;
+    '' | observer | builder | operator) ;;
     *) usage_error "--level must be observer, builder, or operator, got '$LEVEL'" ;;
   esac
   case "$TRANSPORT" in
@@ -161,6 +180,7 @@ plan_header() {
   say "  operating system: $OPERATING_SYSTEM"
   if [ "$COMMAND" = install ]; then
     say "  level: $LEVEL (write allowed: $LEVEL_WRITE_ALLOWED)"
+    say "  paths: $(setup_describe_paths)"
   fi
   say "  service user: $SERVICE_USER"
   say "  owner: $OWNER"
@@ -251,6 +271,7 @@ finish() {
 
 main() {
   parse_arguments "$@"
+  setup_from_environment
   OPERATING_SYSTEM="$(detect_os)"
   PACKAGE="$(package_name "$ROOT_DIR/project.json")"
   layout_set_directories
@@ -266,6 +287,9 @@ main() {
     [ -z "$refusal" ] || DIE_STATUS=3 die "not applied: $refusal"
   fi
   preflight_all "$OPERATING_SYSTEM" "$TRANSPORT" "$strict"
+
+  # the questions come before the plan is built, so the plan shows the answers.
+  setup_questions
 
   STAGE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/$PACKAGE-plan.XXXXXX")"
   trap 'rm -rf "$STAGE_DIR"' EXIT

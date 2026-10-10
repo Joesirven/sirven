@@ -1,6 +1,7 @@
 sirven install plan
   operating system: linux
   level: builder (write allowed: true)
+  paths: /home/example/project
   service user: agent
   owner: example
   transport: tailscale

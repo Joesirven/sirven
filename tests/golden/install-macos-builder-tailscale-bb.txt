@@ -1,6 +1,7 @@
 sirven install plan
   operating system: macos
   level: builder (write allowed: true)
+  paths: /Users/example/code/app
   service user: agent
   owner: example
   transport: tailscale

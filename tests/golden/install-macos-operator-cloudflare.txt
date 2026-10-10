@@ -1,6 +1,7 @@
 sirven install plan
   operating system: macos
   level: operator (write allowed: true)
+  paths: /Users/example/code/site
   service user: agent
   owner: example
   transport: cloudflare
