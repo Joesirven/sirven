@@ -14,11 +14,24 @@
 #   section   a heading
 #   note      a line of context under the current section
 #
-# plain indexed arrays only, so it runs on bash 3.2.
+# a step can also carry
+#   a tag     plan_tag TAG, a word other modules match on (state, audit, grant, always)
+#   an undo   plan_undo TITLE CHECK ACTION [SHOWN], or plan_undo_owner TITLE TEXT: how to
+#             reverse the step. when apply really runs a step that has an undo, the undo is
+#             appended to PLAN_RECORD_FILE, the install record. uninstall.sh reverses only what
+#             that record lists, so it never removes something this package did not create.
+#
+# PLAN_STEP_HOOK, when set, names a function apply calls after every numbered step with
+# NUMBER KIND TAG TITLE OUTCOME. install.sh points it at the audit log writer.
+#
+# plain indexed arrays only, walked by index and never expanded whole, so it runs on bash 3.2
+# with set -u, where expanding an empty array is an error.
 
 PLAN_PREFIX="${PLAN_PREFIX:-}"
 PLAN_SIMULATION_LOG="${PLAN_SIMULATION_LOG:-}"
 PLAN_OPERATING_SYSTEM="${PLAN_OPERATING_SYSTEM:-linux}"
+PLAN_RECORD_FILE="${PLAN_RECORD_FILE:-}"
+PLAN_STEP_HOOK="${PLAN_STEP_HOOK:-}"
 
 plan_reset() {
   PLAN_KIND=()
@@ -29,7 +42,14 @@ plan_reset() {
   PLAN_REASON=()
   PLAN_STATUS=()
   PLAN_NUMBER=()
+  PLAN_TAG=()
+  PLAN_SECTION=()
+  PLAN_UNDO_TITLE=()
+  PLAN_UNDO_CHECK=()
+  PLAN_UNDO_ACTION=()
+  PLAN_UNDO_SHOWN=()
   PLAN_COUNT=0
+  PLAN_CURRENT_SECTION=""
 }
 
 plan_reset
@@ -44,6 +64,13 @@ _plan_add() {
   PLAN_REASON[index]="$6"
   PLAN_STATUS[index]=""
   PLAN_NUMBER[index]=""
+  PLAN_TAG[index]=""
+  if [ "$1" = section ]; then PLAN_CURRENT_SECTION="$2"; fi
+  PLAN_SECTION[index]="$PLAN_CURRENT_SECTION"
+  PLAN_UNDO_TITLE[index]=""
+  PLAN_UNDO_CHECK[index]=""
+  PLAN_UNDO_ACTION[index]=""
+  PLAN_UNDO_SHOWN[index]=""
   PLAN_COUNT=$((PLAN_COUNT + 1))
 }
 
@@ -68,14 +95,63 @@ plan_step() {
   _plan_add "$kind" "$title" "$check" "$action" "$shown" ""
 }
 
-# plan_owner TITLE TEXT
+# plan_owner TITLE TEXT [CHECK]
+# with CHECK, a step the owner already did shows as already done.
 plan_owner() {
-  _plan_add owner "$1" "" "" "$2" ""
+  _plan_add owner "$1" "${3:-}" "" "$2" ""
 }
 
 # plan_planonly TITLE SHOWN REASON [CHECK]
 plan_planonly() {
   _plan_add planonly "$1" "${4:-}" "" "$2" "$3"
+}
+
+# plan_tag TAG: tag the most recent step.
+plan_tag() {
+  [ "$PLAN_COUNT" -gt 0 ] || die "plan_tag: no step to tag"
+  PLAN_TAG[PLAN_COUNT - 1]="$1"
+}
+
+# the install record keeps one undo per line, fields separated by tabs, so an undo must not
+# hold a tab or a newline.
+_plan_one_line() {
+  local tab newline
+  tab="$(printf '\t')"
+  newline="
+"
+  case "$1" in
+    *"$tab"* | *"$newline"*) die "plan_undo: '$2' must fit on one line without tabs" ;;
+  esac
+}
+
+# plan_undo TITLE CHECK ACTION [SHOWN]: how to reverse the most recent run or system step.
+# CHECK exits 0 when the step is already reversed.
+plan_undo() {
+  local index=$((PLAN_COUNT - 1)) title="$1" check="$2" action="$3" shown="${4:-$3}"
+  [ "$index" -ge 0 ] || die "plan_undo: no step to attach to"
+  case "${PLAN_KIND[index]}" in
+    run | system | planonly) ;;
+    *) die "plan_undo: step '${PLAN_TITLE[index]}' cannot be reversed by a command" ;;
+  esac
+  [ -n "$action" ] || die "plan_undo: undo for '${PLAN_TITLE[index]}' has no action"
+  _plan_one_line "$title" "$title"
+  _plan_one_line "$check" "$title"
+  _plan_one_line "$action" "$title"
+  _plan_one_line "$shown" "$title"
+  PLAN_UNDO_TITLE[index]="$title"
+  PLAN_UNDO_CHECK[index]="$check"
+  PLAN_UNDO_ACTION[index]="$action"
+  PLAN_UNDO_SHOWN[index]="$shown"
+}
+
+# plan_undo_owner TITLE TEXT: what the owner does by hand to reverse the most recent owner step.
+plan_undo_owner() {
+  local index=$((PLAN_COUNT - 1))
+  [ "$index" -ge 0 ] && [ "${PLAN_KIND[index]}" = owner ] || die "plan_undo_owner: the most recent step is not an owner step"
+  _plan_one_line "$1" "$1"
+  _plan_one_line "$2" "$1"
+  PLAN_UNDO_TITLE[index]="$1"
+  PLAN_UNDO_SHOWN[index]="$2"
 }
 
 # run a check without pipefail, so 'producer | grep -q' is judged by grep alone.
@@ -99,7 +175,11 @@ plan_evaluate() {
     kind="${PLAN_KIND[index]}"
     case "$kind" in
       section | note) PLAN_STATUS[index]="info" ;;
-      owner) number=$((number + 1)); PLAN_STATUS[index]="owner" ;;
+      owner)
+        number=$((number + 1))
+        PLAN_STATUS[index]="owner"
+        if _plan_check_passes "${PLAN_CHECK[index]}"; then PLAN_STATUS[index]="done"; fi
+        ;;
       planonly)
         number=$((number + 1))
         PLAN_STATUS[index]="planonly"
@@ -236,6 +316,41 @@ plan_blockers() {
   done
 }
 
+# a field of the install record. empty fields are written as '-', because read with a tab in
+# IFS would swallow an empty field.
+_plan_field() {
+  printf '%s' "${1:--}"
+}
+
+# _plan_record INDEX: append the step's undo to the install record, once.
+# fields: kind, tag, section, title, undo title, undo check, undo action, undo shown.
+_plan_record() {
+  local index="$1" line
+  [ -n "$PLAN_RECORD_FILE" ] || return 0
+  [ -n "${PLAN_UNDO_TITLE[index]}" ] || return 0
+  line="$(printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s' \
+    "${PLAN_KIND[index]}" "$(_plan_field "${PLAN_TAG[index]}")" "$(_plan_field "${PLAN_SECTION[index]}")" \
+    "$(_plan_field "${PLAN_TITLE[index]}")" "$(_plan_field "${PLAN_UNDO_TITLE[index]}")" \
+    "$(_plan_field "${PLAN_UNDO_CHECK[index]}")" "$(_plan_field "${PLAN_UNDO_ACTION[index]}")" \
+    "$(_plan_field "${PLAN_UNDO_SHOWN[index]}")")"
+  if [ ! -d "$(dirname "$PLAN_RECORD_FILE")" ]; then
+    printf 'warning: no folder for the install record %s; step %s is not recorded, so uninstall will leave it.\n' \
+      "$PLAN_RECORD_FILE" "${PLAN_NUMBER[index]}" >&2
+    return 0
+  fi
+  if [ -f "$PLAN_RECORD_FILE" ] && grep -qxF -- "$line" "$PLAN_RECORD_FILE"; then
+    return 0
+  fi
+  printf '%s\n' "$line" >> "$PLAN_RECORD_FILE"
+  chmod 0600 "$PLAN_RECORD_FILE"
+}
+
+# _plan_hook INDEX OUTCOME
+_plan_hook() {
+  [ -n "$PLAN_STEP_HOOK" ] || return 0
+  "$PLAN_STEP_HOOK" "${PLAN_NUMBER[$1]}" "${PLAN_KIND[$1]}" "${PLAN_TAG[$1]}" "${PLAN_TITLE[$1]}" "$2"
+}
+
 # apply the evaluated plan. refuses up front, before any change, if any step cannot run.
 plan_apply() {
   local refusal blockers index=0 kind applied=0 skipped=0
@@ -258,27 +373,41 @@ plan_apply() {
         if [ "${PLAN_STATUS[index]}" = "done" ]; then
           printf '  %3s. skipped, already done\n' "${PLAN_NUMBER[index]}"
           skipped=$((skipped + 1))
+          _plan_hook "$index" skipped
         elif [ "$kind" = system ] && [ -n "$PLAN_PREFIX" ]; then
           mkdir -p "$(dirname "$PLAN_SIMULATION_LOG")"
           printf '%s\n' "${PLAN_ACTION[index]}" >> "$PLAN_SIMULATION_LOG"
           printf '  %3s. recorded in %s\n' "${PLAN_NUMBER[index]}" "$PLAN_SIMULATION_LOG"
           applied=$((applied + 1))
+          _plan_record "$index"
+          _plan_hook "$index" recorded
         else
           if ! ( eval "${PLAN_ACTION[index]}" ); then
             printf 'error: step %s failed: %s\n' "${PLAN_NUMBER[index]}" "${PLAN_TITLE[index]}" >&2
             printf 'steps before it stay applied; fix the cause and run again, finished steps are skipped.\n' >&2
+            _plan_hook "$index" failed
             return 4
           fi
           printf '  %3s. done\n' "${PLAN_NUMBER[index]}"
           applied=$((applied + 1))
+          _plan_record "$index"
+          _plan_hook "$index" applied
         fi
         ;;
       owner)
-        printf '  %3s. yours to do by hand: %s\n' "${PLAN_NUMBER[index]}" "${PLAN_TITLE[index]}"
+        if [ "${PLAN_STATUS[index]}" = "done" ]; then
+          printf '  %3s. skipped, already done\n' "${PLAN_NUMBER[index]}"
+          _plan_hook "$index" skipped
+        else
+          printf '  %3s. yours to do by hand: %s\n' "${PLAN_NUMBER[index]}" "${PLAN_TITLE[index]}"
+          _plan_record "$index"
+          _plan_hook "$index" owner
+        fi
         ;;
       planonly)
         printf '  %3s. skipped, already done\n' "${PLAN_NUMBER[index]}"
         skipped=$((skipped + 1))
+        _plan_hook "$index" skipped
         ;;
     esac
     index=$((index + 1))

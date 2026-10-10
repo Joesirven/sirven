@@ -73,3 +73,49 @@ test_revoke_from_record_matches_revoke_from_paths() {
     "$(compiler revoke --level "$REPO_DIR/levels/observer.json" --os linux --record "$TEST_TMP/grant.json")" \
     "$(compiler revoke --level "$LEVEL_BUILDER" --os linux --path /srv/app)"
 }
+
+test_with_undo_pairs_every_grant_with_its_removal() {
+  local os with_undo undo_commands revoke_commands
+  for os in linux macos; do
+    with_undo="$(compiler compile --level "$LEVEL_BUILDER" --os "$os" --with-undo --path /srv/b --path /opt/site/app)"
+    assert_eq "" "$(printf '%s\n' "$with_undo" | grep -v '^#' | awk -F '\t' 'NF != 6')" "six fields on $os"
+    assert_eq "$(compiler compile --level "$LEVEL_BUILDER" --os "$os" --path /srv/b --path /opt/site/app)" \
+      "$(printf '%s\n' "$with_undo" | cut -f1-3)" "the first three fields are the plain compile on $os"
+    undo_commands="$(printf '%s\n' "$with_undo" | grep -v '^#' | cut -f6 | sort)"
+    revoke_commands="$(compiler revoke --level "$LEVEL_BUILDER" --os "$os" --path /srv/b --path /opt/site/app | grep -v '^#' | cut -f3 | sort)"
+    assert_eq "$revoke_commands" "$undo_commands" "undo and revoke agree on $os"
+  done
+}
+
+test_show_reads_a_grant_record() {
+  compiler record --level "$LEVEL_BUILDER" --path /srv/b --path /srv/a > "$TEST_TMP/grant.json"
+  assert_eq "level=builder
+user=agent
+principal=owner-agent
+write_allowed=true
+expires=never
+can_grant=false
+path=/srv/a
+path=/srv/b" "$(compiler show --record "$TEST_TMP/grant.json")"
+  printf '{"level": "root"}\n' > "$TEST_TMP/bad.json"
+  assert_status 2 compiler show --record "$TEST_TMP/bad.json"
+}
+
+test_last_grant_finds_the_newest_entry_for_the_user() {
+  cat > "$TEST_TMP/audit.jsonl" <<'END'
+{"time": "t1", "event": "grant", "user": "agent", "level": "observer", "paths": ["/srv/a"], "previous_level": null, "previous_paths": [], "reason": "install"}
+not json at all
+{"time": "t2", "event": "grant", "user": "agent", "level": "builder", "paths": ["/srv/a", "/srv/b"], "previous_level": "observer", "previous_paths": ["/srv/a"], "reason": "install"}
+{"time": "t3", "event": "grant", "user": "friend", "level": "observer", "paths": ["/srv/c"], "previous_level": null, "previous_paths": [], "reason": "install"}
+{"time": "t4", "event": "step", "user": "agent"}
+END
+  assert_eq "time=t2
+reason=install
+level=builder
+previous_level=observer
+path=/srv/a
+path=/srv/b
+previous_path=/srv/a
+skipped_lines=1" "$(compiler last-grant --audit "$TEST_TMP/audit.jsonl" --user agent)"
+  assert_eq "skipped_lines=1" "$(compiler last-grant --audit "$TEST_TMP/audit.jsonl" --user nobody)"
+}

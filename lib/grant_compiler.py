@@ -14,8 +14,9 @@ subcommands
   describe --level FILE
       print key=value lines that install.sh reads (level, summary, write_allowed, ...).
 
-  compile --level FILE --os linux|macos --user NAME [--prefix PATH] --path PATH...
-      print a plan fragment that grants the level on each path.
+  compile --level FILE --os linux|macos --user NAME [--prefix PATH] [--with-undo] --path PATH...
+      print a plan fragment that grants the level on each path. with --with-undo, every line
+      also carries the step that reverses it, for the install record uninstall.sh reads.
 
   revoke --level FILE --os linux|macos --user NAME [--prefix PATH] --path PATH...
   revoke --level FILE --os linux|macos --user NAME [--prefix PATH] --record GRANT_FILE
@@ -25,9 +26,17 @@ subcommands
   record --level FILE --user NAME --path PATH...
       print the grant record as JSON.
 
+  show --record GRANT_FILE
+      print a grant record as key=value lines, one path= line per path.
+
+  last-grant --audit LOG --user NAME
+      print the most recent grant entry for NAME in the audit log as key=value lines, with
+      path= and previous_path= lines. prints nothing when there is none.
+
 plan fragment format: lines starting with '#' are comments. every other line is one step,
 three fields separated by a tab: title, check, command. the check is a read-only shell
-command that exits 0 when the step is already done. the command applies the step.
+command that exits 0 when the step is already done. the command applies the step. with
+--with-undo, three more fields follow: the undo title, check, and command.
 """
 
 import argparse
@@ -230,11 +239,55 @@ def linux_entry(permissions):
     return "".join(letter if letter.lower() in permissions.lower() else "-" for letter in "rwx")
 
 
-def fragment_line(title, check, command):
-    return "%s\t%s\t%s" % (title, check, command)
+def fragment_line(title, check, command, undo=None):
+    fields = [title, check, command]
+    if undo:
+        fields.extend(undo)
+    return "\t".join(fields)
 
 
-def compile_linux(level, user, prefix, paths):
+# each removal returns (title, check, command). revoke prints them as steps, and compile
+# attaches them as the undo of the line they reverse, so both always agree.
+
+def linux_traverse_removal(user, target, parent):
+    return ("stop %s passing through %s" % (user, parent),
+            "! getfacl --absolute-names --omit-header %s 2>/dev/null | grep -q '^user:%s:'" % (target, user),
+            "setfacl -x u:%s %s" % (user, target))
+
+
+def linux_grant_removal(user, target, path):
+    return ("remove %s from %s and everything inside" % (user, path),
+            "! getfacl --absolute-names --omit-header %s 2>/dev/null | grep -q '^user:%s:'" % (target, user),
+            "setfacl -R -P -x u:%s %s" % (user, target))
+
+
+def linux_default_removal(user, target, path):
+    return ("stop new files in %s inheriting %s" % (path, user),
+            "! getfacl --absolute-names --omit-header %s 2>/dev/null | grep -q '^default:user:%s:'" % (target, user),
+            "setfacl -R -P -d -x u:%s %s" % (user, target))
+
+
+def macos_traverse_removal(rights, user, target, parent):
+    return ("stop %s passing through %s" % (user, parent),
+            "! /bin/ls -lde %s 2>/dev/null | grep -q 'user:%s allow search'" % (target, user),
+            "/bin/chmod -a %s %s" % (shlex.quote("%s allow %s" % (user, rights["traverse"])), target))
+
+
+def macos_files_removal(rights, user, target, path):
+    return ("remove %s file rights in %s" % (user, path),
+            "! /bin/ls -lde %s 2>/dev/null | grep -q 'user:%s allow'" % (target, user),
+            "/usr/bin/find %s -type f -exec /bin/chmod -a %s {} +"
+            % (target, shlex.quote("%s allow %s" % (user, rights["files"]))))
+
+
+def macos_folders_removal(rights, user, target, path):
+    return ("remove %s folder rights on %s" % (user, path),
+            "! /bin/ls -lde %s 2>/dev/null | grep -q 'user:%s allow'" % (target, user),
+            "/usr/bin/find %s -type d -exec /bin/chmod -a %s {} +"
+            % (target, shlex.quote("%s allow %s" % (user, rights["directories"]))))
+
+
+def compile_linux(level, user, prefix, paths, with_undo=False):
     grant = level["access_control"]["linux"]["grant"]
     traverse = level["access_control"]["linux"]["traverse"]
     entry = linux_entry(grant)
@@ -244,21 +297,24 @@ def compile_linux(level, user, prefix, paths):
         lines.append(fragment_line(
             "let %s pass through %s" % (user, parent),
             "getfacl --absolute-names --omit-header %s 2>/dev/null | grep -q '^user:%s:..x$'" % (target, user),
-            "setfacl -m u:%s:%s %s" % (user, traverse, target)))
+            "setfacl -m u:%s:%s %s" % (user, traverse, target),
+            with_undo and linux_traverse_removal(user, target, parent)))
     for path in paths:
         target = shlex.quote(prefix + path)
         lines.append(fragment_line(
             "grant %s %s on %s and everything inside" % (user, grant, path),
             "getfacl --absolute-names --omit-header %s 2>/dev/null | grep -qx 'user:%s:%s'" % (target, user, entry),
-            "setfacl -R -P -m u:%s:%s %s" % (user, grant, target)))
+            "setfacl -R -P -m u:%s:%s %s" % (user, grant, target),
+            with_undo and linux_grant_removal(user, target, path)))
         lines.append(fragment_line(
             "make new files in %s inherit the grant" % path,
             "getfacl --absolute-names --omit-header %s 2>/dev/null | grep -qx 'default:user:%s:%s'" % (target, user, entry),
-            "setfacl -R -P -d -m u:%s:%s %s" % (user, grant, target)))
+            "setfacl -R -P -d -m u:%s:%s %s" % (user, grant, target),
+            with_undo and linux_default_removal(user, target, path)))
     return lines
 
 
-def compile_macos(level, user, prefix, paths):
+def compile_macos(level, user, prefix, paths, with_undo=False):
     rights = level["access_control"]["macos"]
     lines = []
     for parent in traverse_parents(paths):
@@ -266,7 +322,8 @@ def compile_macos(level, user, prefix, paths):
         lines.append(fragment_line(
             "let %s pass through %s" % (user, parent),
             "/bin/ls -lde %s 2>/dev/null | grep -q 'user:%s allow search'" % (target, user),
-            "/bin/chmod +a %s %s" % (shlex.quote("%s allow %s" % (user, rights["traverse"])), target)))
+            "/bin/chmod +a %s %s" % (shlex.quote("%s allow %s" % (user, rights["traverse"])), target),
+            with_undo and macos_traverse_removal(rights, user, target, parent)))
     for path in paths:
         target = shlex.quote(prefix + path)
         marker = "/bin/ls -lde %s 2>/dev/null | grep -q 'user:%s allow list'" % (target, user)
@@ -274,58 +331,37 @@ def compile_macos(level, user, prefix, paths):
             "grant %s file rights on files in %s" % (user, path),
             marker,
             "/usr/bin/find %s -type f -exec /bin/chmod +a %s {} +"
-            % (target, shlex.quote("%s allow %s" % (user, rights["files"])))))
+            % (target, shlex.quote("%s allow %s" % (user, rights["files"]))),
+            with_undo and macos_files_removal(rights, user, target, path)))
         lines.append(fragment_line(
             "grant %s folder rights on %s and folders inside, inherited by new files" % (user, path),
             marker,
             "/usr/bin/find %s -type d -exec /bin/chmod +a %s {} +"
-            % (target, shlex.quote("%s allow %s" % (user, rights["directories"])))))
+            % (target, shlex.quote("%s allow %s" % (user, rights["directories"]))),
+            with_undo and macos_folders_removal(rights, user, target, path)))
     return lines
 
 
-def revoke_linux(level, user, prefix, paths):
+def revoke_linux(level, user, prefix, paths, with_undo=False):
     lines = []
     for path in paths:
         target = shlex.quote(prefix + path)
-        lines.append(fragment_line(
-            "remove %s from %s and everything inside" % (user, path),
-            "! getfacl --absolute-names --omit-header %s 2>/dev/null | grep -q '^user:%s:'" % (target, user),
-            "setfacl -R -P -x u:%s %s" % (user, target)))
-        lines.append(fragment_line(
-            "stop new files in %s inheriting %s" % (path, user),
-            "! getfacl --absolute-names --omit-header %s 2>/dev/null | grep -q '^default:user:%s:'" % (target, user),
-            "setfacl -R -P -d -x u:%s %s" % (user, target)))
+        lines.append(fragment_line(*linux_grant_removal(user, target, path)))
+        lines.append(fragment_line(*linux_default_removal(user, target, path)))
     for parent in traverse_parents(paths):
-        target = shlex.quote(prefix + parent)
-        lines.append(fragment_line(
-            "stop %s passing through %s" % (user, parent),
-            "! getfacl --absolute-names --omit-header %s 2>/dev/null | grep -q '^user:%s:'" % (target, user),
-            "setfacl -x u:%s %s" % (user, target)))
+        lines.append(fragment_line(*linux_traverse_removal(user, shlex.quote(prefix + parent), parent)))
     return lines
 
 
-def revoke_macos(level, user, prefix, paths):
+def revoke_macos(level, user, prefix, paths, with_undo=False):
     rights = level["access_control"]["macos"]
     lines = []
     for path in paths:
         target = shlex.quote(prefix + path)
-        gone = "! /bin/ls -lde %s 2>/dev/null | grep -q 'user:%s allow'" % (target, user)
-        lines.append(fragment_line(
-            "remove %s file rights in %s" % (user, path),
-            gone,
-            "/usr/bin/find %s -type f -exec /bin/chmod -a %s {} +"
-            % (target, shlex.quote("%s allow %s" % (user, rights["files"])))))
-        lines.append(fragment_line(
-            "remove %s folder rights on %s" % (user, path),
-            gone,
-            "/usr/bin/find %s -type d -exec /bin/chmod -a %s {} +"
-            % (target, shlex.quote("%s allow %s" % (user, rights["directories"])))))
+        lines.append(fragment_line(*macos_files_removal(rights, user, target, path)))
+        lines.append(fragment_line(*macos_folders_removal(rights, user, target, path)))
     for parent in traverse_parents(paths):
-        target = shlex.quote(prefix + parent)
-        lines.append(fragment_line(
-            "stop %s passing through %s" % (user, parent),
-            "! /bin/ls -lde %s 2>/dev/null | grep -q 'user:%s allow search'" % (target, user),
-            "/bin/chmod -a %s %s" % (shlex.quote("%s allow %s" % (user, rights["traverse"])), target)))
+        lines.append(fragment_line(*macos_traverse_removal(rights, user, shlex.quote(prefix + parent), parent)))
     return lines
 
 
@@ -357,7 +393,8 @@ def fragment(kind, arguments):
         ("revoke", "linux"): revoke_linux,
         ("revoke", "macos"): revoke_macos,
     }
-    lines = builders[(kind, arguments.os)](level, arguments.user, prefix, paths)
+    with_undo = getattr(arguments, "with_undo", False)
+    lines = builders[(kind, arguments.os)](level, arguments.user, prefix, paths, with_undo)
     header = [
         "# %s %s for %s on %s" % (kind, level["level"], arguments.user, arguments.os),
         "# paths: %s" % " ".join(paths),
@@ -397,6 +434,66 @@ def record(arguments):
     return json.dumps(grant, indent=2, sort_keys=True) + "\n"
 
 
+def show(arguments):
+    try:
+        with open(arguments.record, encoding="utf-8") as handle:
+            grant = json.load(handle)
+    except (OSError, ValueError) as error:
+        raise Refused("cannot read grant record %s: %s" % (arguments.record, error))
+    if grant.get("level") not in LEVEL_NAMES or not isinstance(grant.get("paths"), list):
+        raise Refused("grant record %s has no valid level and paths" % arguments.record)
+    pairs = [
+        ("level", grant["level"]),
+        ("user", grant.get("user", "")),
+        ("principal", grant.get("principal", "")),
+        ("write_allowed", "true" if grant.get("write_allowed") else "false"),
+        ("expires", grant.get("expires") or "never"),
+        ("can_grant", "true" if grant.get("can_grant") else "false"),
+    ]
+    pairs.extend(("path", path) for path in grant["paths"])
+    return "".join("%s=%s\n" % (key, one_line(value)) for key, value in pairs)
+
+
+def one_line(value):
+    return str(value).replace("\n", " ").replace("\r", " ")
+
+
+def last_grant(arguments):
+    """the most recent grant entry for the user. lines that are not JSON objects are skipped."""
+    found = None
+    skipped = 0
+    try:
+        with open(arguments.audit, encoding="utf-8") as handle:
+            for line in handle:
+                if not line.strip():
+                    continue
+                try:
+                    entry = json.loads(line)
+                except ValueError:
+                    skipped += 1
+                    continue
+                if isinstance(entry, dict) and entry.get("event") == "grant" and entry.get("user") == arguments.user:
+                    found = entry
+    except OSError as error:
+        raise Refused("cannot read audit log %s: %s" % (arguments.audit, error.strerror))
+    if found is None:
+        return "skipped_lines=%d\n" % skipped if skipped else ""
+    pairs = [
+        ("time", found.get("time", "")),
+        ("reason", found.get("reason", "")),
+        ("level", found.get("level") or "none"),
+        ("previous_level", found.get("previous_level") or "none"),
+    ]
+    for key, name in (("paths", "path"), ("previous_paths", "previous_path")):
+        values = found.get(key) or []
+        if not isinstance(values, list):
+            raise Refused("the last grant entry in %s has a %s that is not a list" % (arguments.audit, key))
+        pairs.extend((name, value) for value in values)
+    if skipped:
+        pairs.append(("skipped_lines", skipped))
+    return "".join("%s=%s\n" % (key, one_line(value)) for key, value in pairs)
+
+
 def validate(arguments):
     defaults = []
     output = []
@@ -431,6 +528,15 @@ def parser():
         command.add_argument("--path", action="append", default=[])
         if name == "revoke":
             command.add_argument("--record", default="")
+        if name == "compile":
+            command.add_argument("--with-undo", action="store_true")
+
+    shown = commands.add_parser("show")
+    shown.add_argument("--record", required=True)
+
+    last = commands.add_parser("last-grant")
+    last.add_argument("--audit", required=True)
+    last.add_argument("--user", default="agent")
     return top
 
 
@@ -445,6 +551,10 @@ def main(argv):
             sys.stdout.write(describe(arguments))
         elif arguments.command == "record":
             sys.stdout.write(record(arguments))
+        elif arguments.command == "show":
+            sys.stdout.write(show(arguments))
+        elif arguments.command == "last-grant":
+            sys.stdout.write(last_grant(arguments))
         else:
             sys.stdout.write(fragment(arguments.command, arguments))
     except Refused as error:

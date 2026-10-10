@@ -9,14 +9,14 @@ sirven install plan
 
 package directories
      note: owned by root. the agent can read its policy but never change it.
-    1. create the policy directory /etc/sirven (to do)
-       $ mkdir -p <prefix>/etc/sirven && chmod 0755 <prefix>/etc/sirven
-    2. create /etc/sirven/levels for the level in force (to do)
-       $ mkdir -p <prefix>/etc/sirven/levels && chmod 0755 <prefix>/etc/sirven/levels
-    3. create /etc/sirven/grants for grant records (to do)
-       $ mkdir -p <prefix>/etc/sirven/grants && chmod 0755 <prefix>/etc/sirven/grants
-    4. create the state directory /var/lib/sirven (to do)
+    1. create the state directory /var/lib/sirven, which records what this install creates (to do)
        $ mkdir -p <prefix>/var/lib/sirven && chmod 0700 <prefix>/var/lib/sirven
+    2. create the policy directory /etc/sirven (to do)
+       $ mkdir -p <prefix>/etc/sirven && chmod 0755 <prefix>/etc/sirven
+    3. create /etc/sirven/levels for the level in force (to do)
+       $ mkdir -p <prefix>/etc/sirven/levels && chmod 0755 <prefix>/etc/sirven/levels
+    4. create /etc/sirven/grants for grant records (to do)
+       $ mkdir -p <prefix>/etc/sirven/grants && chmod 0755 <prefix>/etc/sirven/grants
 
 audit log
     5. create the audit log directory /var/log/sirven (to do)
@@ -70,5 +70,5 @@ transport: none
 
 summary: 23 steps. 22 to do, 0 already done, 1 by the owner, 0 plan only.
 dry run: nothing was changed. run the same command without --dry-run to apply this plan.
-to undo later: ./install.sh revoke --all --dry-run
+to undo later: ./install.sh revoke --all --dry-run, or ./uninstall.sh --dry-run
 exit status: 0

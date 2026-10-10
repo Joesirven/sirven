@@ -12,6 +12,30 @@ grant_compiler() {
   python3 "$ROOT_DIR/lib/grant_compiler.py" "$@"
 }
 
+# load_level: read what the plan needs from levels/LEVEL.json, through the grant compiler.
+# sets LEVEL_FILE, LEVEL_SUMMARY, and LEVEL_WRITE_ALLOWED.
+load_level() {
+  local key value description
+  LEVEL_SUMMARY=""
+  LEVEL_WRITE_ALLOWED=false
+  LEVEL_FILE="$ROOT_DIR/levels/$LEVEL.json"
+  [ -f "$LEVEL_FILE" ] || die "level file $LEVEL_FILE is missing"
+  description="$STAGE_DIR/level-description.txt"
+  if ! grant_compiler describe --level "$LEVEL_FILE" > "$description"; then
+    die "the $LEVEL level file breaks the rules; nothing was changed"
+  fi
+  while IFS='=' read -r key value; do
+    case "$key" in
+      summary) LEVEL_SUMMARY="$value" ;;
+      write_allowed) LEVEL_WRITE_ALLOWED="$value" ;;
+    esac
+  done < "$description"
+}
+
+access_control_record_file() {
+  printf '%s/grants/%s.json' "$CONFIG_DIR" "$SERVICE_USER"
+}
+
 # _access_control_run_compiler OUTPUT ARGUMENT...: run the compiler with the shared flags and
 # every --path, write its fragment to OUTPUT, and stop the run if it refuses.
 _access_control_run_compiler() {
@@ -29,16 +53,20 @@ _access_control_run_compiler() {
   fi
 }
 
-# turn a plan fragment (title, check, command separated by tabs) into steps.
+# turn a plan fragment (title, check, command separated by tabs, and with --with-undo the undo
+# title, check, and command) into steps.
 _access_control_add_fragment() {
-  local fragment="$1" kind="$2" reason="$3" tab title check command
+  local fragment="$1" kind="$2" reason="$3" tab title check command undo_title undo_check undo_command
   tab="$(printf '\t')"
-  while IFS="$tab" read -r title check command; do
+  while IFS="$tab" read -r title check command undo_title undo_check undo_command; do
     case "$title" in '#'* | '') continue ;; esac
     if [ "$kind" = system ]; then
       plan_step system "$title" "$check" "$command"
     else
       plan_planonly "$title" "$command" "$reason" "$check"
+    fi
+    if [ -n "$undo_title" ]; then
+      plan_undo "$undo_title" "$undo_check" "$undo_command"
     fi
   done < "$fragment"
 }
@@ -56,6 +84,7 @@ plan_access_control() {
     "cmp -s $(shell_quote "$LEVEL_FILE") $level_copy" \
     "cp $(shell_quote "$LEVEL_FILE") $level_copy && chmod 0644 $level_copy" \
     "cp levels/$LEVEL.json $level_copy && chmod 0644 $level_copy"
+  plan_undo "remove the $LEVEL policy copy" "[ ! -e $level_copy ]" "rm -f $level_copy"
   if [ "${#GRANT_PATHS[@]}" -eq 0 ]; then
     plan_note "no --path given. the agent can use only its own home until you grant a path."
     return 0
@@ -66,18 +95,19 @@ plan_access_control() {
 
   grant_record="$STAGE_DIR/grant-record.json"
   _access_control_run_compiler "$grant_record" record --level "$LEVEL_FILE"
-  layout_write_file "record the grant for $SERVICE_USER" "$CONFIG_DIR/grants/$SERVICE_USER.json" 0644 "$grant_record" \
+  layout_write_file "record the grant for $SERVICE_USER" "$(access_control_record_file)" 0644 "$grant_record" \
     "level $LEVEL on the paths below, no expiry, cannot grant further"
+  plan_tag grant
 
   fragment="$STAGE_DIR/grant-fragment.txt"
-  _access_control_run_compiler "$fragment" compile --level "$LEVEL_FILE" --prefix "$PREFIX"
+  _access_control_run_compiler "$fragment" compile --level "$LEVEL_FILE" --prefix "$PREFIX" --with-undo
   _access_control_add_fragment "$fragment" "$(_access_control_kind)" "$ACCESS_CONTROL_MACOS_REASON"
 }
 
 # removal steps for the kill switch. uses --path when given, otherwise the grant record.
 plan_access_control_revoke() {
   local record fragment
-  record="${PREFIX}$CONFIG_DIR/grants/$SERVICE_USER.json"
+  record="${PREFIX}$(access_control_record_file)"
   fragment="$STAGE_DIR/revoke-fragment.txt"
   if [ "${#GRANT_PATHS[@]}" -gt 0 ]; then
     _access_control_run_compiler "$fragment" revoke --level "$LEVEL_FILE" --prefix "$PREFIX"
@@ -88,4 +118,13 @@ plan_access_control_revoke() {
     return 0
   fi
   _access_control_add_fragment "$fragment" planonly "$KILL_SWITCH_REASON"
+}
+
+# plan_access_control_remove_paths: removal steps for the paths in GRANT_PATHS only, as system
+# steps on linux. a grant rollback uses this for paths the change being reversed added.
+plan_access_control_remove_paths() {
+  local fragment="$STAGE_DIR/remove-fragment.txt"
+  [ "${#GRANT_PATHS[@]}" -gt 0 ] || return 0
+  _access_control_run_compiler "$fragment" revoke --level "$LEVEL_FILE" --prefix "$PREFIX"
+  _access_control_add_fragment "$fragment" "$(_access_control_kind)" "$ACCESS_CONTROL_MACOS_REASON"
 }

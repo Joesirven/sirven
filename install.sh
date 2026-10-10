@@ -7,7 +7,7 @@
 
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # shellcheck source=lib/common.sh
 . "$ROOT_DIR/lib/common.sh"
@@ -148,25 +148,6 @@ parse_arguments() {
   fi
 }
 
-# read what install.sh needs from the level, through the grant compiler.
-load_level() {
-  local key value description
-  LEVEL_SUMMARY=""
-  LEVEL_WRITE_ALLOWED=false
-  LEVEL_FILE="$ROOT_DIR/levels/$LEVEL.json"
-  [ -f "$LEVEL_FILE" ] || die "level file $LEVEL_FILE is missing"
-  description="$STAGE_DIR/level-description.txt"
-  if ! grant_compiler describe --level "$LEVEL_FILE" > "$description"; then
-    die "the $LEVEL level file breaks the rules; nothing was changed"
-  fi
-  while IFS='=' read -r key value; do
-    case "$key" in
-      summary) LEVEL_SUMMARY="$value" ;;
-      write_allowed) LEVEL_WRITE_ALLOWED="$value" ;;
-    esac
-  done < "$description"
-}
-
 plan_header() {
   local mode="apply: the plan below is printed, then applied"
   [ "$DRY_RUN" = yes ] && mode="dry run: nothing will be changed"
@@ -207,6 +188,31 @@ build_install_plan() {
   fi
 }
 
+# apply the plan, writing the install record and the audit log as it goes.
+apply_for_real() {
+  local status=0 record before
+  PLAN_RECORD_FILE="${PREFIX}$(layout_record_file)"
+  PLAN_STEP_HOOK=audit_step_hook
+  AUDIT_OPERATION="$COMMAND"
+  AUDIT_PENDING="$STAGE_DIR/audit-pending.jsonl"
+  record="${PREFIX}$(access_control_record_file)"
+  before="$STAGE_DIR/grant-before.json"
+  if [ -f "$record" ]; then cp "$record" "$before"; fi
+  plan_apply || status=$?
+  if [ "$status" -ne 3 ]; then
+    if [ "$COMMAND" = install ]; then
+      audit_grant_change "$before" "$record" install
+    fi
+    if [ "$status" -eq 0 ]; then
+      audit_write "$(audit_entry "$COMMAND" "operation=$COMMAND" "level=$LEVEL" "outcome=finished")"
+    else
+      audit_write "$(audit_entry "$COMMAND" "operation=$COMMAND" "level=$LEVEL" "outcome=failed" "json:exit_status=$status")"
+    fi
+  fi
+  audit_flush
+  return "$status"
+}
+
 finish() {
   local status=0
   plan_print
@@ -217,11 +223,11 @@ finish() {
       say "applying would stop before any change: the plan has plan-only steps the alpha cut does not apply yet."
     fi
     if [ "$COMMAND" = install ]; then
-      say "to undo later: ./install.sh revoke --all --dry-run"
+      say "to undo later: ./install.sh revoke --all --dry-run, or ./uninstall.sh --dry-run"
     fi
     return 0
   fi
-  plan_apply || status=$?
+  apply_for_real || status=$?
   return "$status"
 }
 
@@ -229,9 +235,7 @@ main() {
   parse_arguments "$@"
   OPERATING_SYSTEM="$(detect_os)"
   PACKAGE="$(package_name "$ROOT_DIR/project.json")"
-  CONFIG_DIR="/etc/$PACKAGE"
-  STATE_DIR="/var/lib/$PACKAGE"
-  AUDIT_DIR="/var/log/$PACKAGE"
+  layout_set_directories
 
   local strict=yes refusal
   if [ "$DRY_RUN" = yes ] || [ -n "$PREFIX" ]; then
@@ -252,7 +256,7 @@ main() {
   PLAN_OPERATING_SYSTEM="$OPERATING_SYSTEM"
   PLAN_SIMULATION_LOG=""
   if [ -n "$PREFIX" ]; then
-    PLAN_SIMULATION_LOG="$PREFIX$STATE_DIR/simulated-system-commands.log"
+    PLAN_SIMULATION_LOG="$PREFIX$(layout_simulation_log)"
   fi
 
   load_level
@@ -267,4 +271,7 @@ main() {
   finish
 }
 
-main "$@"
+# run main only when executed, so tests can source this file and build plans themselves.
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  main "$@"
+fi

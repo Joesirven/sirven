@@ -153,3 +153,89 @@ test_summary_counts_every_kind() {
   capture plan_summary
   assert_contains "$CAPTURED_STDOUT" "summary: 3 steps. 1 to do, 0 already done, 1 by the owner, 1 plan only."
 }
+
+test_apply_records_undo_only_for_steps_it_ran() {
+  setup_fake_root
+  mkdir -p "$ROOT/already"
+  PLAN_RECORD_FILE="$ROOT/record.tsv"
+  add_directory_step /already
+  plan_undo "remove /already" "[ ! -d $ROOT/already ]" "rmdir $ROOT/already"
+  add_directory_step /new
+  plan_tag example
+  plan_undo "remove /new" "[ ! -d $ROOT/new ]" "rmdir $ROOT/new"
+  add_directory_step /no-undo
+  plan_evaluate
+  assert_status 0 plan_apply
+  assert_eq "1" "$(grep -c . "$PLAN_RECORD_FILE")" "only the step this run created is recorded"
+  assert_contains "$(cat "$PLAN_RECORD_FILE")" "run	example	-	create /new	remove /new"
+
+  plan_reset
+  add_directory_step /new
+  plan_undo "remove /new" "[ ! -d $ROOT/new ]" "rmdir $ROOT/new"
+  rmdir "$ROOT/new"
+  plan_evaluate
+  assert_status 0 plan_apply
+  assert_eq "2" "$(grep -c . "$PLAN_RECORD_FILE")" "a different section makes a new line"
+}
+
+test_a_rerun_does_not_record_twice() {
+  setup_fake_root
+  PLAN_RECORD_FILE="$ROOT/record.tsv"
+  mkdir -p "$ROOT"
+  plan_step system "make a user" "" "useradd example"
+  plan_undo "remove the user" "" "userdel example"
+  plan_evaluate
+  assert_status 0 plan_apply
+  plan_reset
+  plan_step system "make a user" "" "useradd example"
+  plan_undo "remove the user" "" "userdel example"
+  plan_evaluate
+  : > "$PLAN_SIMULATION_LOG"
+  plan_evaluate
+  assert_status 0 plan_apply
+  assert_eq "1" "$(grep -c . "$PLAN_RECORD_FILE")"
+}
+
+test_undo_must_fit_on_one_line() {
+  setup_fake_root
+  add_directory_step /one
+  assert_status 1 plan_undo "remove" "" "rm -f a
+rm -f b"
+  assert_contains "$CAPTURED_STDERR" "must fit on one line"
+  plan_section "a heading"
+  assert_status 1 plan_undo "remove" "" "rm -f a"
+}
+
+record_outcome() {
+  printf '%s %s %s %s\n' "$1" "$2" "${3:--}" "$5" >> "$TEST_TMP/hook.log"
+}
+
+test_step_hook_sees_every_outcome() {
+  setup_fake_root
+  mkdir -p "$ROOT/done"
+  PLAN_STEP_HOOK=record_outcome
+  add_directory_step /done
+  add_directory_step /new
+  plan_tag example
+  plan_step system "make a user" "" "useradd example"
+  plan_owner "click the button" "in the browser"
+  plan_step run "break" "" "false"
+  plan_evaluate
+  assert_status 4 plan_apply
+  assert_eq "1 run - skipped
+2 run example applied
+3 system - recorded
+4 owner - owner
+5 run - failed" "$(cat "$TEST_TMP/hook.log")"
+}
+
+test_an_owner_step_with_a_passing_check_is_done() {
+  setup_fake_root
+  mkdir -p "$ROOT"
+  plan_owner "add a key" "paste it" "[ -d $ROOT ]"
+  plan_owner "log in" "in the browser"
+  plan_evaluate
+  capture plan_print
+  assert_contains "$CAPTURED_STDOUT" "add a key (already done)"
+  assert_contains "$CAPTURED_STDOUT" "log in (owner, by hand)"
+}
