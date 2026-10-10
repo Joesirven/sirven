@@ -239,3 +239,16 @@ test_an_owner_step_with_a_passing_check_is_done() {
   assert_contains "$CAPTURED_STDOUT" "add a key (already done)"
   assert_contains "$CAPTURED_STDOUT" "log in (owner, by hand)"
 }
+
+test_steps_assumed_undone_always_run() {
+  setup_fake_root
+  mkdir -p "$ROOT/there"
+  add_directory_step /there
+  plan_assume_undone
+  add_directory_step /there
+  plan_step system "make a user" "" "useradd example"
+  mkdir -p "$(dirname "$PLAN_SIMULATION_LOG")"
+  printf 'useradd example\n' > "$PLAN_SIMULATION_LOG"
+  plan_evaluate
+  assert_eq "done todo todo" "${PLAN_STATUS[0]} ${PLAN_STATUS[1]} ${PLAN_STATUS[2]}"
+}

@@ -1,0 +1,430 @@
+#!/usr/bin/env bash
+# sirven: the owner's command for access that is already installed. a sketch for the alpha cut.
+#
+#   sirven grant inspect    the level in force and the active grants, read from state files
+#   sirven grant rollback   reverse the most recent grant change, found in the audit log
+#
+# inspect only reads. rollback is a plan like install.sh: --dry-run prints it and changes
+# nothing, and without --dry-run the identical plan is printed and then applied, under the
+# same rule: a fake root, or a throwaway linux container as root.
+#
+# after alpha: live sessions and per-command entries come from the forced-command wrapper on
+# the agent's SSH key, which is designed, not built. this command reads the grant records, the
+# install record, and the grant entries the package itself writes to the audit log.
+
+if [ -z "${BASH_VERSION:-}" ]; then
+  echo "error: run this with bash, for example: bash $0" >&2
+  exit 1
+fi
+
+set -euo pipefail
+
+# find the package folder, following a symbolic link such as /usr/local/bin/sirven.
+# readlink without -f, because macos readlink has no -f.
+_sirven_self="${BASH_SOURCE[0]}"
+while [ -L "$_sirven_self" ]; do
+  _sirven_link="$(readlink "$_sirven_self")"
+  case "$_sirven_link" in
+    /*) _sirven_self="$_sirven_link" ;;
+    *) _sirven_self="$(dirname "$_sirven_self")/$_sirven_link" ;;
+  esac
+done
+ROOT_DIR="$(cd "$(dirname "$_sirven_self")/.." && pwd)"
+
+# shellcheck source=lib/common.sh
+. "$ROOT_DIR/lib/common.sh"
+# shellcheck source=lib/plan.sh
+. "$ROOT_DIR/lib/plan.sh"
+# shellcheck source=lib/preflight.sh
+. "$ROOT_DIR/lib/preflight.sh"
+# shellcheck source=lib/layout.sh
+. "$ROOT_DIR/lib/layout.sh"
+# shellcheck source=lib/audit.sh
+. "$ROOT_DIR/lib/audit.sh"
+# shellcheck source=lib/access_control.sh
+. "$ROOT_DIR/lib/access_control.sh"
+
+AFTER_ALPHA_SESSIONS="sessions already open keep the rights they started with until they end. ending them belongs to the forced-command wrapper, built after alpha. to cut everything now: ./install.sh revoke --all --dry-run"
+
+usage() {
+  cat <<END
+usage:
+  sirven grant inspect [options]     show the level in force and the active grants
+  sirven grant rollback [options]    reverse the most recent grant change
+
+options:
+  --prefix PATH    read a fake root that install.sh was applied to with --prefix
+  --user NAME      the service user (default: agent). inspect shows every user without it
+  --dry-run        rollback only: print the plan and change nothing
+  --help           show this help
+
+rollback reverses the newest grant entry in the audit log, and refuses when the grant record
+no longer matches it. a rollback is itself a grant change, so a second rollback undoes the first.
+
+examples:
+  sirven grant inspect
+  sirven grant rollback --dry-run
+END
+}
+
+usage_error() {
+  printf 'error: %s\n' "$1" >&2
+  printf 'run sirven --help for usage.\n' >&2
+  exit 64
+}
+
+parse_arguments() {
+  ACTION=""
+  DRY_RUN=no
+  PREFIX=""
+  SERVICE_USER=agent
+  USER_GIVEN=no
+  OWNER="${SUDO_USER:-$(id -un)}"
+  case "${1:-}" in
+    -h | --help | help) usage; exit 0 ;;
+    grant) shift ;;
+    '') usage_error "a command is needed: grant inspect or grant rollback" ;;
+    *) usage_error "unknown command '$1'" ;;
+  esac
+  case "${1:-}" in
+    inspect | rollback) ACTION="$1"; shift ;;
+    -h | --help) usage; exit 0 ;;
+    '') usage_error "grant needs inspect or rollback" ;;
+    *) usage_error "unknown grant command '$1'; revoking one grant is designed, not built" ;;
+  esac
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --dry-run) DRY_RUN=yes ;;
+      --prefix)
+        [ "$#" -ge 2 ] || usage_error "--prefix needs a value"
+        PREFIX="$2"
+        shift
+        ;;
+      --prefix=*) PREFIX="${1#*=}" ;;
+      --user)
+        [ "$#" -ge 2 ] || usage_error "--user needs a value"
+        SERVICE_USER="$2"
+        USER_GIVEN=yes
+        shift
+        ;;
+      --user=*) SERVICE_USER="${1#*=}"; USER_GIVEN=yes ;;
+      -h | --help) usage; exit 0 ;;
+      *) usage_error "unknown option '$1'" ;;
+    esac
+    shift
+  done
+  case "$SERVICE_USER" in
+    '' | [!a-z_]* | *[!a-z0-9_-]*) usage_error "--user must be a plain lowercase account name" ;;
+  esac
+  if [ -n "$PREFIX" ]; then
+    case "$PREFIX" in
+      /*) ;;
+      *) usage_error "--prefix must be an absolute path" ;;
+    esac
+    PREFIX="${PREFIX%/}"
+  fi
+  if [ "$ACTION" = inspect ] && [ "$DRY_RUN" = yes ]; then
+    usage_error "--dry-run goes with rollback; inspect never changes anything"
+  fi
+  if [ -n "${SIRVEN_OS_OVERRIDE:-}" ] && [ "$ACTION" = rollback ] && [ "$DRY_RUN" != yes ] && [ -z "$PREFIX" ]; then
+    usage_error "SIRVEN_OS_OVERRIDE only works with --dry-run or --prefix"
+  fi
+}
+
+need_python() {
+  command -v python3 >/dev/null 2>&1 || die "python3 was not found on PATH; reading grant records needs it"
+}
+
+# read_grant RECORD: set GRANT_LEVEL (or none) and GRANT_PATHS_TEXT (one path per line).
+# a missing record is no grant; an unreadable one returns 1.
+read_grant() {
+  local key value shown
+  GRANT_LEVEL=none
+  GRANT_WRITE=false
+  GRANT_PRINCIPAL=""
+  GRANT_EXPIRES=never
+  GRANT_CAN_GRANT=false
+  GRANT_PATHS_TEXT=""
+  [ -f "$1" ] || return 0
+  shown="$(grant_compiler show --record "$1")" || return 1
+  while IFS='=' read -r key value; do
+    case "$key" in
+      level) GRANT_LEVEL="$value" ;;
+      write_allowed) GRANT_WRITE="$value" ;;
+      principal) GRANT_PRINCIPAL="$value" ;;
+      expires) GRANT_EXPIRES="$value" ;;
+      can_grant) GRANT_CAN_GRANT="$value" ;;
+      path) GRANT_PATHS_TEXT="${GRANT_PATHS_TEXT}${value}
+" ;;
+    esac
+  done <<END
+$shown
+END
+}
+
+# read_last_grant: the newest grant entry for SERVICE_USER, into LAST_* variables.
+read_last_grant() {
+  local key value found
+  LAST_TIME=""
+  LAST_REASON=""
+  LAST_LEVEL=none
+  LAST_PREVIOUS_LEVEL=none
+  LAST_PATHS_TEXT=""
+  LAST_PREVIOUS_PATHS_TEXT=""
+  LAST_SKIPPED=0
+  found="$(grant_compiler last-grant --audit "$1" --user "$SERVICE_USER")" || die "the audit log $1 cannot be read"
+  while IFS='=' read -r key value; do
+    case "$key" in
+      time) LAST_TIME="$value" ;;
+      reason) LAST_REASON="$value" ;;
+      level) LAST_LEVEL="$value" ;;
+      previous_level) LAST_PREVIOUS_LEVEL="$value" ;;
+      path) LAST_PATHS_TEXT="${LAST_PATHS_TEXT}${value}
+" ;;
+      previous_path) LAST_PREVIOUS_PATHS_TEXT="${LAST_PREVIOUS_PATHS_TEXT}${value}
+" ;;
+      skipped_lines) LAST_SKIPPED="$value" ;;
+    esac
+  done <<END
+$found
+END
+}
+
+count_lines() {
+  if [ -z "$1" ]; then printf '0'; else printf '%s' "$1" | grep -c .; fi
+}
+
+# set_grant_paths TEXT: GRANT_PATHS from one path per line.
+set_grant_paths() {
+  local path
+  GRANT_PATHS=()
+  while IFS= read -r path; do
+    if [ -n "$path" ]; then GRANT_PATHS[${#GRANT_PATHS[@]}]="$path"; fi
+  done <<END
+$1
+END
+}
+
+describe_grant() {
+  if [ "$1" = none ]; then
+    printf 'no grant'
+  else
+    printf 'level %s on %s path(s)' "$1" "$(count_lines "$2")"
+  fi
+}
+
+inspect_policy_copy() {
+  local level="$1" copy
+  copy="${PREFIX}$CONFIG_DIR/levels/$level.json"
+  if [ ! -f "$copy" ]; then
+    printf 'missing: %s is not installed' "$CONFIG_DIR/levels/$level.json"
+  elif cmp -s "$copy" "$ROOT_DIR/levels/$level.json"; then
+    printf '%s, the same as levels/%s.json' "$CONFIG_DIR/levels/$level.json" "$level"
+  else
+    printf '%s, different from levels/%s.json in this copy of the package' "$CONFIG_DIR/levels/$level.json" "$level"
+  fi
+}
+
+inspect() {
+  local grants record name shown=0 revoked="" log install_record steps
+  need_python
+  grants="${PREFIX}$CONFIG_DIR/grants"
+  say "$PACKAGE grants"
+  say "  prefix: ${PREFIX:-none, the real root}"
+  if [ ! -d "$grants" ]; then
+    say ""
+    say "no grants folder at $grants: nothing is installed here."
+    return 0
+  fi
+  for record in "$grants"/*.json; do
+    [ -f "$record" ] || continue
+    name="$(basename "$record" .json)"
+    if [ "$USER_GIVEN" = yes ] && [ "$name" != "$SERVICE_USER" ]; then continue; fi
+    if ! read_grant "$record" 2>/dev/null; then
+      say ""
+      say "service user $name: the grant record $record cannot be read"
+      continue
+    fi
+    shown=$((shown + 1))
+    say ""
+    say "service user $name"
+    say "  level in force: $GRANT_LEVEL (write allowed: $GRANT_WRITE)"
+    say "  policy: $(inspect_policy_copy "$GRANT_LEVEL")"
+    say "  principal: $GRANT_PRINCIPAL"
+    say "  expires: $GRANT_EXPIRES"
+    say "  can grant further: $GRANT_CAN_GRANT"
+    say "  paths:"
+    printf '%s' "$GRANT_PATHS_TEXT" | sed 's/^/    /'
+  done
+  for record in "$grants"/*.json.revoked; do
+    [ -f "$record" ] || continue
+    revoked="$revoked $(basename "$record" .json.revoked)"
+  done
+  if [ "$shown" -eq 0 ]; then
+    say ""
+    say "no active grants."
+  fi
+  say ""
+  say "revoked by the kill switch:${revoked:- none}"
+
+  log="${PREFIX}$(audit_log_file)"
+  if [ "$USER_GIVEN" = yes ]; then
+    if [ ! -e "$log" ]; then
+      say "last grant change for $SERVICE_USER: no audit log at $log"
+    elif [ ! -r "$log" ]; then
+      say "last grant change for $SERVICE_USER: the audit log belongs to the owner; run this as the owner to read it"
+    else
+      read_last_grant "$log"
+      if [ -z "$LAST_TIME" ]; then
+        say "last grant change for $SERVICE_USER: none in the audit log"
+      else
+        say "last grant change for $SERVICE_USER: $LAST_TIME ($LAST_REASON), $(describe_grant "$LAST_LEVEL" "$LAST_PATHS_TEXT"), before it $(describe_grant "$LAST_PREVIOUS_LEVEL" "$LAST_PREVIOUS_PATHS_TEXT")"
+      fi
+    fi
+  fi
+
+  install_record="${PREFIX}$(layout_record_file)"
+  if [ -r "$install_record" ]; then
+    steps="$(grep -c . "$install_record" || true)"
+    say "install record: $steps steps this package can reverse; read them with ./uninstall.sh --dry-run"
+  elif [ -e "$install_record" ]; then
+    say "install record: $(layout_record_file) belongs to root; run this with sudo to read it"
+  else
+    say "install record: none"
+  fi
+  say ""
+  say "after alpha: live sessions and the commands the agent runs come from the forced-command wrapper, which is not built yet. this view reads files only."
+}
+
+rollback_header() {
+  local mode="apply: the plan below is printed, then applied"
+  [ "$DRY_RUN" = yes ] && mode="dry run: nothing will be changed"
+  say "$PACKAGE grant rollback plan"
+  say "  operating system: $OPERATING_SYSTEM"
+  say "  service user: $SERVICE_USER"
+  say "  reversing: the grant change at $LAST_TIME ($LAST_REASON)"
+  say "  now: $(describe_grant "$GRANT_LEVEL" "$GRANT_PATHS_TEXT")"
+  say "  after: $(describe_grant "$LAST_PREVIOUS_LEVEL" "$LAST_PREVIOUS_PATHS_TEXT")"
+  say "  prefix: ${PREFIX:-none, the real root}"
+  say "  mode: $mode"
+}
+
+# every current entry is removed, then the earlier grant is applied again from nothing. removing
+# only the difference goes wrong with nested paths and shared parent folders, and chmod +a on
+# macos adds a second entry rather than replacing one. the grant steps come after removals that
+# undo their end state, so they are assumed undone and always run.
+build_rollback_plan() {
+  local record
+  record="$(rooted "$(access_control_record_file)")"
+  plan_reset
+  LEVEL="$GRANT_LEVEL"
+  load_level
+  set_grant_paths "$GRANT_PATHS_TEXT"
+  plan_section "remove the access in force now"
+  plan_access_control_remove_paths
+  plan_assume_undone
+  if [ "$LAST_PREVIOUS_LEVEL" = none ]; then
+    plan_section "no grant before the change"
+    plan_step run "remove the grant record for $SERVICE_USER" "[ ! -e $record ]" "rm -f $record"
+    plan_tag grant
+  else
+    LEVEL="$LAST_PREVIOUS_LEVEL"
+    load_level
+    set_grant_paths "$LAST_PREVIOUS_PATHS_TEXT"
+    plan_access_control
+  fi
+  plan_section "after alpha"
+  plan_note "$AFTER_ALPHA_SESSIONS"
+}
+
+rollback_apply() {
+  local status=0 record before
+  PLAN_RECORD_FILE="${PREFIX}$(layout_record_file)"
+  PLAN_STEP_HOOK=audit_step_hook
+  AUDIT_OPERATION="grant rollback"
+  AUDIT_PENDING="$STAGE_DIR/audit-pending.jsonl"
+  record="${PREFIX}$(access_control_record_file)"
+  before="$STAGE_DIR/grant-before.json"
+  if [ -f "$record" ]; then cp "$record" "$before"; fi
+  plan_apply || status=$?
+  if [ "$status" -ne 3 ]; then
+    audit_grant_change "$before" "$record" rollback
+  fi
+  audit_flush
+  return "$status"
+}
+
+rollback() {
+  local strict=yes refusal log record
+  PLAN_PREFIX="$PREFIX"
+  PLAN_OPERATING_SYSTEM="$OPERATING_SYSTEM"
+  if [ "$DRY_RUN" = yes ] || [ -n "$PREFIX" ]; then
+    strict=no
+  fi
+  if [ "$DRY_RUN" != yes ]; then
+    refusal="$(plan_real_apply_refusal)"
+    [ -z "$refusal" ] || DIE_STATUS=3 die "not applied: $refusal"
+  fi
+  preflight_bash
+  preflight_python
+  case "$OPERATING_SYSTEM" in
+    linux) preflight_commands "$strict" setfacl getfacl ;;
+  esac
+  if [ "$PREFLIGHT_PROBLEMS" -gt 0 ]; then
+    die "preflight found $PREFLIGHT_PROBLEMS problem(s); nothing was changed"
+  fi
+
+  log="${PREFIX}$(audit_log_file)"
+  [ -e "$log" ] || die "no audit log at $log, so there is no grant change to roll back"
+  [ -r "$log" ] || die "the audit log $log belongs to the owner; run this as the owner or with sudo"
+  read_last_grant "$log"
+  if [ -z "$LAST_TIME" ]; then
+    say "no grant change for $SERVICE_USER in the audit log; nothing to roll back."
+    return 0
+  fi
+  if [ "$LAST_SKIPPED" != 0 ]; then
+    warn "$LAST_SKIPPED audit log lines are not JSON and were skipped"
+  fi
+
+  record="${PREFIX}$(access_control_record_file)"
+  read_grant "$record" || DIE_STATUS=2 die "the grant record $record cannot be read; nothing was changed"
+  if [ "$GRANT_LEVEL" != "$LAST_LEVEL" ] || [ "$GRANT_PATHS_TEXT" != "$LAST_PATHS_TEXT" ]; then
+    printf 'error: the grant record no longer matches the last grant change in the audit log.\n' >&2
+    printf '  record:    %s\n' "$(describe_grant "$GRANT_LEVEL" "$GRANT_PATHS_TEXT")" >&2
+    printf '  audit log: %s, at %s\n' "$(describe_grant "$LAST_LEVEL" "$LAST_PATHS_TEXT")" "$LAST_TIME" >&2
+    printf 'something changed it outside this package; nothing was changed. look with: sirven grant inspect\n' >&2
+    exit 2
+  fi
+
+  PLAN_SIMULATION_LOG=""
+  if [ -n "$PREFIX" ]; then
+    PLAN_SIMULATION_LOG="$PREFIX$(layout_simulation_log)"
+  fi
+  build_rollback_plan
+  plan_evaluate
+  rollback_header
+  plan_print
+  plan_summary
+  if [ "$DRY_RUN" = yes ]; then
+    say "dry run: nothing was changed. run the same command without --dry-run to apply this plan."
+    return 0
+  fi
+  rollback_apply
+}
+
+main() {
+  parse_arguments "$@"
+  OPERATING_SYSTEM="$(detect_os)"
+  PACKAGE="$(package_name "$ROOT_DIR/project.json")"
+  layout_set_directories
+  STAGE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/$PACKAGE-grant.XXXXXX")"
+  trap 'rm -rf "$STAGE_DIR"' EXIT
+  case "$ACTION" in
+    inspect) inspect ;;
+    rollback) rollback ;;
+  esac
+}
+
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  main "$@"
+fi

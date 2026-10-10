@@ -23,6 +23,11 @@
 #             appended to PLAN_RECORD_FILE, the install record. uninstall.sh reverses only what
 #             that record lists, so it never removes something this package did not create.
 #
+# plan_assume_undone: steps added after it are shown as to do and always applied, without their
+# check. for plans where an earlier step undoes their end state, like a grant rollback that
+# removes access and then grants the earlier access again: a check run before applying would
+# wrongly find them done.
+#
 # PLAN_STEP_HOOK, when set, names a function apply calls after every numbered step with
 # NUMBER KIND TAG TITLE OUTCOME. install.sh points it at the audit log writer.
 #
@@ -50,8 +55,10 @@ plan_reset() {
   PLAN_UNDO_CHECK=()
   PLAN_UNDO_ACTION=()
   PLAN_UNDO_SHOWN=()
+  PLAN_ASSUMED_UNDONE=()
   PLAN_COUNT=0
   PLAN_CURRENT_SECTION=""
+  PLAN_ASSUME_UNDONE=no
 }
 
 plan_reset
@@ -73,7 +80,12 @@ _plan_add() {
   PLAN_UNDO_CHECK[index]=""
   PLAN_UNDO_ACTION[index]=""
   PLAN_UNDO_SHOWN[index]=""
+  PLAN_ASSUMED_UNDONE[index]="$PLAN_ASSUME_UNDONE"
   PLAN_COUNT=$((PLAN_COUNT + 1))
+}
+
+plan_assume_undone() {
+  PLAN_ASSUME_UNDONE=yes
 }
 
 plan_section() {
@@ -189,14 +201,14 @@ plan_evaluate() {
           PLAN_STATUS[index]="done"
         fi
         ;;
-      run)
-        number=$((number + 1))
-        if _plan_check_passes "${PLAN_CHECK[index]}"; then PLAN_STATUS[index]="done"; else PLAN_STATUS[index]="todo"; fi
-        ;;
-      system)
+      run | system)
         number=$((number + 1))
         PLAN_STATUS[index]="todo"
-        if [ -n "$PLAN_PREFIX" ]; then
+        if [ "${PLAN_ASSUMED_UNDONE[index]}" = yes ]; then
+          :
+        elif [ "$kind" = run ]; then
+          if _plan_check_passes "${PLAN_CHECK[index]}"; then PLAN_STATUS[index]="done"; fi
+        elif [ -n "$PLAN_PREFIX" ]; then
           if _plan_simulated "${PLAN_ACTION[index]}"; then PLAN_STATUS[index]="done"; fi
         elif _plan_check_passes "${PLAN_CHECK[index]}"; then
           PLAN_STATUS[index]="done"
