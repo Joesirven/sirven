@@ -4,6 +4,11 @@ sirven gives your personal agent its own account on your machine, with an access
 
 The whole setup is three steps and a confirmation.
 
+## already running an agent? that is the headline case
+
+sirven is built for people who already have a personal agent or muse running (a coding agent, a chat runtime, your own setup). It does not replace any of it. sirven connects the pieces that are missing: the dedicated account, the access level, the audit trail, the kill switch. Anything you already have stays exactly as it is; your agent just plugs into the account sirven creates.
+
+
 ## 1. get the package
 
 ```bash
