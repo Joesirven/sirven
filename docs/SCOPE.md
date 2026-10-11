@@ -146,7 +146,7 @@ safely") is W1 → W2 → W3 → W4 → W6 → W8 → W9. Everything else makes 
    stranger with a shell. It ships last, read-only by default, with mandatory expiry.
 7. **Testing reach.** Tonight's tests prove plans, not effects. Real user and access control list
    creation is unverified until a container (Linux) or virtual machine (macOS) run exists.
-8. **Load on the server ba-sing-se.** All builds and tests run on the MacBook; the server only
+8. **Load on the server.** All builds and tests run on the MacBook; the server only
    coordinates.
 
 ## Open questions for Jose

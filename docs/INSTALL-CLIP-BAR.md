@@ -1,6 +1,6 @@
 # Reference bar for the sirven install clip (and all future demos)
 
-Source: Jose's reference video (ElevenAgents Architect, 1:07, 720p) - /home/jose/dev/sirven-video-bar.mov on ba-sing-se. His note: "the bottom has helper sections to show structure .. this is the standard for demos from now on."
+Source: Jose's reference video (ElevenAgents Architect, 1:07, 720p). Note: "the bottom has helper sections to show structure .. this is the standard for demos from now on."
 
 ## Style rules extracted
 - Light, minimal, calm. Lots of negative space. One idea on screen at a time; one animation at a time; no fast cuts.
