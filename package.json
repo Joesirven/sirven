@@ -1,0 +1,31 @@
+{
+  "name": "@joesirven/sirven",
+  "version": "0.1.0",
+  "description": "Secure access levels for your personal AI agent. Install it, own it, no hosted middleman.",
+  "bin": {
+    "sirven": "bin/sirven"
+  },
+  "files": [
+    "bin",
+    "lib",
+    "levels",
+    "docs",
+    "install.sh",
+    "uninstall.sh",
+    "README.md",
+    "project.json",
+    "Makefile"
+  ],
+  "scripts": {
+    "test": "make test"
+  },
+  "os": [
+    "darwin",
+    "linux"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Joesirven/sirven.git"
+  }
+}
