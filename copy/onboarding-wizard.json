@@ -1,0 +1,92 @@
+{
+  "_review": "Every word the onboarding wizard shows, in one file, drafted for Jose's review. The app reads this file at launch; nothing user-facing in the wizard is written anywhere else. {endpoint} is filled in by the app.",
+  "welcome": {
+    "title": "Your agent, on your own connection.",
+    "body": "sirven lets your personal agent use the web from this Mac, through your own connection, and asks you before it does anything in the real world.",
+    "next": "Begin"
+  },
+  "tier": {
+    "title": "How much to share",
+    "body": "Start with Solo. You can change this any time from the menu bar.",
+    "unavailableBadge": "Not yet",
+    "options": [
+      {
+        "id": "solo",
+        "name": "Solo",
+        "summary": "Nothing shared. Your agent uses only your connection and asks before every real-world action. If a site blocks it, sirven tells you instead of working around it.",
+        "lends": "Lends nothing",
+        "autonomy": "Asks every time",
+        "available": true,
+        "unavailableNote": ""
+      },
+      {
+        "id": "neighborly",
+        "name": "Neighborly",
+        "summary": "Your Mac carries other members' agent traffic to reviewed sites, and theirs carries yours. Carrying and sending count the same.",
+        "lends": "Up to 5 gigabytes a month",
+        "autonomy": "Acts more on its own",
+        "available": false,
+        "unavailableNote": "Opens once the proof and site review safeguards are live."
+      },
+      {
+        "id": "coop",
+        "name": "Co-op",
+        "summary": "Higher caps and a broader list of reviewed sites. Your agent acts within the budget and preferences you set.",
+        "lends": "More than Neighborly",
+        "autonomy": "Acts within your limits",
+        "available": false,
+        "unavailableNote": "Opens once the proof and site review safeguards are live."
+      }
+    ],
+    "next": "Continue"
+  },
+  "permissions": {
+    "title": "Two permissions, and why",
+    "body": "Both are optional. sirven works without them, just more quietly.",
+    "allow": "Allow",
+    "allowed": "Allowed",
+    "declined": "Not allowed",
+    "items": [
+      {
+        "id": "notifications",
+        "name": "Notifications",
+        "why": "So your agent can ask you before it books, buys, or sends anything. Without them, questions wait in the menu bar."
+      },
+      {
+        "id": "openAtLogin",
+        "name": "Open at login",
+        "why": "So sirven is in your menu bar whenever your agent needs it. Turn it off in System Settings any time."
+      }
+    ],
+    "notAskedTitle": "Not asked now",
+    "notAskedBody": "Setup never asks for your administrator password. Keeping your Mac awake with the lid closed needs one system approval, and macOS asks for it the first time you turn that on.",
+    "next": "Continue"
+  },
+  "confirmation": {
+    "title": "Here is what is now true",
+    "facts": {
+      "solo": "You are on Solo. This Mac carries no one else's traffic.",
+      "asks": "Your agent asks before every real-world action.",
+      "notificationsOn": "Notifications are on, so those questions reach you.",
+      "notificationsOff": "Notifications are off. Questions wait in the menu bar.",
+      "openAtLoginOn": "sirven opens when you log in.",
+      "openAtLoginOff": "sirven opens only when you open it.",
+      "endpoint": "Point your agent at {endpoint}.",
+      "endpointPending": "Your agent's connection details appear in the menu bar once sirven is running."
+    },
+    "menuBarTitle": "sirven lives in your menu bar",
+    "menuBarBody": "Click the mark at the top of your screen for everything below. There is no dock icon.",
+    "menuBarItems": [
+      { "name": "Tier", "detail": "Solo now. Change it here." },
+      { "name": "Agent", "detail": "What your agent is doing, and its questions." },
+      { "name": "Keep awake", "detail": "Hold your Mac awake while work is in flight." },
+      { "name": "Network", "detail": "Your private network connection, in one place." },
+      { "name": "Settings", "detail": "Permissions, undo, and quit." }
+    ],
+    "done": "Done"
+  },
+  "navigation": {
+    "back": "Back",
+    "stepLabel": "Step {current} of {total}"
+  }
+}

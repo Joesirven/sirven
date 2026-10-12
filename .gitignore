@@ -8,3 +8,5 @@ out/
 .DS_Store
 .claude/
 dist/
+.build/
+.swiftpm/
