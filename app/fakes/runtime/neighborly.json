@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "tier": "neighborly",
+  "peer_routing_available": true,
+  "consent": {"prompted": true, "decision": "neighborly"},
+  "last_block": null
+}

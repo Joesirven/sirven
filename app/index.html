@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>sirven</title>
+  <link rel="stylesheet" href="/app/style.css">
+</head>
+<body>
+  <main class="shell" aria-busy="true">
+    <header class="top">
+      <span class="wordmark">sirven</span>
+      <nav class="tabs" role="tablist">
+        <span class="tabs-indicator" aria-hidden="true"></span>
+        <button role="tab" data-view="dial" data-copy="nav.dial"></button>
+        <button role="tab" data-view="meter" data-copy="nav.meter"></button>
+        <button role="tab" data-view="list" data-copy="nav.list"></button>
+      </nav>
+    </header>
+
+    <section class="view" data-view="dial" role="tabpanel">
+      <p class="eyebrow" data-copy="dial.title"></p>
+      <div class="dial" role="radiogroup">
+        <div class="dial-track"><span class="dial-fill"></span><span class="dial-knob"></span></div>
+        <div class="dial-stops"></div>
+      </div>
+      <h1 class="tier-summary" aria-live="polite"></h1>
+      <div class="linked">
+        <div class="linked-row" data-axis="lend">
+          <span class="linked-label" data-copy="dial.lend"></span>
+          <span class="bar"><span class="bar-fill"></span></span>
+          <p class="linked-text"></p>
+        </div>
+        <span class="linked-join" aria-hidden="true"></span>
+        <div class="linked-row" data-axis="autonomy">
+          <span class="linked-label" data-copy="dial.autonomy"></span>
+          <span class="bar"><span class="bar-fill"></span></span>
+          <p class="linked-text"></p>
+        </div>
+      </div>
+      <div class="dial-action"></div>
+    </section>
+
+    <section class="view" data-view="meter" role="tabpanel" hidden>
+      <p class="eyebrow" data-copy="meter.title"></p>
+      <h1 class="meter-figure"></h1>
+      <div class="meter-bar" aria-hidden="true">
+        <span class="meter-seg carried"></span><span class="meter-seg sent"></span>
+      </div>
+      <div class="meter-legend">
+        <span class="key carried"><i></i><span data-copy="meter.carried"></span> <b class="n-carried"></b></span>
+        <span class="key sent"><i></i><span data-copy="meter.sent"></span> <b class="n-sent"></b></span>
+      </div>
+      <p class="meter-note" aria-live="polite"></p>
+      <h2 class="subhead" data-copy="meter.sessions"></h2>
+      <ul class="sessions"></ul>
+    </section>
+
+    <section class="view" data-view="list" role="tabpanel" hidden>
+      <p class="eyebrow" data-copy="list.title"></p>
+      <p class="lede" data-copy="list.intro"></p>
+      <p class="list-meta"></p>
+      <ul class="sites"></ul>
+    </section>
+  </main>
+
+  <div class="consent" hidden>
+    <div class="consent-backdrop"></div>
+    <div class="consent-sheet" role="dialog" aria-modal="true" aria-labelledby="consent-title">
+      <button class="consent-close" data-copy-label="consent.close">&times;</button>
+      <div class="consent-steps"></div>
+      <div class="consent-dots" aria-hidden="true"></div>
+      <div class="consent-actions"></div>
+    </div>
+  </div>
+
+  <div class="toast" role="status" aria-live="polite"></div>
+  <script src="/app/main.js"></script>
+</body>
+</html>

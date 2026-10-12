@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "period": {"start": "2026-10-01T00:00:00Z", "end": "2026-11-01T00:00:00Z"},
+  "cap_bytes": 5000000000,
+  "carried_bytes": 2900000000,
+  "sent_bytes": 1720000000,
+  "used_bytes": 4620000000,
+  "state": "under",
+  "sessions": [
+    {"id": "s-0031", "direction": "carried", "domain": "groceries.example", "bytes": 140000000, "started_at": "2026-10-11T16:05:00Z", "ended_at": null},
+    {"id": "s-0030", "direction": "sent", "domain": "tickets.example", "bytes": 260000000, "started_at": "2026-10-11T12:44:00Z", "ended_at": "2026-10-11T13:02:00Z"}
+  ]
+}

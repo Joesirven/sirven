@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "registry_version": "2026.10.3",
+  "published_at": "2026-10-09T00:00:00Z",
+  "test_data": true,
+  "entries": [
+    {
+      "domain": "rides.example",
+      "status": "approved",
+      "scope": "authenticated",
+      "approved_at": "2026-10-02T00:00:00Z",
+      "last_reviewed_at": "2026-10-02T00:00:00Z",
+      "next_review_by": "2027-01-02T00:00:00Z",
+      "rationale": "Booking a ride for yourself is ordinary personal use. The site publicly welcomes assistants acting for individual riders, and the traffic a member carries is a handful of page loads per trip.",
+      "public_positions": [{"label": "Terms of service", "url": "https://rides.example/terms"}]
+    },
+    {
+      "domain": "library.example",
+      "status": "approved",
+      "scope": "read",
+      "approved_at": "2026-10-05T00:00:00Z",
+      "last_reviewed_at": "2026-10-05T00:00:00Z",
+      "next_review_by": "2027-01-05T00:00:00Z",
+      "rationale": "A public library catalog. Checking holds and due dates is what a patron would do in person, and the library states that automated access for patrons is permitted.",
+      "public_positions": [{"label": "Access policy", "url": "https://library.example/policy"}]
+    },
+    {
+      "domain": "tickets.example",
+      "status": "approved",
+      "scope": "authenticated",
+      "approved_at": "2026-10-09T00:00:00Z",
+      "last_reviewed_at": "2026-10-09T00:00:00Z",
+      "next_review_by": "2026-12-09T00:00:00Z",
+      "rationale": "Buying one or two tickets for yourself is personal use. Approved with a shorter review cycle because the site's resale rules are still changing.",
+      "public_positions": [
+        {"label": "Terms of use", "url": "https://tickets.example/terms"},
+        {"label": "Statement on automated buying", "url": "https://tickets.example/bots"}
+      ]
+    }
+  ]
+}

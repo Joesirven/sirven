@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "tier": "solo",
+  "peer_routing_available": false,
+  "consent": {"prompted": false, "decision": null},
+  "last_block": {
+    "version": 1,
+    "mode": "solo",
+    "route": "local",
+    "outcome": "blocked",
+    "reason": "site_refused",
+    "http_status": 403,
+    "host": "tickets.example",
+    "at": "2026-10-11T16:42:00Z"
+  }
+}

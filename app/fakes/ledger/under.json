@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "period": {"start": "2026-10-01T00:00:00Z", "end": "2026-11-01T00:00:00Z"},
+  "cap_bytes": 5000000000,
+  "carried_bytes": 1240000000,
+  "sent_bytes": 610000000,
+  "used_bytes": 1850000000,
+  "state": "under",
+  "sessions": [
+    {"id": "s-0007", "direction": "carried", "domain": "rides.example", "bytes": 84000000, "started_at": "2026-10-11T15:58:00Z", "ended_at": null},
+    {"id": "s-0006", "direction": "sent", "domain": "tickets.example", "bytes": 212000000, "started_at": "2026-10-11T14:10:00Z", "ended_at": "2026-10-11T14:31:00Z"},
+    {"id": "s-0005", "direction": "carried", "domain": "library.example", "bytes": 356000000, "started_at": "2026-10-10T19:02:00Z", "ended_at": "2026-10-10T19:40:00Z"},
+    {"id": "s-0004", "direction": "sent", "domain": "rides.example", "bytes": 398000000, "started_at": "2026-10-09T08:15:00Z", "ended_at": "2026-10-09T08:22:00Z"}
+  ]
+}
