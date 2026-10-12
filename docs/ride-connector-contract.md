@@ -23,7 +23,7 @@ Where this document and the schema disagree, the schema wins and the disagreemen
 | `cancel_ride` | Cancels a booking and reconciles what is owed. | Cancels a ride; may incur the published fee. |
 | `get_ride` | Reads a booking's status, tracking details, and final charge. | None. |
 
-`quote_ride`, `book_ride`, and `cancel_ride` are the three primary calls. `get_ride` is the read-only tracking surface that `book_ride` points to; it is how the agent and the money layer learn that a trip finished and what it cost.
+`quote_ride`, `book_ride`, and `cancel_ride` are the three primary calls. `get_ride` is the read-only tracking surface that `book_ride` points to; it is how the agent learns that a trip finished and what it cost.
 
 Every call takes an optional `contract_version` argument and every result carries `contract_version`. Every argument object and every result object is closed: a field the schema does not name is refused on the way in and can never appear on the way out.
 
@@ -78,7 +78,7 @@ Each option:
 | `provider` | The ride service the rider will see on the car or the receipt, as a display name. |
 | `vehicle_class` | One of the vehicle classes above. |
 | `price` | `{kind, amount, maximum}`. `fixed`: the fare is guaranteed until the quote expires, and `maximum` equals `amount`. `estimate`: the final fare may land anywhere up to `maximum`, never above it. |
-| `charge_terms` | What the money layer holds funds against. See [What the money layer reads](#what-the-money-layer-reads). |
+| `charge_terms` | What the booking may cost, which the owner approves and the backend enforces. See [What the payment approval reads](#what-the-payment-approval-reads). |
 | `estimated_pickup_at` | When the vehicle should arrive at the origin. |
 | `estimated_dropoff_at` | When the rider should arrive at the destination. |
 | `estimated_pickup_wait_minutes` | Minutes from the start of the window (or from now, if later) to pickup. |
@@ -138,7 +138,7 @@ Notices never say which service or backend. When no option at all can be returne
 | Argument | Required | Meaning |
 |---|---|---|
 | `quote_id` | yes | From a `quote_ride` result. |
-| `payment_reference` | no in version 1 | An opaque handle from the sirven money layer for funds already held against this booking: letters, digits, `_` and `-`, 8 to 128 characters. **Never a card number or any card detail.** A long run of digits is refused as `invalid_argument` before any backend sees it. A gateway configured to require held funds returns `payment_required` without it. |
+| `payment_reference` | no in version 1 | An opaque handle for funds already held against this booking, for a backend that pays that way (none that sirven ships does): letters, digits, `_` and `-`, 8 to 128 characters. **Never a card number or any card detail.** A long run of digits is refused as `invalid_argument` before any backend sees it. A gateway configured to require held funds returns `payment_required` without it. |
 | `contract_version` | no | As for `quote_ride`. |
 
 ### Result
@@ -197,7 +197,7 @@ A booking only moves forward through this list. The agent should not tell the pe
 | `tip` | Zero for a cancelled booking. |
 | `cancellation_fee` | Zero or the published fee. |
 | `total` | `fare + tip + cancellation_fee`. |
-| `amount_to_release` | `authorization_cap - total`: what the money layer releases from its hold. |
+| `amount_to_release` | `authorization_cap - total`: what a backend paying through held funds would release. The iPhone ride backend holds nothing, so for it this is only the difference. |
 
 If the cancellation could not reach the ride service, `cancel_ride` returns a retryable error and the booking is **not** marked cancelled. The agent retries; it never tells the person a ride is cancelled on an error.
 
@@ -205,23 +205,38 @@ If the cancellation could not reach the ride service, `cancel_ride` returns a re
 
 Argument: `booking_id`. Result: `{"contract_version", "booking"}`, refreshed from the ride service. On `completed`, `final_charge` holds the actual `fare` and `tip` with a zero `cancellation_fee`. `fare` never exceeds `charge_terms.fare_ceiling`, `tip` never exceeds `charge_terms.tip_ceiling`, so `total` never exceeds `authorization_cap`: the gateway clamps anything above and logs the discrepancy for sirven's operators.
 
-## What the money layer reads
+## What the payment approval reads
 
-The money layer (Stripe Issuing per-booking virtual cards) needs no side channel. Everything it needs is in `charge_terms` on the quoted option and the booking, and in `final_charge`:
+Payment is a live approval by the owner, for each purchase, on the owner's own phone. No sirven
+account holds funds and no card is issued: the earlier design (Stripe Issuing per-booking
+virtual cards) is out of the booking path. With the iPhone ride backend (`connectors/ride/ride_phone`)
+the order is:
+
+1. `quote_ride`, and the person approves an option in conversation.
+2. `book_ride`. The backend re-reads the price in the ride app and refuses with `price_changed`
+   if it rose above the quote or the `authorization_cap`, then taps the request button.
+3. The phone bridge holds that tap as money bearing until the owner runs `sirven phone approve`.
+4. The phone shows its own face recognition or Apple Pay prompt for that one purchase. Only the
+   owner answers it, on the phone. sirven never presses it, never stores or replays a scan, and
+   never lets one approval cover a later purchase.
+5. A refusal at step 3 or 4 books nothing and returns `payment_declined`.
+
+The fields stay what they were, and are what the owner is shown and what the backend enforces:
 
 | Need | Field |
 |---|---|
 | Expected fare to show the person | `charge_terms.quoted_amount` |
 | Most the fare can be | `charge_terms.fare_ceiling` |
 | Pre-authorized tip ceiling | `charge_terms.tip_ceiling` |
-| Card spending cap | `charge_terms.authorization_cap` (fare ceiling plus tip ceiling) |
+| The most the booking may cost; the backend refuses above it | `charge_terms.authorization_cap` (fare ceiling plus tip ceiling) |
 | Currency | `charge_terms.currency` |
-| Link from held funds to the booking | `payment_reference` on `book_ride`; `booking_id` and `quote_id` on the booking |
-| Settle on completion | `final_charge.total` when `get_ride` reports `completed` |
-| Release on cancellation or failure | `final_charge.amount_to_release` |
+| What it cost, on completion | `final_charge.total` when `get_ride` reports `completed` |
 | Rationale record (amount paired with why) | The quoted option (price, flags, rank) plus the booking |
 
-The intended order: `quote_ride`, the person approves an option, the money layer holds `authorization_cap` and returns a `payment_reference`, then `book_ride`. Card numbers, card verification codes, and expiry dates never appear in any argument or result. They travel only between the money layer and the backend inside sirven, outside this contract.
+`payment_reference` stays an optional argument in version 1 for a backend that pays through
+funds held elsewhere; no backend sirven ships uses it, and the iPhone ride backend's gateway
+does not require it. Card numbers, card verification codes, and expiry dates never appear in
+any argument or result.
 
 ## Backend blindness
 
@@ -278,7 +293,7 @@ A failed call returns an error object instead of a result:
 | `option_unavailable` | `book_ride` | The ride is gone since the quote. | no | Quote again. The `quote_id` stays unbooked. |
 | `price_changed` | `book_ride` | The ride service raised the price above the quote. | no | Quote again and show the person the new price. |
 | `idempotency_conflict` | `book_ride` | The quote was already booked with a different `payment_reference`. | no | Use the original booking; do not book again. |
-| `payment_required` | `book_ride` | The gateway requires held funds and none were referenced. | no | Hold funds through the money layer, then book. |
+| `payment_required` | `book_ride` | The gateway is configured to require held funds and none were referenced. No gateway sirven ships is configured this way. | no | Hold funds as that gateway requires, then book. |
 | `payment_declined` | `book_ride` | The held funds were declined. | no | Tell the person. |
 | `booking_not_found` | `get_ride`, `cancel_ride` | No such `booking_id`. | no | Check the identifier. |
 | `not_cancellable` | `cancel_ride` | The trip started, finished, or failed. | no | Tell the person; the error carries the booking. |
@@ -340,6 +355,8 @@ A backend implements `RideBackend` in `connectors/ride/ride_connector/backend.py
 
 A backend never sees the person's preferences or budget, only the trip and window (`QuoteRequest`), and never mints anything the agent sees. It does report `human_assisted` honestly on every option it serves through a person.
 
+The backend sirven ships is the iPhone ride backend, `connectors/ride/ride_phone` (`PhoneRideBackend`, and `build_connector()` for a gateway over it). It drives the owner's own Uber or Lyft app on the owner's plugged-in iPhone through the phone bridge (`docs/phone-interface.md`), finds its way with the semantic map the owner's onboarding built, and books only after the two live approvals in [What the payment approval reads](#what-the-payment-approval-reads). `python3 -m ride_connector.server --phone` serves it. The earlier official-partner backend is removed.
+
 ## Running against the fake backend
 
 ```sh
@@ -349,4 +366,4 @@ cd connectors/ride && python3 -m ride_connector.server      # a model context pr
 
 The server runs on the real clock, so departure windows built from the current time work. The unit tests use a frozen, controllable clock instead.
 
-In Python, `ride_connector.fake.demo_connector()` returns a gateway over two fake backends (an automated partner offering Uber and Lyft products, and a concierge desk offering Waymo), the clock, and the backends. It defaults to the frozen `FakeClock`; pass `ride_connector.gateway.system_clock` for the real one. The concierge backend's `pending()` (each waiting request with its reference, provider, origin, destination, pickup window, estimated pickup, `confirm_by`, and fare ceiling), `confirm(reference)`, and `decline(reference)` are the seam a rehearsal console drives. The standard input and output server does not expose that seam: a console runs in the same process as the gateway and holds the backend object directly. That seam belongs to the fake only. It is not part of the contract. `connectors/ride/tests/test_round_trips.py` (`BarberScenarioTests`) walks the barber scenario: after the 2pm meeting, Waymo preferred, under 25 dollars.
+In Python, `ride_connector.fake.demo_connector()` returns a gateway over two fake backends (an automated service offering Uber and Lyft products, and a concierge desk offering Waymo), the clock, and the backends. It defaults to the frozen `FakeClock`; pass `ride_connector.gateway.system_clock` for the real one. The concierge backend's `pending()` (each waiting request with its reference, provider, origin, destination, pickup window, estimated pickup, `confirm_by`, and fare ceiling), `confirm(reference)`, and `decline(reference)` are the seam a rehearsal console drives. The standard input and output server does not expose that seam: a console runs in the same process as the gateway and holds the backend object directly. That seam belongs to the fake only. It is not part of the contract. `connectors/ride/tests/test_round_trips.py` (`BarberScenarioTests`) walks the barber scenario: after the 2pm meeting, Waymo preferred, under 25 dollars.
