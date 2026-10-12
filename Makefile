@@ -6,6 +6,8 @@
 #   make package    a tarball of the files git tracks, in dist/ (or DIST=path)
 #   make runtime    macos only: build the runtime's fetch helper, dist/runtime/sirven-fetch, for
 #                   Apple Silicon and Intel. needs the Xcode command line tools
+#   make keep-awake        macos only: build the keep-awake program behind sirven awake
+#   make test-keep-awake   macos only: its unit tests, and a short real power assertion
 
 SHELL := /bin/sh
 PACKAGE := $(shell sed -n 's/^[[:space:]]*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' project.json | head -n 1 | tr '[:upper:]' '[:lower:]')
@@ -13,13 +15,15 @@ VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo unve
 DIST ?= dist
 SHELL_FILES := install.sh uninstall.sh bin/sirven $(wildcard lib/*.sh) $(wildcard lib/attestation/*.sh) tests/run.sh tests/golden/run.sh $(wildcard tests/lib/*.sh) $(wildcard tests/unit/*.sh)
 
-.PHONY: help test lint package runtime
+.PHONY: help test lint package runtime keep-awake test-keep-awake
 
 help:
 	@echo "make test      run every test: tests/run.sh"
 	@echo "make lint      bash -n on every shell file, then shellcheck if it is installed"
 	@echo "make package   $(DIST)/$(PACKAGE)-$(VERSION).tar.gz from the files git tracks"
 	@echo "make runtime   macos: build dist/runtime/sirven-fetch, the runtime's fetch helper"
+	@echo "make keep-awake        build the keep-awake program behind sirven awake (macos)"
+	@echo "make test-keep-awake   run its tests (macos)"
 
 test:
 	bash tests/run.sh
@@ -66,3 +70,8 @@ runtime:
 	done; \
 	lipo -create "$$scratch/sirven-fetch-arm64" "$$scratch/sirven-fetch-x86_64" -output $(RUNTIME_HELPER); \
 	echo "runtime: built $(RUNTIME_HELPER) for $$(lipo -archs $(RUNTIME_HELPER))"
+keep-awake:
+	swift build --package-path macos/keep-awake -c release
+
+test-keep-awake:
+	swift test --package-path macos/keep-awake

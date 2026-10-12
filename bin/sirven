@@ -5,6 +5,7 @@
 #   sirven grant rollback   reverse the most recent grant change, found in the audit log
 #   sirven runtime ...      the Solo egress runtime for the owner's personal agent: see
 #                           docs/runtime-interface.md and sirven runtime --help
+#   sirven awake ...        keep the Mac awake while the agent has work in flight (macos only)
 #
 # inspect only reads. rollback is a plan like install.sh: --dry-run prints it and changes
 # nothing, and without --dry-run the identical plan is printed and then applied, under the
@@ -55,6 +56,7 @@ usage:
   sirven grant rollback [options]    reverse the most recent grant change
   sirven runtime serve|status|fetch|classify|decisions|exec
                                      the Solo egress runtime: sirven runtime --help
+  sirven awake [command]             keep the Mac awake while your agent works; sirven awake --help
 
 options:
   --prefix PATH    read a fake root that install.sh was applied to with --prefix
@@ -422,10 +424,29 @@ run_runtime() {
   PYTHONPATH="$ROOT_DIR/lib${PYTHONPATH:+:$PYTHONPATH}" exec python3 -m sirven_runtime "$@"
 }
 
+# keep-awake lives in a compiled helper program (macos/keep-awake), because a power assertion is
+# held by a running process and released by the system when that process exits.
+# SIRVEN_KEEP_AWAKE_BIN points at a build elsewhere, such as the one inside the signed app.
+keep_awake() {
+  local built candidate
+  [ "$(detect_os)" = macos ] || die "sirven awake is for macos only"
+  built="$ROOT_DIR/macos/keep-awake/.build"
+  for candidate in "${SIRVEN_KEEP_AWAKE_BIN:-}" "$built/release/sirven-keep-awake" "$built/debug/sirven-keep-awake"; do
+    if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+      exec "$candidate" "$@"
+    fi
+  done
+  die "sirven awake is not built yet. build it with: make keep-awake"
+}
+
 main() {
   if [ "${1:-}" = runtime ]; then
     shift
     run_runtime "$@"
+  fi
+  if [ "${1:-}" = awake ]; then
+    shift
+    keep_awake "$@"
   fi
   parse_arguments "$@"
   OPERATING_SYSTEM="$(detect_os)"

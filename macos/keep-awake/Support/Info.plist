@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- a development bundle that carries the keep-awake program and its helper. the menu bar app
+     replaces it: that app takes this bundle identifier, these two programs, and the helper plist. -->
+<plist version="1.0">
+<dict>
+	<key>CFBundleIdentifier</key>
+	<string>xyz.sirven.app</string>
+	<key>CFBundleName</key>
+	<string>Sirven</string>
+	<key>CFBundleExecutable</key>
+	<string>sirven-keep-awake</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>13.0</string>
+	<key>LSUIElement</key>
+	<true/>
+</dict>
+</plist>
