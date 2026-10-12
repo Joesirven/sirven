@@ -58,6 +58,18 @@ and is not this deliverable. What it must contain, at minimum:
 4. That the ride is booked on an account sirven controls, not the user's own.
 5. How to withdraw, and what happens to the trip details afterwards (section 4).
 
+**Draft disclosure sentence, held for Jose's approval.** The connector contract takes one
+sentence, shown on a concierge-served option before the user approves it, and leaves its
+wording to this protocol. Its placeholder is not approved copy. Draft:
+
+> A person on the sirven concierge team in San Francisco books this ride for you on a sirven
+> account. They see only the pickup, drop-off, and time, and the details are deleted once the
+> ride is booked.
+
+The second sentence is only true if Jose keeps the no-retention recommendation in section 4;
+change both together. After a concierge confirms, the booking should also show their display
+name ("Booked by Example A., sirven concierge").
+
 ## 3. What a concierge may see, and what they must never do
 
 **May see, only for a request they have claimed:**

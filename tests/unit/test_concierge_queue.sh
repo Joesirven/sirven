@@ -156,3 +156,25 @@ test_monitoring_sample_is_the_real_report() {
   documented="$(sed -n '/^## Concierge service levels/,/concierge-2: 1 worked/p' "$REPO_DIR/concierge-ops/monitoring.md")"
   assert_eq "$documented" "$(queue report --log "$TEST_TMP/log" --from 2026-10-12 --to 2026-10-18)" "monitoring.md sample drifted from the tool"
 }
+
+# the ride connector contract's human-assisted path: software quoted, the user accepted, and a
+# person only confirms the booking.
+test_booking_stage_request_skips_the_quote_and_times_the_booking() {
+  local log="$TEST_TMP/log"
+  queue submit --log "$log" --request r1 --consent disclosed --stage booking --at 2026-10-12T14:00:00Z
+  capture queue quote --log "$log" --request r1 --amount-cents 1840 --at 2026-10-12T14:00:05Z
+  assert_eq 1 "$CAPTURED_STATUS" "a software-quoted request takes no human quote"
+  capture queue book --log "$log" --request r1 --at 2026-10-12T14:00:05Z
+  assert_eq 1 "$CAPTURED_STATUS" "nobody has claimed it yet"
+  capture queue check --log "$log" --at 2026-10-12T14:00:40Z
+  assert_contains "$CAPTURED_STDOUT" "warning	unclaimed	r1	40 seconds with no concierge"
+  assert_not_contains "$CAPTURED_STDOUT" "quote"
+  queue claim --log "$log" --request r1 --concierge concierge-1 --roster "$ROSTER" --at 2026-10-12T14:00:41Z > /dev/null
+  capture queue check --log "$log" --at 2026-10-12T14:01:31Z
+  assert_contains "$CAPTURED_STDOUT" "breach	booking	r1	91 seconds since acceptance, target 90"
+  queue book --log "$log" --request r1 --at 2026-10-12T14:01:35Z
+  capture queue report --log "$log" --from 2026-10-12 --to 2026-10-12
+  assert_contains "$CAPTURED_STDOUT" "Quote time (submit to quote): none recorded."
+  assert_contains "$CAPTURED_STDOUT" "median 95 seconds, 90th percentile 95 seconds, 0 of 1 under the 90 second target."
+  assert_contains "$CAPTURED_STDOUT" "Breaches: 0 quote, 1 booking."
+}

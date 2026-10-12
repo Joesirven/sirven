@@ -15,6 +15,7 @@ From the scope, and the definitions this design commits to:
 
 The booking clock starts at acceptance, not at submit, so the user's own thinking time never
 counts against the concierge. **Jose decides** whether these definitions match what he meant.
+Section 5 covers the other shape, where software quotes and a person only confirms.
 
 ## 2. The flow
 
@@ -84,21 +85,46 @@ The end-to-end demo thread can drive it as the scripted concierge console's back
 - **Build, not buy.** A help-desk or on-call product would add a vendor that sees trip
   content. The surface is small enough to build, and it keeps trip data in one place.
 
-## 5. Dependencies on other threads
+## 5. Two ways in: a person quotes, or a person only confirms
 
-- **Ride connector contract.** Two things to ask for:
-  1. *Time to quote.* A concierge quote can take up to 30 seconds. Either `quote_ride` waits
-     that long, or the contract allows a pending option that fills in later. Without one of
-     these, concierge options can never appear.
-  2. *Disclosure without naming the backend.* The contract keeps the backend invisible to the
-     agent, but the user must be told a person is involved and who. The proposal: a
-     backend-neutral optional field on a quoted option (for example `human_involvement`, with
-     the disclosure text and the person's display name) that the agent must show. This keeps
-     backend blindness and makes disclosure part of the contract.
-- **Consent.** Consent must exist before routing, which means it is collected ahead of time (a
-  standing, revocable setting) and restated per ride. **Jose decides** standing consent with a
-  per-ride notice, or a per-ride question every time.
+The ride connector contract thread (branch `model-context-protocol-connector-contract-for-ri-thr_jzapafb9uf`,
+commit 5e9d5f9, not yet merged) already settled a shape for human-assisted rides that differs
+from the flow in section 2:
+
+- Software produces the quote for a concierge-served option (an estimate with a fare ceiling).
+  No person touches the quote, so the 30 second quote target is met by software.
+- The option carries `fulfillment.method` of `human_assisted` and a `fulfillment.disclosure`
+  sentence the agent must show before the user approves.
+- `book_ride` returns a booking in state `requested` with a `confirm_by` deadline. A person
+  confirms it, or it becomes `failed` with nothing charged.
+
+The prototype supports both: `submit --stage booking` enters a request that software quoted
+and the user already accepted, so the booking clock starts at once and there is no quote step.
+
+**Recommendation: adopt the contract's shape.** It is better for the user. A concierge sees only
+trips the user has already chosen, never trips that were merely being priced, and consent is
+the disclosure shown at approval. The cost: an estimate can be wrong. If the price in the
+service's app is above the fare ceiling, the concierge hands back with `over_budget` and the
+agent asks the user again. **Jose decides.**
+
+Under that shape, two settings in the contract thread need to match this design:
+1. `confirm_by` should sit at the 90 second booking target (the reference fake uses 15
+   minutes). A request that misses it fails cleanly instead of leaving the user waiting.
+2. The concierge's display name has no field yet. The protocol requires the user to see it once
+   a person has the request; a backend-neutral optional field on the `requested` booking would
+   carry it without naming any backend.
+
+## 6. Dependencies on other threads
+
+- **Ride connector contract:** the two settings above.
+- **Consent.** Under the contract's shape, consent is the disclosure shown at approval, plus a
+  standing setting so the user can turn concierge-served options off entirely. Under the
+  person-quotes shape, consent must exist before routing, so it has to be a standing, revocable
+  setting with a per-ride notice. **Jose decides** along with the shape.
 - **Money layer.** The concierge's service account pays with a sirven card; the per-booking
   virtual card fits if the service accepts card changes per booking. Until then, test mode.
-- **End-to-end demo.** Can use the prototype as its scripted console; the demo's rehearsal
-  should include one handback and one breach to show the gates working.
+- **End-to-end demo.** The contract's fake concierge desk exposes `pending()`, `confirm()`, and
+  `decline()` for a rehearsal console. That console can also write `submit --stage booking`,
+  `claim`, and `book` or `handback` events to this prototype, so the rehearsal produces real
+  service-level numbers. The rehearsal should include one handback and one breach to show the
+  gates working.

@@ -44,11 +44,16 @@ and the disclosure exists.
 9. **Target definitions:** quote clock from submit, booking clock from the user's acceptance.
    Queue design, section 1.
 10. **Consent shape:** a standing, revocable consent plus a per-ride notice, or a question on
-    every ride. Queue design, section 5.
+    every ride; depends on decision 13. Queue design, section 6.
 11. **Trip detail retention:** none beyond the open request (recommended), or a short window
     for disputes. Protocol, section 4.
 12. **Role description and scenario questions:** approve or edit before any use. Hiring packet,
     sections 1 and 2.
+13. **Who quotes:** software quotes and a person only confirms the booking (the connector
+    contract thread's shape; recommended, since the concierge then sees only trips the user
+    chose), or a person quotes every request. Queue design, section 5.
+14. **Disclosure sentence:** approve or edit the draft the connector contract shows on every
+    concierge-served option. Protocol, section 2.
 
 ## Contents
 

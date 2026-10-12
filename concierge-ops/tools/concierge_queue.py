@@ -14,9 +14,13 @@ deterministic. leave it out and the current time is used.
 
 subcommands
 
-  submit   --log F --request R --consent disclosed [--service NAME] [--at T]
+  submit   --log F --request R --consent disclosed [--service NAME] [--stage quote|booking] [--at T]
       a ride request enters the queue. refused unless the user's consent to a human seeing
-      the trip request is recorded as disclosed.
+      the trip request is recorded as disclosed. --stage quote (the default) means a person
+      quotes it. --stage booking means software already quoted it and the user already
+      accepted (the ride connector contract's human-assisted path, where a booking waits
+      as requested until a person confirms it): no quote clock, and the booking clock
+      starts at submit.
   claim    --log F --request R --concierge C --roster ROSTER [--at T]
       a concierge takes an open request. refused if the concierge is not active on the
       roster, or the request is already claimed. prints the concierge's display name, which
@@ -108,12 +112,13 @@ def replay(events):
             requests[request_id] = {
                 "request": request_id,
                 "service": event.get("service", ""),
+                "stage": event.get("stage", "quote"),
                 "submitted": at,
+                "accepted": at if event.get("stage") == "booking" else None,
                 "claimed": None,
                 "concierge": None,
                 "claims": 0,
                 "quoted": None,
-                "accepted": None,
                 "booked": None,
                 "handed_back": None,
                 "reason": None,
@@ -182,7 +187,10 @@ def command_submit(args, requests):
         raise Refused(f"request {args.request} was already submitted")
     if args.consent != "disclosed":
         raise Refused("the user has not consented to a human concierge seeing this trip request")
-    return {"event": "submit", "request": args.request, "service": args.service, "consent": "disclosed"}
+    event = {"event": "submit", "request": args.request, "service": args.service, "consent": "disclosed"}
+    if args.stage == "booking":
+        event["stage"] = "booking"
+    return event
 
 
 def command_claim(args, requests):
@@ -206,6 +214,8 @@ def command_release(args, requests):
 
 def command_quote(args, requests):
     record = open_record(requests, args.request)
+    if record["stage"] == "booking":
+        raise Refused(f"request {args.request} was quoted by software and already accepted; book it or hand it back")
     if record["concierge"] is None:
         raise Refused(f"request {args.request} must be claimed before it is quoted")
     if args.amount_cents <= 0:
@@ -215,6 +225,8 @@ def command_quote(args, requests):
 
 def command_accept(args, requests):
     record = open_record(requests, args.request)
+    if record["accepted"] is not None:
+        raise Refused(f"request {args.request} is already accepted")
     if record["quoted"] is None:
         raise Refused(f"request {args.request} has no quote to accept")
     return {"event": "accept", "request": args.request}
@@ -224,6 +236,8 @@ def command_book(args, requests):
     record = open_record(requests, args.request)
     if record["accepted"] is None:
         raise Refused(f"request {args.request} cannot be booked before the user accepts the quote")
+    if record["concierge"] is None:
+        raise Refused(f"request {args.request} must be claimed before it is booked")
     return {"event": "book", "request": args.request}
 
 
@@ -241,7 +255,7 @@ def alerts(requests, now):
             continue
         request_id = record["request"]
         waiting = int((now - record["submitted"]).total_seconds())
-        if record["quoted"] is None:
+        if record["stage"] == "quote" and record["quoted"] is None:
             if waiting > QUOTE_TARGET_SECONDS:
                 lines.append(f"breach\tquote\t{request_id}\t{waiting} seconds since submit, target {QUOTE_TARGET_SECONDS}")
             elif record["concierge"] is None and waiting > UNCLAIMED_WARNING_SECONDS:
@@ -252,6 +266,8 @@ def alerts(requests, now):
                     lines.append(f"warning\tslow_quote\t{request_id}\t{held} seconds claimed by {record['concierge']} with no quote")
         elif record["accepted"] is not None:
             booking = int((now - record["accepted"]).total_seconds())
+            if record["concierge"] is None and UNCLAIMED_WARNING_SECONDS < booking <= BOOKING_TARGET_SECONDS:
+                lines.append(f"warning\tunclaimed\t{request_id}\t{booking} seconds with no concierge")
             if booking > BOOKING_TARGET_SECONDS:
                 lines.append(f"breach\tbooking\t{request_id}\t{booking} seconds since acceptance, target {BOOKING_TARGET_SECONDS}")
     return lines
@@ -280,7 +296,7 @@ def report(requests, start, end):
     still_open = sum(1 for r in window if not is_closed(r))
     # a request handed back unquoted after the quote target also missed it.
     quote_breaches = sum(1 for s in quotes if s >= QUOTE_TARGET_SECONDS) + sum(
-        1 for r in window if r["quoted"] is None and r["handed_back"] is not None
+        1 for r in window if r["stage"] == "quote" and r["quoted"] is None and r["handed_back"] is not None
         and (r["handed_back"] - r["submitted"]).total_seconds() >= QUOTE_TARGET_SECONDS)
     booking_breaches = sum(1 for s in bookings if s >= BOOKING_TARGET_SECONDS)
     reclaimed = sum(1 for r in window if r["claims"] > 1)
@@ -337,6 +353,7 @@ def build_parser():
     submit = add("submit")
     submit.add_argument("--consent", required=True)
     submit.add_argument("--service", default="")
+    submit.add_argument("--stage", choices=("quote", "booking"), default="quote")
     claim = add("claim")
     claim.add_argument("--concierge", required=True)
     claim.add_argument("--roster", required=True)
