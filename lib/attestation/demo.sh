@@ -12,7 +12,7 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CLI="$HERE/cli.mjs"
+ATTEST_COMMAND="$HERE/cli.mjs"
 KEEP=no
 [ "${1:-}" = "--keep" ] && KEEP=yes
 
@@ -32,7 +32,7 @@ PEER="$WORK/peer"
 failures=0
 
 attest() {
-  node "$CLI" "$@"
+  node "$ATTEST_COMMAND" "$@"
 }
 
 say() {
