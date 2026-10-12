@@ -26,7 +26,7 @@ audit_format_json() {
   "encoding": "JSON lines: one JSON object per line, appended, never rewritten",
   "fields": {
     "time": "universal time with seconds, like 2026-10-10T12:00:00Z",
-    "event": "install, step, grant, uninstall, session_start, command, session_end, revoke_started, revoke_finished",
+    "event": "install, step, grant, adopt, uninstall, session_start, command, session_end, revoke_started, revoke_finished",
     "user": "the service user, $SERVICE_USER by default",
     "principal": "who acted: owner for the package's own commands, owner-agent, or invite:<name> for a friend's agent",
     "level": "observer, builder, or operator; null when a grant change leaves no grant",
@@ -34,7 +34,8 @@ audit_format_json() {
     "command": "for command events: the command exactly as received",
     "exit_status": "for command events: the exit status",
     "source": "for session events: the transport and the remote address SSH reported",
-    "operation": "for install, step, grant, and uninstall events: install, uninstall, or grant rollback",
+    "operation": "for install, step, grant, adopt, and uninstall events: install, uninstall, or grant rollback",
+    "found": "for adopt events: what the install found already on the machine and kept as it is, as the plan showed it",
     "step": "for step events: the step number in the printed plan",
     "title": "for step events: the step title in the printed plan",
     "kind": "for step events: run, system, owner, or planonly",
@@ -48,6 +49,7 @@ audit_format_json() {
     "the directory belongs to the owner, mode 0750; the agent cannot read, edit, or remove entries",
     "entries are appended by a forced-command wrapper on the SSH key; it sees what you send, not every system call",
     "install, uninstall, and grant rollback write step and grant entries when they apply for real, never in a dry run",
+    "install writes one adopt entry for each thing it found and kept, when it applies for real",
     "the kill switch writes revoke_started first and revoke_finished last"
   ],
   "example": {"time": "2026-10-10T12:00:00Z", "event": "command", "user": "$SERVICE_USER", "principal": "owner-agent", "level": "builder", "session": "k3v9q", "command": "npm test", "exit_status": 0}

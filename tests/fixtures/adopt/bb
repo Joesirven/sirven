@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# a fake bb for the adopt tests. it answers only --version and fails loudly on anything else.
+# every call is appended to FAKE_CALLS_LOG when it is set.
+
+[ -z "${FAKE_CALLS_LOG:-}" ] || printf 'bb %s\n' "$*" >> "$FAKE_CALLS_LOG"
+
+case "$*" in
+  --version) printf '0.42.1\n' ;;
+  *) printf 'fake bb: refusing %s: sirven may only read\n' "$*" >&2; exit 9 ;;
+esac

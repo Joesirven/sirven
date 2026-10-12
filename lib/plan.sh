@@ -13,6 +13,9 @@
 #   planonly  shown in the plan, but the alpha cut does not apply it yet
 #   section   a heading
 #   note      a line of context under the current section
+#   adopted   something already on the machine that the plan keeps as it is and never changes:
+#             a Tailscale login, a bb install, sirven state from an earlier run. see lib/adopt.sh.
+#             not a step: it has no action, no number, and never goes in the install record.
 #
 # a step can also carry
 #   a tag     plan_tag TAG, a word other modules match on: state, audit, and grant mark the
@@ -94,6 +97,10 @@ plan_section() {
 
 plan_note() {
   _plan_add note "$1" "" "" "" ""
+}
+
+plan_adopted() {
+  _plan_add adopted "$1" "" "" "" ""
 }
 
 # plan_step run|system TITLE CHECK ACTION [SHOWN]
@@ -188,7 +195,7 @@ plan_evaluate() {
   while [ "$index" -lt "$PLAN_COUNT" ]; do
     kind="${PLAN_KIND[index]}"
     case "$kind" in
-      section | note) PLAN_STATUS[index]="info" ;;
+      section | note | adopted) PLAN_STATUS[index]="info" ;;
       owner)
         number=$((number + 1))
         PLAN_STATUS[index]="owner"
@@ -216,7 +223,7 @@ plan_evaluate() {
         ;;
     esac
     case "$kind" in
-      section | note) ;;
+      section | note | adopted) ;;
       *) PLAN_NUMBER[index]="$number" ;;
     esac
     index=$((index + 1))
@@ -268,6 +275,7 @@ plan_print() {
     case "$kind" in
       section) printf '\n%s\n' "${PLAN_TITLE[index]}" ;;
       note) printf '     note: %s\n' "${PLAN_TITLE[index]}" ;;
+      adopted) printf '     adopted: %s\n' "${PLAN_TITLE[index]}" ;;
       *)
         printf '  %3s. %s (%s)\n' "${PLAN_NUMBER[index]}" "${PLAN_TITLE[index]}" "$(_plan_status_label "$index")"
         if [ "$kind" = owner ]; then

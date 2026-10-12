@@ -16,6 +16,13 @@ REPO_DIR="$(cd "$GOLDEN_DIR/../.." && pwd)"
 WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/sirven-golden.XXXXXX")"
 trap 'rm -rf "$WORK_DIR"' EXIT
 
+# the machine running the goldens must not show through: its Tailscale and bb are never probed.
+# the adopt case points these at the fakes in tests/fixtures/adopt.
+SIRVEN_TAILSCALE=none
+SIRVEN_BB=none
+export SIRVEN_TAILSCALE SIRVEN_BB
+FAKES="$REPO_DIR/tests/fixtures/adopt"
+
 INSTALL="$REPO_DIR/install.sh"
 UNINSTALL="$REPO_DIR/uninstall.sh"
 COMPILER="$REPO_DIR/lib/grant_compiler.py"
@@ -104,6 +111,27 @@ install_case revoke-macos-cloudflare macos revoke --all --level observer --path 
 # removal plans: after an install, and with nothing recorded
 uninstall_case uninstall-linux-builder-none linux --level builder --path /home/example/project --path /srv/app --transport none
 golden_case uninstall-nothing-recorded linux "$UNINSTALL" --dry-run --prefix "$(case_prefix uninstall-nothing-recorded)"
+
+# adopt_case NAME OPERATING_SYSTEM INSTALL_ARGUMENT...: apply install.sh to a fake root on a
+# machine whose fake Tailscale already has this machine as the agent node and whose fake bb is
+# installed, then pin the dry run of a second install with no level and no path given: it adopts
+# the grant in force, Tailscale, bb, and the audit log, and changes nothing.
+adopt_case() {
+  local name="$1" os="$2" prefix
+  shift 2
+  prefix="$(case_prefix "$name")"
+  if ! SIRVEN_OS_OVERRIDE="$os" SIRVEN_TAILSCALE="$FAKES/tailscale" SIRVEN_BB="$FAKES/bb" \
+    "$INSTALL" "$@" --prefix "$prefix" --owner example > /dev/null 2>&1; then
+    printf 'not ok %s: the install before it failed\n' "$name"
+    failures=$((failures + 1))
+    return 0
+  fi
+  golden_case "$name" "$os" env SIRVEN_TAILSCALE="$FAKES/tailscale" SIRVEN_BB="$FAKES/bb" \
+    "$INSTALL" --dry-run --prefix "$prefix" --owner example --transport tailscale --with-bb
+}
+
+# adoption: a second run on a machine that already has Tailscale, bb, and an earlier install
+adopt_case adopt-linux-builder-tailscale-bb linux --level builder --path /home/example/project --transport tailscale --with-bb
 
 # grant compiler fragments, both operating systems, every level
 for os in linux macos; do

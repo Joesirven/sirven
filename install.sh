@@ -37,6 +37,8 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$ROOT_DIR/lib/kill_switch.sh"
 # shellcheck source=lib/questions.sh
 . "$ROOT_DIR/lib/questions.sh"
+# shellcheck source=lib/adopt.sh
+. "$ROOT_DIR/lib/adopt.sh"
 
 WITH_BB_REASON="--with-bb is plan only in the alpha cut; the orca install is not specified yet"
 
@@ -49,6 +51,11 @@ usage:
 setup asks at most two questions, the level and the path, each with its default shown. a flag
 or environment variable answers a question ahead of time. with --yes, or with no terminal to
 ask on, nothing is asked: the level is observer and no path is granted.
+
+what is already on the machine is adopted, never reinstalled or overwritten: a Tailscale login,
+a bb install, and the grant, policy, and audit log of an earlier run. with a grant in force, a
+level or path left open is taken from it. when what is there conflicts with the request, the
+run stops before any change and says what to do.
 
 options:
   --dry-run                  print the plan and change nothing
@@ -171,6 +178,7 @@ parse_arguments() {
   if [ -n "${SIRVEN_OS_OVERRIDE:-}" ] && [ "$DRY_RUN" != yes ] && [ -z "$PREFIX" ]; then
     usage_error "SIRVEN_OS_OVERRIDE only works with --dry-run or --prefix"
   fi
+  adopt_check_seams
 }
 
 plan_header() {
@@ -191,6 +199,10 @@ plan_header() {
 
 plan_with_bb() {
   plan_section "phone to agent channel"
+  if [ "$ADOPT_BB" = installed ]; then
+    plan_note "bb is already installed, adopted above: nothing to install."
+    return 0
+  fi
   plan_planonly "install bb for $SERVICE_USER" \
     "# no command yet. alpha relies on bb or the runtime's own remote mode, over the transport above." \
     "$WITH_BB_REASON"
@@ -198,6 +210,7 @@ plan_with_bb() {
 }
 
 build_install_plan() {
+  plan_adopt
   plan_layout
   plan_audit
   plan_service_user
@@ -228,6 +241,7 @@ apply_for_real() {
   plan_apply || status=$?
   if [ "$status" -ne 3 ]; then
     if [ "$COMMAND" = install ]; then
+      adopt_audit_entries
       audit_grant_change "$before" "$record" install
     fi
     if [ "$status" -eq 0 ]; then
@@ -288,11 +302,19 @@ main() {
   fi
   preflight_all "$OPERATING_SYSTEM" "$TRANSPORT" "$strict"
 
+  # what is already here comes first: a grant in force answers the questions it can.
+  if [ "$COMMAND" = install ]; then
+    adopt_detect
+    adopt_fill_answers
+  fi
+
   # the questions come before the plan is built, so the plan shows the answers.
   setup_questions
 
   STAGE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/$PACKAGE-plan.XXXXXX")"
   trap 'rm -rf "$STAGE_DIR"' EXIT
+
+  adopt_refuse_conflicts
 
   PLAN_PREFIX="$PREFIX"
   PLAN_OPERATING_SYSTEM="$OPERATING_SYSTEM"
