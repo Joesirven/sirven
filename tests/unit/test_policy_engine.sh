@@ -11,10 +11,20 @@ NOW=1800000000
 # a published registry the verify command passes through unchanged.
 write_registry() {
   cat > "$TEST_TMP/published.json" <<END
-{"schema_version": 1, "status": "published", "serial": 9, "reviewer": "Jose",
+{"schema_version": 1, "status": "published", "serial": 9, "reviewer": "Jose Sirven",
  "published_at": $((NOW - 60)), "expires_at": $((NOW + 3600)),
  "entries": [{"domain": "public.example.org", "tiers": ["Neighborly", "Co-op"]}]}
 END
+}
+
+# an envelope in the lib/attestation shape with an unchecked signature: the engine's own checks
+# are structural. real signatures run through the engine in tests/peer_routing.
+structural_envelope() {
+  python3 -c 'import base64, json, sys
+payload = {"version": 1, "type": "request", "posture": "identity", "domain": "public.example.org",
+           "request_digest": sys.argv[1], "issued_at": int(sys.argv[2]) - 1, "expires_at": int(sys.argv[2]) + 60}
+encoded = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
+print(json.dumps({"sirven_attestation": 1, "type": "request", "payload": encoded, "signature": "s"}))' "$1" "$NOW"
 }
 
 refresh_from_file() {
@@ -73,14 +83,13 @@ test_classify_calls_the_attestation_verifier_and_logs() {
   cat > "$TEST_TMP/verifier.sh" <<END
 #!/bin/sh
 cat > /dev/null
-printf '%s\n' '{"state": "valid", "posture": "identity-attested", "domain": "public.example.org", "request_digest": "$digest", "key_id": "k", "nonce": "n", "maximum_bytes": 2048}'
+printf '%s\n' '{"state": "valid", "posture": "identity", "domain": "public.example.org", "request_digest": "$digest", "key_id": "k", "nonce": "n", "maximum_bytes": 2048}'
 END
   chmod +x "$TEST_TMP/verifier.sh"
   capture engine classify --registry-state "$TEST_TMP/state.json" --now "$NOW" \
     --log "$TEST_TMP/decisions.jsonl" --attestation-verifier "$TEST_TMP/verifier.sh" <<END
 {"domain": "public.example.org", "tier": "Neighborly", "direction": "peer", "request_digest": "$digest",
- "envelope": {"payload": {"posture": "identity-attested", "domain": "public.example.org",
-   "requestDigest": "$digest", "issuedAt": $((NOW - 1)), "expiresAt": $((NOW + 60))}, "signature": "s"}}
+ "envelope": $(structural_envelope "$digest")}
 END
   assert_eq 0 "$CAPTURED_STATUS" "$CAPTURED_STDERR"
   assert_contains "$CAPTURED_STDOUT" '"action": "allow_peer_carrier"'
@@ -95,8 +104,7 @@ test_a_verifier_error_code_becomes_a_plain_refusal() {
   capture engine classify --registry-state "$TEST_TMP/state.json" --now "$NOW" \
     --attestation-verifier "cat > /dev/null; echo '{\"error\": \"over-cap\"}'" <<END
 {"domain": "public.example.org", "tier": "Neighborly", "direction": "peer", "request_digest": "$digest",
- "envelope": {"payload": {"posture": "identity-attested", "domain": "public.example.org",
-   "requestDigest": "$digest", "issuedAt": $((NOW - 1)), "expiresAt": $((NOW + 60))}, "signature": "s"}}
+ "envelope": $(structural_envelope "$digest")}
 END
   assert_contains "$CAPTURED_STDOUT" '"code": "attestation_over_cap"'
   assert_contains "$CAPTURED_STDOUT" "5 gigabyte monthly sharing limit"

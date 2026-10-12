@@ -15,10 +15,12 @@ import {
   newPeerIdentifier,
   normalizeDomain,
   openCertificationRequest,
+  openRegistry,
   openRevocationList,
   periodOf,
   publicKeyText,
   signObject,
+  signRegistry,
   signRequest,
   traceEnvelope,
   trustedIssuerMap,
@@ -436,4 +438,44 @@ test('the originator will not sign with a key its certificate does not name', ()
   const w = world();
   const other = generateSigningKey();
   assert.throws(() => signRequest({ userPrivateKey: other.privateKey, certificate: w.certificate, audience: w.peer, domain: 'shop.example.com', requestBytes: 1, usedBytes: 0, now: NOW }), /different key/);
+});
+
+// integration additions: a request digest binds an envelope to one exact request, and registry
+// versions are signed by the identity issuer.
+
+const DIGEST = 'a'.repeat(64);
+
+test('an envelope with a request digest covers that request only', () => {
+  const w = world();
+  const verdict = verifyRequest(w.sign({ requestDigest: DIGEST }), w.context({ requestDigest: DIGEST }));
+  assert.equal(verdict.accepted, true);
+  assert.equal(verdict.request_digest, DIGEST);
+  assert.equal(verdict.declared_bytes, 2048);
+  assertRefused(verifyRequest(w.sign({ requestDigest: DIGEST }), w.context({ requestDigest: 'b'.repeat(64) })), REFUSAL.WRONG_REQUEST);
+});
+
+test('a peer that checks the digest refuses an envelope that carries none', () => {
+  const w = world();
+  assertRefused(verifyRequest(w.sign(), w.context({ requestDigest: DIGEST })), REFUSAL.WRONG_REQUEST);
+});
+
+test('a malformed request digest is never signed', () => {
+  const w = world();
+  assert.throws(() => w.sign({ requestDigest: 'A'.repeat(64) }));
+  assert.throws(() => w.sign({ requestDigest: 'abc' }));
+});
+
+test('a registry version opens only under a trusted issuer, byte for byte', () => {
+  const w = world();
+  const bytes = Buffer.from('{"format":"sirven-allowlist-registry/1","version":1,"approved":[]}\n');
+  const signed = signRegistry({ issuerPrivateKey: w.issuer.privateKey, registryBytes: bytes, publishedAt: NOW, expiresAt: NOW + DAY });
+  const opened = openRegistry(signed, w.trustedIssuers);
+  assert.deepEqual(opened.registry_bytes, bytes);
+  assert.equal(opened.expires_at, NOW + DAY);
+  const tampered = encode(signed, { ...decode(signed), expires_at: NOW + 20 * DAY });
+  assert.throws(() => openRegistry(tampered, w.trustedIssuers), (error) => error.reason === REFUSAL.BAD_SIGNATURE);
+  const stranger = generateSigningKey();
+  const foreign = signRegistry({ issuerPrivateKey: stranger.privateKey, registryBytes: bytes, publishedAt: NOW, expiresAt: NOW + DAY });
+  assert.throws(() => openRegistry(foreign, w.trustedIssuers), (error) => error.reason === REFUSAL.UNTRUSTED_ISSUER);
+  assert.throws(() => signRegistry({ issuerPrivateKey: w.issuer.privateKey, registryBytes: bytes, publishedAt: NOW, expiresAt: NOW + 31 * DAY }));
 });

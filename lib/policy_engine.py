@@ -43,6 +43,7 @@ log could not be written (the caller must then refuse to dispatch).
 """
 
 import argparse
+import base64
 import hashlib
 import ipaddress
 import json
@@ -65,13 +66,15 @@ DIRECTIONS = ("own", "peer")
 # anything a request carries.
 SHIP_GATE_AUTHENTICATED_PEER_TRAFFIC = "closed"
 
-# the site-allowlist reviewer for the first six months (Jose's decision, October 11, 2026).
-REVIEWERS = ("Jose",)
+# the site-allowlist reviewer for the first six months (Jose's decision, October 11, 2026),
+# spelled the way allowlist/policy.json and the review workflow record it.
+REVIEWERS = ("Jose Sirven",)
 
 # identity-attested per user at first ship. a pseudonymous posture is recognized, so its
 # refusal reads as "not enabled yet" rather than "malformed", and can be added here later.
-ACCEPTED_POSTURES = ("identity-attested",)
-KNOWN_POSTURES = ("identity-attested", "pseudonymous")
+# the posture names are the ones lib/attestation/attestation.mjs signs.
+ACCEPTED_POSTURES = ("identity",)
+KNOWN_POSTURES = ("identity", "pseudonymous")
 
 ALLOW_LOCAL = "allow_local"
 ALLOW_PEER_CARRIER = "allow_peer_carrier"
@@ -95,31 +98,33 @@ ENVELOPE_STATES = (
     "verifier_unavailable",
 )
 
+# the refusal reasons of lib/attestation/attestation.mjs (REFUSAL), onto envelope states.
 ATTESTATION_ERROR_STATES = {
-    "invalid-envelope": "malformed",
-    "unsigned-or-invalid": "malformed",
-    "invalid-domain": "malformed",
-    "invalid-period": "malformed",
-    "invalid-request": "malformed",
+    "malformed": "malformed",
+    "unsigned": "malformed",
+    "unsupported-version": "malformed",
     "unsupported-posture": "unsupported_posture",
-    "invalid-signature": "invalid_signature",
-    "invalid-key-type": "invalid_signature",
-    "expired-or-future": "expired",
-    "revoked-user": "revoked",
-    "revoked-or-unknown-key": "revoked",
-    "unknown-user": "revoked",
+    "bad-signature": "invalid_signature",
+    "untrusted-issuer": "invalid_signature",
+    "certificate-invalid": "invalid_signature",
+    "certificate-expired": "expired",
+    "not-personal-agent": "malformed",
+    "user-mismatch": "invalid_signature",
+    "expired": "expired",
+    "not-yet-valid": "expired",
+    "lifetime-too-long": "malformed",
+    "wrong-audience": "wrong_peer",
     "wrong-domain": "wrong_domain",
     "domain-not-allowlisted": "wrong_domain",
-    "wrong-request": "wrong_request",
-    "request-over-reservation": "wrong_request",
-    "wrong-peer": "wrong_peer",
-    "replayed": "replayed",
+    "revocation-list-missing": "verifier_unavailable",
+    "revocation-list-stale": "verifier_unavailable",
+    "revocation-list-rollback": "verifier_unavailable",
+    "revoked": "revoked",
+    "wrong-period": "wrong_request",
+    "over-declared-size": "wrong_request",
     "over-cap": "over_cap",
-    "authority-unavailable": "verifier_unavailable",
-    "invalid-authority-state": "verifier_unavailable",
-    "clock-rollback": "verifier_unavailable",
-    "invalid-clock": "verifier_unavailable",
-    "invalid-policy": "verifier_unavailable",
+    "replayed": "replayed",
+    "wrong-request": "wrong_request",
 }
 
 # plain-language reasons, written for the person who sees them. codes are stable; the log,
@@ -276,27 +281,46 @@ def usable_snapshot(registry_state, now):
 # attestation
 
 
+def envelope_payload(envelope):
+    """the unverified payload of a signed envelope in the lib/attestation format:
+    {"sirven_attestation": 1, "type": "request", "payload": BASE64URL, "signature": BASE64URL}.
+    returns the decoded payload, or None when the shape is wrong. nothing read here is trusted;
+    it only decides whether the envelope is worth handing to the verifier."""
+    if (type(envelope) is not dict or envelope.get("sirven_attestation") != 1 or envelope.get("type") != "request"
+            or type(envelope.get("payload")) is not str or type(envelope.get("signature")) is not str
+            or not envelope["signature"]):
+        return None
+    text = envelope["payload"]
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", text):
+        return None
+    try:
+        payload = json.loads(base64.urlsafe_b64decode(text + "=" * (-len(text) % 4)).decode("utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        return None
+    return payload if type(payload) is dict else None
+
+
 def envelope_problem(envelope, request, now):
     """structural checks the engine makes itself before asking the verifier. returns an
     envelope state, or None when the envelope is worth verifying. these never replace the
     verifier's signature, revocation, replay, and cap checks."""
     if envelope is None:
         return "missing"
-    if type(envelope) is not dict or type(envelope.get("payload")) is not dict or type(envelope.get("signature")) is not str:
+    payload = envelope_payload(envelope)
+    if payload is None:
         return "malformed"
-    payload = envelope["payload"]
     posture = payload.get("posture")
     if posture not in KNOWN_POSTURES:
         return "malformed"
     if posture not in ACCEPTED_POSTURES:
         return "unsupported_posture"
-    if not (is_time(payload.get("issuedAt")) and is_time(payload.get("expiresAt"))):
+    if not (is_time(payload.get("issued_at")) and is_time(payload.get("expires_at"))):
         return "malformed"
-    if not payload["issuedAt"] <= now < payload["expiresAt"]:
+    if not payload["issued_at"] <= now < payload["expires_at"]:
         return "expired"
     if payload.get("domain") != request.domain:
         return "wrong_domain"
-    if not request.request_digest or payload.get("requestDigest") != request.request_digest:
+    if not request.request_digest or payload.get("request_digest") != request.request_digest:
         return "wrong_request"
     return None
 

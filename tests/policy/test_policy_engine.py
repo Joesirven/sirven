@@ -3,6 +3,7 @@
 run with: python3 -m unittest discover -s tests/policy
 """
 
+import base64
 import hashlib
 import itertools
 import json
@@ -20,7 +21,7 @@ DIGEST = hashlib.sha256(b"GET / HTTP/1.1").hexdigest()
 
 
 def snapshot(entries=None, **overrides):
-    data = {"schema_version": 1, "status": "published", "serial": 3, "reviewer": "Jose",
+    data = {"schema_version": 1, "status": "published", "serial": 3, "reviewer": "Jose Sirven",
             "published_at": NOW - 100, "expires_at": NOW + 3600,
             "entries": entries if entries is not None else [
                 {"domain": "public.example.org", "tiers": ["Neighborly", "Co-op"]},
@@ -35,13 +36,17 @@ def current(data=None):
     return engine.refresh_registry(lambda: b"bytes", lambda _: data or snapshot(), NOW)
 
 
-def envelope(domain="public.example.org", posture="identity-attested", issued=NOW - 10,
+def envelope(domain="public.example.org", posture="identity", issued=NOW - 10,
              expires=NOW + 200, digest=DIGEST):
-    return {"payload": {"version": 1, "posture": posture, "purpose": "personal-agent",
-                        "userId": "requester", "keyId": "a" * 64, "peerId": "carrier",
-                        "domain": domain, "requestDigest": digest, "maximumBytes": 4096,
-                        "issuedAt": issued, "expiresAt": expires, "nonce": "b" * 64},
-            "signature": "c" * 86}
+    """an envelope in the lib/attestation shape. the signature is not real: the engine's own
+    checks are structural, and signatures are the verifier's job (tests/peer_routing)."""
+    payload = {"version": 1, "type": "request", "posture": posture, "agent": "personal",
+               "user": "requester", "key": "a" * 22, "audience": "carrier-peer",
+               "domain": domain, "request_digest": digest,
+               "cap": {"period": "2027-01", "limit_bytes": 5_000_000_000, "used_bytes": 0, "request_bytes": 4096},
+               "issued_at": issued, "expires_at": expires, "nonce": "b" * 22}
+    encoded = base64.urlsafe_b64encode(json.dumps(payload).encode("utf-8")).decode("ascii").rstrip("=")
+    return {"sirven_attestation": 1, "type": "request", "payload": encoded, "signature": "c" * 86}
 
 
 def peer(domain="public.example.org", tier="Neighborly", authenticated=False, env="default"):
@@ -55,7 +60,7 @@ def verifier_returning(state):
     def verify(envelope_, request, now):
         calls.append((envelope_, request, now))
         if state == "valid":
-            return engine.Attestation("valid", "identity-attested", request.domain, request.request_digest,
+            return engine.Attestation("valid", "identity", request.domain, request.request_digest,
                                       "a" * 64, "b" * 64, 4096)
         return engine.Attestation(state)
     verify.calls = calls
@@ -142,7 +147,7 @@ class DecisionTable(unittest.TestCase):
 
     def test_the_verifier_must_vouch_for_this_exact_request(self):
         def verifier(**overrides):
-            fields = dict(state="valid", posture="identity-attested", domain="public.example.org",
+            fields = dict(state="valid", posture="identity", domain="public.example.org",
                           request_digest=DIGEST, key_id="a" * 64, nonce="b" * 64, maximum_bytes=4096)
             fields.update(overrides)
             return lambda *_: engine.Attestation(**fields)
