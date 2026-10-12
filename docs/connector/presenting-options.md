@@ -58,11 +58,15 @@ When nothing fits the budget, offer the person a real next step and let them pic
 
 ## when a person helps behind the scenes
 
-Some options are carried out by a person on the sirven concierge team, who books the ride on the person's behalf (in San Francisco first). These options have `fulfillment.method` set to `human_assisted` and a `fulfillment.disclosure` sentence:
+Some options are carried out by a person on the sirven concierge team, who books the ride on the person's behalf (in San Francisco first). These options have `fulfillment.method` set to `human_assisted` and a `fulfillment.disclosure` sentence. Today the reference connector returns:
 
-> A person on the sirven concierge team books this ride for you using the details shown here. They see the pickup, drop-off, and time, and nothing else.
+> A person on the sirven concierge team books this ride for you.
 
-This is part of how the service works, not a feature. Do not lead with it, and do not describe it as a selling point. Do show the disclosure sentence, as written, whenever the person is choosing that option, and before they approve the booking, not after. If the person does not want anyone to see the trip, offer the options whose `fulfillment.method` is `automated`.
+That wording is placeholder text awaiting Jose's approval, as part of the concierge trust and safety protocol. Show whatever sentence the connector returns, exactly as returned, and never a copy of the one above.
+
+This is part of how the service works, not a feature. Do not lead with it, and do not describe it as a selling point. Do show the disclosure sentence whenever the person is choosing that option, and before they approve the booking, not after. If the person does not want anyone to see the trip, offer the options whose `fulfillment.method` is `automated`.
+
+Human-assisted options only appear where the human-concierge tier is turned on, which it is not in production until that tier's ship gate is met. The same quote may come back with them on one day and without them on another; present whatever the list holds.
 
 ## words to use
 

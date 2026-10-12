@@ -9,7 +9,8 @@ it starts the connector's model context protocol server as a child process and t
 standard input and output, one JSON message per line, exactly as an agent would. nothing here
 imports the connector's internals except fake_blocked_server.py, which starts the same server with
 every fake backend set to refuse agents. no network, no money: the fake backends price rides from
-straight-line distance and their clock stands still at 2026-10-12 13:00 Pacific time.
+straight-line distance, and the server runs on the real clock, so every scenario asks for a pickup
+tomorrow between 3:00 and 3:20 pm in this machine's time zone.
 
 needs python 3.8 or newer and nothing else. the connector lives in connectors/ride; set
 SIRVEN_RIDE_CONNECTOR_DIR to point somewhere else.
@@ -22,6 +23,7 @@ import json
 import os
 import subprocess
 import sys
+from datetime import datetime, timedelta
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
@@ -36,7 +38,7 @@ class Connector:
     def __init__(self, command):
         if not os.path.isdir(os.path.join(CONNECTOR_DIR, "ride_connector")):
             sys.exit("harness: no ride connector at %s. set SIRVEN_RIDE_CONNECTOR_DIR." % CONNECTOR_DIR)
-        environment = dict(os.environ, PYTHONPATH=CONNECTOR_DIR)
+        environment = dict(os.environ, PYTHONPATH=CONNECTOR_DIR, PYTHONDONTWRITEBYTECODE="1")
         self.process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                         env=environment, universal_newlines=True)
         self.next_id = 0
@@ -140,8 +142,15 @@ OFFICE = {"label": "office", "address": "1 Ferry Building, San Francisco",
 BARBER = {"label": "barber", "address": "Valencia Street and 18th Street, San Francisco",
           "coordinates": {"latitude": 37.7617, "longitude": -122.4216}}
 
-# the 2pm meeting ends at 3pm on the fake clock's day; the person wants a pickup from 3:00 to 3:20.
-AFTER_MEETING = {"earliest": "2026-10-12T15:00:00-07:00", "latest": "2026-10-12T15:20:00-07:00"}
+
+def after_meeting():
+    """the 2pm meeting ends at 3pm tomorrow; the person wants a pickup from 3:00 to 3:20."""
+    tomorrow = (datetime.now().astimezone() + timedelta(days=1)).replace(second=0, microsecond=0)
+    earliest = tomorrow.replace(hour=15, minute=0)
+    return {"earliest": earliest.isoformat(), "latest": (earliest + timedelta(minutes=20)).isoformat()}
+
+
+AFTER_MEETING = after_meeting()
 
 
 def barber():
@@ -236,7 +245,9 @@ def cancel():
         "user_preferences": {"preferred_providers": ["Lyft"], "vehicle_classes": ["standard"]},
         "budget_ceiling": {"amount_minor": 2500, "currency": "USD"},
     })
-    option = quote["options"][0]
+    # equal options tie at random, so take the first one that is the class the person asked for.
+    option = next(option for option in quote["options"]
+                  if "vehicle_class_not_requested" not in option["constraint_flags"])
     step("book_ride: " + describe(option))
     booking = connector.call("book_ride", {"quote_id": option["quote_id"]})["booking"]
     expect(booking["status"] == "confirmed", "an automated booking is confirmed straight away")

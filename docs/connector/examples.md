@@ -1,6 +1,6 @@
 # worked examples
 
-Four conversations, each with the calls behind it. Every request and result here comes from a real run of [examples/harness.py](examples/harness.py) against the fake demo backends; run it yourself to see the full results (`--json` prints them all). The fake backends price rides from straight-line distance, and their clock stands still at 1:00 pm Pacific time on October 12, 2026, so the times below are relative to that. Results are trimmed to the fields each example is about; `quote_id` and `booking_id` values differ on every run.
+Four conversations, each with the calls behind it. Every request and result here comes from a real run of [examples/harness.py](examples/harness.py) against the fake demo backends; run it yourself to see the full results (`--json` prints them all). The fake backends price rides from straight-line distance. The results below come from a run with the clock at 1:00 pm Pacific time on October 12, 2026, for a pickup that afternoon; the harness now runs on your real clock and asks for tomorrow afternoon, so your times will differ while the prices match. Results are trimmed to the fields each example is about; `quote_id` and `booking_id` values differ on every run.
 
 The trip in every example: from the office at the Ferry Building to a barber at Valencia Street and 18th Street in San Francisco, picked up between 3:00 and 3:20 pm.
 
@@ -37,7 +37,7 @@ The top option, trimmed:
   "constraint_flags": ["human_assisted"],
   "fulfillment": {
     "method": "human_assisted",
-    "disclosure": "A person on the sirven concierge team books this ride for you using the details shown here. They see the pickup, drop-off, and time, and nothing else."
+    "disclosure": "A person on the sirven concierge team books this ride for you."
   },
   "cancellation_policy": {"free_until": "2026-10-12T14:30:00-07:00",
                           "fee_after_free_period": {"amount_minor": 300, "currency": "USD"}},
@@ -45,11 +45,11 @@ The top option, trimmed:
 }
 ```
 
-Waymo ranks first because it is preferred and bookable. This option is carried out by the concierge team, so the agent shows the disclosure sentence before asking:
+Waymo ranks first because it is preferred and bookable. The fake demo server turns human-assisted options on for rehearsal; a production connector leaves them out until the human-concierge tier ships, and then the Lyft would rank first here. This option is carried out by the concierge team, so the agent shows the connector's disclosure sentence, as returned, before asking. (The sentence is placeholder text awaiting Jose's approval; the agent passes on whatever the connector sends.)
 
 > The best match is a Waymo, 10.73 dollars, picks up around 3:00, arrives around 3:11.
 > Also available: a Lyft at 9.51 dollars, same times.
-> A person on the sirven concierge team books this ride for you using the details shown here. They see the pickup, drop-off, and time, and nothing else.
+> A person on the sirven concierge team books this ride for you.
 > Book the Waymo for 10.73 dollars? You can cancel free until 2:30.
 
 The person says yes. The agent books before `expires_at`:
@@ -101,7 +101,7 @@ The Lyft fare is 9.51 dollars, under the limit. But the budget ceiling covers th
 
 Only the Waymo, which takes no tips, fits. The over-budget options are still returned, ranked after the bookable one, so the agent can say what a higher limit would buy:
 
-> Within 11 dollars: a Waymo, 10.73 dollars, picks up around 3:00. A person on the sirven concierge team books this ride for you using the details shown here. They see the pickup, drop-off, and time, and nothing else.
+> Within 11 dollars: a Waymo, 10.73 dollars, picks up around 3:00. A person on the sirven concierge team books this ride for you.
 > A Lyft would be 9.51 dollars, but up to 11.41 dollars once a tip is allowed for, which is over your limit.
 > Book the Waymo, or raise the limit?
 

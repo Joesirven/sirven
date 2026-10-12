@@ -1,6 +1,6 @@
 # calling the ride connector
 
-This page walks through the connector's calls in the order an agent makes them, and covers authentication, errors, idempotency, cancellation, and budget ceilings. Field names in `code` are literal contract identifiers. The schema at `connectors/ride/schemas/v1/ride-connector.schema.json` is the authority on every field; this page explains how to use them.
+This page walks through the connector's calls in the order an agent makes them, and covers authentication, errors, idempotency, cancellation, and budget ceilings. Field names in `code` are literal contract identifiers. The contract is the document [docs/ride-connector-contract.md](../ride-connector-contract.md) together with the schema at `connectors/ride/schemas/v1/ride-connector.schema.json`, and the schema wins where they differ. This page explains how to use them and does not redefine anything.
 
 Contract version documented here: `1.0.0`.
 
@@ -9,7 +9,7 @@ Contract version documented here: `1.0.0`.
 The connector is a model context protocol server that speaks over standard input and output: one JSON message per line. Your agent's runtime starts it as a child process and lists its tools:
 
 ```bash
-PYTHONPATH=connectors/ride python3 -m ride_connector.server           # serve the fake demo backends
+PYTHONPATH=connectors/ride python3 -m ride_connector.server           # serve the fake demo backends on the real clock
 PYTHONPATH=connectors/ride python3 -m ride_connector.server --tools   # print the tool list and exit
 ```
 
@@ -79,18 +79,20 @@ Required: `quote_id`. Optional: `payment_reference`.
 {"quote_id": "qt_f56hzunev63sh7uzsjk5rdxp2z"}
 ```
 
-`payment_reference` is an opaque handle from the sirven money layer for the funds held against this booking. It is never a card number or any card detail. The fake demo server books without one; a production connector requires it and fails with `payment_required` when it is missing.
+`payment_reference` is an opaque handle from the sirven money layer for the funds held against this booking. It is never a card number or any card detail: a long run of digits is refused as `invalid_argument` before any ride service sees it. The fake demo server books without one; a connector configured to require held funds fails with `payment_required` when it is missing.
 
-> **Moving.** How an agent obtains a `payment_reference` from the money layer is not published yet. Tracked against the money layer's interface.
+The order is: `quote_ride`, the person approves an option, the money layer holds that option's `charge_terms.authorization_cap` and returns a `payment_reference`, then `book_ride`.
 
-Book before `expires_at`. Quotes from the demo backends live ten minutes; after that, a quote that was never booked fails with `quote_expired` and you quote again. A quote that was already booked keeps replaying its booking even after `expires_at` (see [idempotency](#idempotency)), so retrying a lost `book_ride` reply is safe at any time.
+> **Moving.** How an agent asks the money layer for that hold is the money layer's interface, which is not published yet. Tracked against it.
 
-> **Moving.** That a replay wins over expiry is the observed behavior of the published server, not yet written into the contract document. Tracked against the contract.
+Book before `expires_at`. Quotes from the demo backends live ten minutes; after that, a quote that was never booked fails with `quote_expired` and you quote again. A quote that was already booked keeps replaying its booking even after `expires_at` (see [idempotency](#idempotency)), so retrying a lost `book_ride` reply is safe at any time. A failed `book_ride` never uses up the quote: the same `quote_id` can be booked on retry until it expires.
 
 The result is a `booking` and a `replayed` flag (see [idempotency](#idempotency)). A booking starts in one of two states:
 
 - `confirmed`: a ride is promised.
 - `requested`: accepted but not yet confirmed. Bookings whose `fulfillment.method` is `human_assisted` sit here until a person on the sirven concierge team confirms them, by the time in `confirm_by`. If that time passes without confirmation the booking becomes `failed` and nothing is charged.
+
+Do not tell the person a ride is booked until its status is `confirmed` or later.
 
 ### get_ride
 
@@ -183,14 +185,25 @@ A successful cancel sets `final_charge`: `cancellation_fee` is what the person p
 
 A `requested` booking (for example one waiting on a concierge) can be cancelled the same way.
 
+If the cancellation could not reach the ride service, `cancel_ride` returns a retryable error and the booking is not cancelled. Retry it, and never tell the person a ride is cancelled on an error.
+
 On the Solo tier, cancelling is a real-world action like booking: ask the person first. Before `free_until`, say it is free; after, say the fee.
 
 ## the concierge, and what the agent must show
 
-Some options are carried out by a person on the sirven concierge team instead of by software (in San Francisco first). Those options have `fulfillment.method` set to `human_assisted`, carry the `human_assisted` flag, and have a `fulfillment.disclosure` sentence. Show that sentence to the person before they approve the booking, as written. It is part of how the service works, not a headline: one plain sentence, where it applies, and nothing more. See [presenting-options.md](presenting-options.md).
+Some options are carried out by a person on the sirven concierge team instead of by software (in San Francisco first). Those options have `fulfillment.method` set to `human_assisted`, carry the `human_assisted` flag, and have a `fulfillment.disclosure` sentence. Show that sentence to the person before they approve the booking, exactly as the connector returns it; do not write your own. It is part of how the service works, not a headline: one plain sentence, where it applies, and nothing more. See [presenting-options.md](presenting-options.md).
+
+The wording of the sentence is not part of the contract. It belongs to the concierge trust and safety protocol, and the sentence the reference connector returns today ("A person on the sirven concierge team books this ride for you.") is placeholder text awaiting Jose's approval. That is one more reason to pass along whatever the connector sends rather than a copy.
+
+Human-assisted options only appear where the human-concierge tier is turned on. The tier does not ship until its service-level targets, its trust and safety protocol, and the user-facing disclosure are all in place, so the reference connector leaves these options out unless it is built with `allow_human_assisted=True`. The fake demo server turns it on for rehearsal; a production connector does not, today. An agent should handle both: a list with human-assisted options, and the same list without them.
 
 ## versioning
 
-Contract version `1.0.0`. Within major version 1, the contract only adds optional fields; field meanings, required fields, and error codes do not change. Ignore fields you do not recognize in results.
+Contract version `1.0.0`. The full policy is in the contract document's versioning and stability section; what an agent needs from it:
 
-> **Moving.** The full versioning policy is published in the contract document, `docs/ride-connector-contract.md`, which is not written yet. Tracked against the contract.
+- Send a bare major (`"1"`) or a full version as `contract_version`, or leave it out. A different major fails with `unsupported_contract_version`.
+- Ignore result fields you do not recognize; new ones can appear in a minor release.
+- Treat an unknown constraint flag as advisory, and an unknown booking status that is not terminal as "still in progress, keep polling".
+- Arguments are closed. Send a newer optional argument only after a result's `contract_version` shows the connector speaks that minor version; an older connector refuses it with `invalid_argument` rather than ignoring it.
+- If you validate results, validate against the schemas the running server returns from `tools/list`, not a copy you saved.
+- Field meanings, required arguments, error codes and whether they are retryable, units, and the idempotency and cancellation rules only change with a new major version, and the previous major stays served for at least six months after.
