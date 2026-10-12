@@ -618,7 +618,7 @@ class RunnerSupervisor:
 
     def start(self):
         self.started = stamp(now())
-        self.tunnel, self.endpoint = self._start_tunnel()
+        self._start_tunnel()
         self.launcher = self._start_launcher()
         self._record()
         print("the phone runner is up: the tunnel and the launcher are running. Ctrl-C stops both", flush=True)
@@ -640,15 +640,17 @@ class RunnerSupervisor:
             os.remove(state_file(RUNNER_FILE))
 
     def _start_tunnel(self):
-        tunnel = Child(self.tunnel_command, self.clock)
+        self.tunnel = Child(self.tunnel_command, self.clock)
         deadline = self.clock() + self.tunnel_wait_seconds
         while True:
-            exited = tunnel.exited()
-            endpoint = tunnel_endpoint(tunnel.lines())
+            exited = self.tunnel.exited()
+            endpoint = tunnel_endpoint(self.tunnel.lines())
             if endpoint:
-                return tunnel, endpoint
+                self.endpoint = endpoint
+                return
             if exited or self.clock() >= deadline:
-                tunnel.stop(self.stop_seconds)
+                self.tunnel.stop(self.stop_seconds)
+                self.tunnel = None
                 raise Refusal(
                     "tunnel_no_address",
                     "the tunnel %s its remote service discovery address; check that the phone is plugged in and "
@@ -671,7 +673,7 @@ class RunnerSupervisor:
         self.tunnel = self.launcher = None
         self.sleep(self.tunnel_backoff.next_wait(uptime))
         try:
-            self.tunnel, self.endpoint = self._start_tunnel()
+            self._start_tunnel()
             self.launcher = self._start_launcher()
         except Refusal as refusal:
             print("the tunnel did not come back: %s. trying again" % refusal.said, flush=True)

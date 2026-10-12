@@ -169,6 +169,22 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual(caught.exception.result, "tunnel_no_address")
         self.assertIn("did not print its remote service discovery address", caught.exception.said)
 
+    def test_an_interrupt_while_the_tunnel_is_still_printing_leaves_no_tunnel_running(self):
+        supervisor = self.supervisor(tunnel_command=[sys.executable, "-c", "import time; time.sleep(30)"],
+                                     tunnel_wait_seconds=30)
+        made = []
+        real_child = phone_bridge.Child
+
+        def spy(*args, **kwargs):
+            child = real_child(*args, **kwargs)
+            made.append(child)
+            return child
+
+        with mock.patch.object(phone_bridge, "Child", side_effect=spy):
+            self.run_until_interrupt(supervisor, 0.3)
+        self.assertEqual(len(made), 1)
+        self.assertIsNotNone(made[0].process.poll(), "the tunnel process must not outlive the interrupt")
+
     def test_a_tunnel_that_exits_without_an_address_is_refused_at_once(self):
         supervisor = self.supervisor(tunnel_command=[sys.executable, "-c", "print('goodbye')"],
                                      tunnel_wait_seconds=30)
