@@ -665,7 +665,7 @@ class RunnerSupervisor:
         left = [str(record[name]) for name in ("tunnel", "launcher") if process_alive(record.get(name))]
         if left:
             raise Refusal("leftover_processes", "processes from an earlier phone runner are still running (process "
-                          "ID %s). stop them, for example with kill, then start again" % " and ".join(left), 1)
+                          "number %s). stop them, for example with kill, then start again" % " and ".join(left), 1)
 
     def start(self):
         self.started = stamp(now())
@@ -1464,8 +1464,8 @@ def command_setup(team, bundle):
                "&& unzip -o %s/runner.zip -d %s"
                % (runner_folder, runner_folder, archive, WEBDRIVERAGENT_RUNNER_SHA256, runner_folder,
                   runner_folder, runner_folder)),
-        (None, "the checksum line must say OK. if it does not, stop: the download is not the release. then follow "
-               "route A in docs/phone-interface.md (xtool install, and what it can and cannot do yet)"),
+        (None, "if shasum reports FAILED, stop: the download is not the release, and nothing was unzipped. "
+               "otherwise follow route A in docs/phone-interface.md (xtool install, and what it can and cannot do yet)"),
         (None, "route B, the fallback: full Xcode, used only for this step and never at run time. it builds "
                "from source and does not use the download above:"),
         (None, "git clone %s %s && git -C %s checkout %s" % (WEBDRIVERAGENT_REPOSITORY, source_folder,

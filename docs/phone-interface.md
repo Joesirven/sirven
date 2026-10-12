@@ -59,8 +59,8 @@ because it signs software with your Apple account.
      mkdir -p ~/.sirven/WebDriverAgent && curl -fL -o ~/.sirven/WebDriverAgent/runner.zip https://github.com/appium/WebDriverAgent/releases/download/v16.14.0/WebDriverAgentRunner-Runner.zip && echo '6f7758f72d348d2c35c3fd134fa76a941bba0c447de04b2e9d065682f31fc47f  ~/.sirven/WebDriverAgent/runner.zip' | shasum -a 256 -c - && unzip -o ~/.sirven/WebDriverAgent/runner.zip -d ~/.sirven/WebDriverAgent
      ```
 
-     The checksum line must say OK. If it does not, stop: the download is not the release.
-     Then `xtool auth login` (xtool asks for your Apple ID; sirven never sees it), and
+     If shasum reports FAILED, the download is not the release: stop. Nothing is unzipped.
+     Then `xtool auth login` (xtool asks for your Apple account sign-in; sirven never sees it), and
      `xtool install ~/.sirven/WebDriverAgent/WebDriverAgentRunner-Runner.app`. Known limits: a
      free Apple account signs for 7 days at a time, xtool uses Apple interfaces that are not
      public, and whether the test bundle inside the runner signs correctly is not verified yet.
