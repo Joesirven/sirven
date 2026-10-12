@@ -26,7 +26,8 @@ fi
 
 : "${BB_SERVER_URL:?BB_SERVER_URL must be set (run this from a bb thread, or export it)}"
 BB_PATH="$(command -v bb)" || { echo "bb is not on PATH" >&2; exit 1; }
-NODE_PATH_DIR="$(dirname "$(command -v node)")" || { echo "node is not on PATH" >&2; exit 1; }
+NODE_BIN="$(command -v node)" || { echo "node is not on PATH" >&2; exit 1; }
+NODE_PATH_DIR="$(dirname "$NODE_BIN")"
 [ -x "$HOME/Applications/Sirven.app/Contents/MacOS/sirven-keep-awake" ] ||
   { echo "Sirven.app is not in ~/Applications; build it with scripts/build-app.sh first" >&2; exit 1; }
 
