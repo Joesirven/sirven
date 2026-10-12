@@ -114,6 +114,25 @@
           "body": null
         }
       ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/concierge/rides/fixture-lyft-ride-1",
+      "responses": [
+        {
+          "status": 200,
+          "body": {
+            "ride_id": "fixture-lyft-ride-1",
+            "status": "accepted",
+            "vehicle": {
+              "make": "Honda",
+              "model": "Civic",
+              "color": "Blue",
+              "license_plate": "7FIX456"
+            }
+          }
+        }
+      ]
     }
   ]
 }

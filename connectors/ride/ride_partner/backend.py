@@ -1,266 +1,195 @@
-"""the official-partner ride backend: the three contract calls over the carrier adapters.
+"""the official-partner ride backend: a RideBackend over the Uber for Business and Lyft
+Business adapters.
 
-quote_ride   asks every carrier, normalizes the answers, flags and ranks them, and keeps the
-             carrier tokens private behind an opaque quote identifier.
-book_ride    authorizes the user's payment to sirven first (sirven is merchant of record),
-             then requests the trip on sirven's corporate account with the carrier. if the
-             carrier fails, the authorization is released. booking twice is safe: the same
-             quote always returns the same booking.
-cancel_ride  cancels with the carrier and reconciles the user's authorization: release it
-             when there is no fee, capture only the fee when there is one, and hold it when
-             the carrier names the fee later on a receipt.
+the contract's gateway (ride_connector.gateway.RideConnector) is the only thing an agent talks
+to. it mints identifiers, ranks, flags, writes error messages, and validates every result, so
+this backend's job is to speak the plain backend records honestly:
 
-nothing a caller sees names this backend. errors are contract codes with fixed messages;
-carrier tokens, carrier identifiers, carrier product names, and carrier hosts stay inside.
+  quote    asks every carrier and turns each usable product into a BackendOption.
+  book     refuses unless the money layer has already held the user's funds (sirven is
+           merchant of record and never fronts a fare), then requests the trip on sirven's
+           corporate account with that carrier.
+  status   reads the carrier's trip and, once it is done, the fare and tip it charged.
+  cancel   cancels with the carrier and reports the fee it charged.
+
+carrier tokens, carrier identifiers, carrier product names, and carrier error text stay in
+this module and in log lines for sirven's operators.
 """
 
 import logging
 import threading
-import time
+from datetime import timedelta
 
-from . import contract
-from .contract import RideConnectorError, money
+from ride_connector.backend import (BackendBooking, BackendCancellation, BackendError, BackendOption,
+                                    BackendQuote, BackendStatus, RideBackend)
+
 from .transport import CarrierError, LiveCallsBlocked, PartnerApprovalRequired
 
 log = logging.getLogger("sirven.ride_partner")
 
-# every backend caps quote lifetime the same way, so a quote's lifetime says nothing about
-# which backend made it.
-QUOTE_LIFETIME_SECONDS = 120
-UNREACHABLE = (CarrierError, PartnerApprovalRequired, LiveCallsBlocked, OSError, KeyError, TypeError, ValueError)
+BLOCKED_SEAMS = (PartnerApprovalRequired, LiveCallsBlocked)
 
 
-class PaymentDeclined(Exception):
-    pass
+def _reason(error):
+    """a carrier or seam failure, as a BackendError reason."""
+    if isinstance(error, CarrierError):
+        if error.status == 429:
+            return "rate_limited"
+        if error.status in (409, 410, 422):
+            return "unavailable"
+        if 400 <= error.status < 500 and error.status not in (401, 403):
+            return "unavailable"
+    # authentication failures, approval seams, and server errors are sirven's problem or the
+    # carrier's outage, never the rider's: the agent hears "service unavailable".
+    return "down"
 
 
-class PartnerRideBackend:
-    """carriers: carrier adapters. payments: the money layer (thread 11), with
-    authorize(reference, amount_minor, currency) returning a handle, capture(handle,
-    amount_minor), and release(handle). rider_contact: user_ref to the rider's first_name,
-    last_name, and phone_number, which the carrier needs to find them at the curb.
-    service_fee_minor: what sirven adds to the carrier fare; Jose's pricing decision, zero
-    until he sets it."""
+def _detail(carrier, error):
+    if isinstance(error, CarrierError):
+        return "%s answered %s" % (carrier.name, error.status)
+    return "%s: %s" % (carrier.name, error)
 
-    def __init__(self, carriers, payments, rider_contact, clock=time.time, service_fee_minor=0):
+
+class PartnerRideBackend(RideBackend):
+    """carriers: carrier adapters. clock: returns an aware datetime (the gateway's clock).
+    rider: the rider's first_name, last_name, and phone_number, which the carrier needs to find
+    them at the curb; the contract's backend calls carry no rider identity, so one backend
+    serves one person. geocode: turns an address into {"latitude", "longitude"}, or None when
+    no geocoder is configured, in which case address-only places cannot be quoted.
+    require_payment_reference: refuse to book without funds held by the money layer."""
+
+    def __init__(self, carriers, clock, rider, geocode=None, require_payment_reference=True):
         self.carriers = list(carriers)
-        self.payments = payments
-        self.rider_contact = rider_contact
         self.clock = clock
-        self.service_fee_minor = service_fee_minor
-        # in memory for now. a durable store is a seam: quotes and bookings must survive a
+        self.rider = rider
+        self.geocode = geocode
+        self.require_payment_reference = require_payment_reference
+        # in memory for now. a durable store is a seam: options and bookings must survive a
         # restart before anything books a real ride.
-        self.quotes = {}
+        self.options = {}
         self.bookings = {}
+        self.serial = 0
         self.lock = threading.Lock()
 
-    def _now(self):
-        return int(self.clock())
+    def _next(self, prefix):
+        self.serial += 1
+        return "%s-%d" % (prefix, self.serial)
 
-    # quote_ride
+    def _point(self, place):
+        if "coordinates" in place:
+            return {"latitude": place["coordinates"]["latitude"], "longitude": place["coordinates"]["longitude"]}
+        if self.geocode is None:
+            raise BackendError("no_service", "address-only place and no geocoder configured")
+        return self.geocode(place["address"])
 
-    def quote_ride(self, origin, destination, departure_window, user_preferences, budget_ceiling, user_ref):
-        """user_ref comes from the runtime's session, never from the agent's arguments."""
-        try:
-            contract.validate_quote_request(origin, destination, departure_window, user_preferences, budget_ceiling)
-        except ValueError:
-            raise RideConnectorError("invalid_request") from None
-        now = self._now()
-        passengers = user_preferences.get("passengers", 1)
-        wanted = set(user_preferences.get("vehicle_classes") or contract.VEHICLE_CLASSES)
-        currency = budget_ceiling["currency"]
-        tip_ceiling = user_preferences.get("tip_ceiling", money(0, currency))
-        if tip_ceiling["currency"] != currency:
-            raise RideConnectorError("invalid_request")
+    # quote
 
-        candidates, reachable = [], 0
+    def quote(self, request):
+        origin, destination = self._point(request.origin), self._point(request.destination)
+        now = self.clock()
+        found, failures = [], []
         for carrier in self.carriers:
             try:
-                options = carrier.estimates(origin, destination, passengers, now)
-            except UNREACHABLE as error:
-                log.warning("%s estimates failed: %s", carrier.name, type(error).__name__)
+                estimates = carrier.estimates(origin, destination, now)
+            except (CarrierError,) + BLOCKED_SEAMS as error:
+                log.warning("quote failed: %s", _detail(carrier, error))
+                failures.append(error)
                 continue
-            reachable += 1
-            for option in options:
-                if option["vehicle_class"] in wanted and option["currency"] == currency:
-                    candidates.append((carrier, option))
-        if not reachable:
-            raise RideConnectorError("provider_unavailable")
-        if not candidates:
-            raise RideConnectorError("no_options")
+            for estimate in estimates:
+                found.append(self._option(carrier, estimate, origin, destination, now))
+        if failures and len(failures) == len(self.carriers):
+            reasons = {_reason(error) for error in failures}
+            raise BackendError("rate_limited" if reasons == {"rate_limited"} else "down", "no carrier answered")
+        # a carrier that failed while another answered is invisible to the gateway: the
+        # contract has no partial-results signal from a single backend. reported to thread 08.
+        return BackendQuote(options=found)
 
-        entries = []
-        for carrier, option in candidates:
-            price = option["price_minor"] + self.service_fee_minor
-            pickup_at = now + option["pickup_seconds"]
-            flags = []
-            if price + tip_ceiling["amount_minor"] > budget_ceiling["amount_minor"]:
-                flags.append("exceeds_budget")
-            if not departure_window["earliest"] <= pickup_at <= departure_window["latest"]:
-                flags.append("pickup_outside_window")
-            if option["price_is_upper_bound"]:
-                flags.append("price_is_upper_bound")
-            if option["surge"]:
-                flags.append("surge_pricing")
-            entries.append({
-                "carrier": carrier,
-                "option": option,
-                "price": price,
-                "pickup_at": pickup_at,
-                "arrival": pickup_at + option["trip_seconds"],
-                "flags": flags,
-            })
-
-        optimize = user_preferences.get("optimize_for", "price")
-        primary = {"price": "price", "pickup": "pickup_at", "arrival": "arrival"}[optimize]
-        entries.sort(key=lambda entry: (
-            any(flag in contract.BLOCKING_FLAGS for flag in entry["flags"]),
-            entry[primary], entry["price"], entry["arrival"], entry["carrier"].provider,
-        ))
-
-        quotes = []
-        for rank, entry in enumerate(entries, start=1):
-            quote_id = contract.new_quote_id()
-            expires_at = min(entry["option"]["expires_at"], now + QUOTE_LIFETIME_SECONDS)
-            public = {
-                "quote_id": quote_id,
-                "rank": rank,
-                "provider": entry["carrier"].provider,
-                "vehicle_class": entry["option"]["vehicle_class"],
-                "price": money(entry["price"], currency),
-                "tip_ceiling": dict(tip_ceiling),
-                "estimated_pickup_seconds": entry["option"]["pickup_seconds"],
-                "estimated_trip_seconds": entry["option"]["trip_seconds"],
-                "estimated_arrival": entry["arrival"],
-                "expires_at": expires_at,
-                "constraint_flags": entry["flags"],
-            }
-            self.quotes[quote_id] = {
-                "public": public,
-                "carrier": entry["carrier"],
-                "carrier_ref": entry["option"]["carrier_ref"],
-                "origin": origin,
-                "destination": destination,
-                "user_ref": user_ref,
-                "booking_id": None,
-            }
-            quotes.append(dict(public, constraint_flags=list(entry["flags"])))
-        response = {"contract_version": contract.CONTRACT_VERSION, "quotes": quotes}
-        contract.validate_quote_response(response)
-        return response
-
-    # book_ride
-
-    def book_ride(self, quote_id):
+    def _option(self, carrier, estimate, origin, destination, now):
         with self.lock:
-            quote = self.quotes.get(quote_id)
-            if quote is None:
-                raise RideConnectorError("quote_not_found")
-            if quote["booking_id"] is not None:
-                return self._booking_response(self.bookings[quote["booking_id"]])
-            public = quote["public"]
-            if any(flag in contract.BLOCKING_FLAGS for flag in public["constraint_flags"]):
-                raise RideConnectorError("constraint_not_met")
-            now = self._now()
-            if now > public["expires_at"]:
-                raise RideConnectorError("quote_expired")
-
-            booking_id = contract.new_booking_id()
-            currency = public["price"]["currency"]
-            hold = public["price"]["amount_minor"] + public["tip_ceiling"]["amount_minor"]
-            try:
-                authorization = self.payments.authorize(booking_id, hold, currency)
-            except PaymentDeclined:
-                raise RideConnectorError("payment_declined") from None
-
-            carrier = quote["carrier"]
-            try:
-                rider = self.rider_contact(quote["user_ref"])
-                trip_ref = carrier.create_trip(quote["carrier_ref"], quote["origin"], quote["destination"],
-                                               rider, "sirven " + booking_id)
-            except UNREACHABLE as error:
-                log.warning("%s create_trip failed: %s", carrier.name, type(error).__name__)
-                self.payments.release(authorization)
-                raise RideConnectorError("provider_unavailable") from None
-
-            booking = {
-                "booking_id": booking_id,
-                "quote": quote,
-                "carrier": carrier,
-                "trip_ref": trip_ref,
-                "authorization": authorization,
-                "booked_at": now,
-                "status": "requested",
-                "settlement": None,
-            }
-            self.bookings[booking_id] = booking
-            quote["booking_id"] = booking_id
-            return self._booking_response(booking)
-
-    def _booking_response(self, booking):
-        public = booking["quote"]["public"]
-        response = {
-            "contract_version": contract.CONTRACT_VERSION,
-            "booking_id": booking["booking_id"],
-            "quote_id": public["quote_id"],
-            "status": booking["status"],
-            "provider": public["provider"],
-            "price": dict(public["price"]),
-            "tip_ceiling": dict(public["tip_ceiling"]),
-            "tracking": {"status_path": "/rides/" + booking["booking_id"]},
-            "cancellation_window": {"free_until": booking["booked_at"] + booking["carrier"].free_cancel_seconds},
+            reference = self._next("option")
+        pickup_at = (now + timedelta(seconds=estimate["pickup_seconds"])).replace(microsecond=0)
+        option = BackendOption(
+            reference=reference,
+            provider=carrier.provider,
+            vehicle_class=estimate["vehicle_class"],
+            price_kind=estimate["price_kind"],
+            fare_minor=estimate["fare_minor"],
+            fare_maximum_minor=estimate["fare_maximum_minor"],
+            currency=estimate["currency"],
+            pickup_at=pickup_at,
+            trip_minutes=max(1, int(round(estimate["trip_seconds"] / 60))),
+            expires_at=estimate["expires_at"].replace(microsecond=0),
+            cancellation_free_until=(now + timedelta(seconds=carrier.free_cancel_seconds)).replace(microsecond=0),
+            cancellation_fee_minor=carrier.cancellation_fee_minor,
+            surge=estimate["surge"],
+            accessibility=estimate["accessibility"],
+        )
+        self.options[reference] = {
+            "option": option, "carrier": carrier, "carrier_ref": estimate["carrier_ref"],
+            "origin": origin, "destination": destination, "booking": None,
         }
-        contract.validate_booking_response(response)
-        return response
+        return option
 
-    # cancel_ride
+    # book
 
-    def cancel_ride(self, booking_id):
+    def book(self, option_reference, payment_reference, authorization_cap_minor):
         with self.lock:
-            booking = self.bookings.get(booking_id)
-            if booking is None:
-                raise RideConnectorError("booking_not_found")
-            if booking["status"] != "cancelled":
-                carrier = booking["carrier"]
-                try:
-                    status, fee = carrier.cancel_trip(booking["trip_ref"], booking["booked_at"], self._now())
-                except CarrierError as error:
-                    if error.status in (409, 422):
-                        raise RideConnectorError("not_cancellable") from None
-                    log.warning("%s cancel_trip failed: %s", carrier.name, error.status)
-                    raise RideConnectorError("provider_unavailable") from None
-                except UNREACHABLE as error:
-                    log.warning("%s cancel_trip failed: %s", carrier.name, type(error).__name__)
-                    raise RideConnectorError("provider_unavailable") from None
-                booking["status"] = "cancelled"
-                self._reconcile(booking, status, fee)
-            return self._cancel_response(booking)
+            entry = self.options.get(option_reference)
+            if entry is None:
+                raise BackendError("unavailable", "unknown option reference")
+            if entry["booking"] is not None:
+                return self.bookings[entry["booking"]]["made"]
+            if self.require_payment_reference and not payment_reference:
+                raise BackendError("payment_declined", "no funds held by the money layer; sirven never fronts a fare")
+            carrier, option = entry["carrier"], entry["option"]
+            reference = self._next("booking")
+            try:
+                trip_ref = carrier.create_trip(entry["carrier_ref"], entry["origin"], entry["destination"],
+                                               self.rider, "sirven " + reference)
+            except (CarrierError,) + BLOCKED_SEAMS as error:
+                raise BackendError(_reason(error), _detail(carrier, error)) from None
+            made = BackendBooking(
+                reference=reference,
+                confirmed=True,
+                pickup_at=option.pickup_at,
+                dropoff_at=option.pickup_at + timedelta(minutes=option.trip_minutes),
+            )
+            self.bookings[reference] = {
+                "carrier": carrier, "trip_ref": trip_ref, "made": made,
+                "payment_reference": payment_reference, "authorization_cap_minor": authorization_cap_minor,
+            }
+            entry["booking"] = reference
+            return made
 
-    def _reconcile(self, booking, status, fee):
-        if status == "settled" and fee:
-            self.payments.capture(booking["authorization"], fee)
-        elif status == "settled":
-            self.payments.release(booking["authorization"])
-        # pending_receipt keeps the authorization open until settle_receipt.
-        booking["settlement"] = {"status": status, "fee": fee}
+    # status and cancel
 
-    def settle_receipt(self, booking_id, fee_minor):
-        """the carrier's receipt named the cancellation fee. called by the receipt webhook
-        handler, which is a seam: it waits on sandbox access to see real receipts."""
-        with self.lock:
-            booking = self.bookings[booking_id]
-            if booking["settlement"] and booking["settlement"]["status"] == "pending_receipt":
-                self._reconcile(booking, "settled", fee_minor)
+    def _booking(self, reference):
+        booking = self.bookings.get(reference)
+        if booking is None:
+            raise BackendError("unavailable", "unknown booking reference")
+        return booking
 
-    def _cancel_response(self, booking):
-        settlement = booking["settlement"]
-        currency = booking["quote"]["public"]["price"]["currency"]
-        fee = None if settlement["fee"] is None else money(settlement["fee"], currency)
-        response = {
-            "contract_version": contract.CONTRACT_VERSION,
-            "booking_id": booking["booking_id"],
-            "status": "cancelled",
-            "settlement": {"status": settlement["status"], "cancellation_fee": fee},
-        }
-        contract.validate_cancel_response(response)
-        return response
+    def status(self, booking_reference):
+        booking = self._booking(booking_reference)
+        carrier, made = booking["carrier"], booking["made"]
+        try:
+            state, vehicle, fare, tip = carrier.trip_status(booking["trip_ref"])
+        except (CarrierError,) + BLOCKED_SEAMS as error:
+            raise BackendError(_reason(error), _detail(carrier, error)) from None
+        if state == "requested":
+            state = "confirmed"  # an automated carrier has accepted the request once it exists.
+        return BackendStatus(status=state, pickup_at=made.pickup_at, dropoff_at=made.dropoff_at,
+                             vehicle_description=vehicle, fare_minor=fare, tip_minor=tip)
+
+    def cancel(self, booking_reference, expected_fee_minor):
+        booking = self._booking(booking_reference)
+        carrier = booking["carrier"]
+        try:
+            fee = carrier.cancel_trip(booking["trip_ref"], expected_fee_minor)
+        except CarrierError as error:
+            if error.status in (409, 422):
+                raise BackendError("not_cancellable", _detail(carrier, error)) from None
+            raise BackendError(_reason(error), _detail(carrier, error)) from None
+        except BLOCKED_SEAMS as error:
+            raise BackendError("down", _detail(carrier, error)) from None
+        return BackendCancellation(fee_minor=fee)

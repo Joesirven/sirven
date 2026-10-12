@@ -130,6 +130,25 @@
           }
         }
       ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/guests/trips/fixture-uber-request-1",
+      "responses": [
+        {
+          "status": 200,
+          "body": {
+            "request_id": "fixture-uber-request-1",
+            "status": "arriving",
+            "vehicle": {
+              "make": "Toyota",
+              "model": "Prius",
+              "color": "Silver",
+              "license_plate": "8FIX123"
+            }
+          }
+        }
+      ]
     }
   ]
 }

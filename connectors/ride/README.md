@@ -1,56 +1,58 @@
 # Official-partner ride backend
 
-The ride connector's three calls (`quote_ride`, `book_ride`, `cancel_ride`) served through
-Uber for Business and Lyft Business partner interfaces. Sirven is merchant of record: the user
-pays sirven, and sirven pays the carrier through its corporate account with that carrier.
+`ride_partner` is a ride backend for the sirven ride connector: Uber for Business and Lyft
+Business, reached through their partner interfaces. Sirven is merchant of record: the user pays
+sirven, and sirven pays the carrier through its corporate account with that carrier.
 
 Status: fixtures only. No live rides, no live charges, nothing submitted to either carrier.
 
-## Layout
+## How it fits the contract
 
-- `ride_partner/contract.py`: the contract as this backend reads it. **Provisional**: thread 08
-  owns the published contract (`docs/ride-connector-contract.md` and its schemas), which had not
-  landed when this was written. Every field name, error code, and identifier format a caller can
-  see lives in this one file, so adopting the published schemas is a change here plus the tests.
-- `ride_partner/backend.py`: `PartnerRideBackend`, the three calls. Quotes from both carriers are
-  normalized, flagged, and ranked; booking authorizes the user's payment before the carrier is
-  asked, and releases it if the carrier fails; cancelling reconciles the authorization.
+Thread 08 owns the contract: `docs/ride-connector-contract.md`, `schemas/v1/`, and the gateway in
+`ride_connector/`. The gateway is the only thing an agent talks to. It serves `quote_ride`,
+`book_ride`, `cancel_ride`, and `get_ride`, mints every identifier, ranks and flags options, and
+validates every result against the schema. `PartnerRideBackend` implements the gateway's
+`RideBackend` interface (`quote`, `book`, `cancel`, `status`) and nothing more.
+
+- `ride_partner/backend.py`: `PartnerRideBackend`.
 - `ride_partner/carriers.py`: `UberForBusiness` and `LyftBusiness`, one adapter per carrier.
 - `ride_partner/transport.py`: fixture, sandbox, and live transports.
-- `ride_partner/fixtures/`: recorded scenarios per carrier.
-- `tests/test_backend.py`: the suite. `make test` runs it through `tests/unit/test_ride_partner.sh`.
+- `ride_partner/fixtures/`: carrier scenarios (standard, booking fails, trip underway,
+  completed, cancel with a fee, carrier down).
+- `tests/test_partner_backend.py`: the suite, through the gateway, with every payload checked
+  against the contract schema. `make test` runs it through `tests/unit/test_ride_partner.sh`.
 
-Run the suite or a printed round trip from this directory:
+From `connectors/ride`:
 
-    python3 -m unittest discover -s tests
-    python3 -m ride_partner
+    cd tests && python3 -m unittest test_partner_backend
+    python3 -m ride_partner        # a printed quote, book, and cancel round trip
 
 ## Backend blindness
 
-The calling agent must not be able to tell this backend produced a quote. How that holds:
+The gateway makes backend identity invisible by construction; this backend keeps its side:
 
-- The contract validators are strict: no unknown fields, no missing fields. Every response is
-  validated before it is returned, so this backend's output has exactly the contract's shape.
-- Quote and booking identifiers are random (`quote_` or `booking_` plus 32 hexadecimal
-  characters). Carrier fare identifiers, cost tokens, and trip identifiers stay inside.
+- Carrier fare identifiers, cost tokens, and trip identifiers stay in `PartnerRideBackend`.
+  The option and booking references it hands the gateway are plain counters.
 - Carrier product names (UberX, Lyft XL) become contract vehicle classes (standard, large).
-- Errors are contract codes with a fixed message per code. Carrier error text is logged for
-  operators and never returned.
-- Quote lifetime is capped at 120 seconds for every carrier, and tracking is a sirven path
-  (`/rides/<booking_id>`), not a carrier link.
-- The provider (Uber, Lyft) is an ordinary returned value, as the contract brief allows.
+- Carrier error text goes to the operator log as `<carrier> answered <status>` and becomes a
+  backend error reason; the gateway writes the message the agent sees.
+- The provider (Uber, Lyft) is an ordinary returned value, as the contract allows.
 
-`BlindnessTests` drives every scenario and fails if any carrier token, carrier identifier, or
-integration word appears in anything a caller received.
+`BlindnessTests` drives every scenario through quote, book, status, and cancel, fails if any
+carrier token, carrier identifier, or integration word reaches a payload, and checks that an
+option from this backend has the same shape as one from the contract's fake backend.
 
-## Money, as the money layer (thread 11) sees it
+## Money
 
-`PartnerRideBackend` takes a `payments` object with `authorize(reference, amount_minor,
-currency)`, `capture(handle, amount_minor)`, and `release(handle)`. Booking authorizes the quoted
-price plus the tip ceiling. A cancel with no fee releases the hold; a cancel with a fee captures
-only the fee. A Lyft range is quoted, and authorized, at its upper bound and flagged
-`price_is_upper_bound`. `service_fee_minor` (what sirven adds to the fare) is zero: that is a
-pricing decision for Jose.
+- Booking refuses without a `payment_reference` (funds the money layer, thread 11, has already
+  held). `build_connector` sets the gateway to require it, and the backend refuses on its own
+  too, so sirven never fronts a fare on its corporate account. The reference is kept with the
+  booking for reconciliation and never sent to a carrier.
+- Uber Guest Rides fares are upfront, so they are `fixed`. Lyft gives a range, so its options
+  are `estimate`, priced at the low end with the high end as the fare ceiling; the authorization
+  cap the gateway computes covers the ceiling plus the tip ceiling.
+- A completed Uber trip reads as `in_progress` until Uber's receipt exists, so the gateway never
+  settles a zero fare.
 
 ## Blocked seams
 
@@ -60,8 +62,8 @@ Each is explicit in code; search for the names given.
    `PartnerApprovalRequired` until `SIRVEN_UBER_FOR_BUSINESS_SANDBOX_TOKEN` or
    `SIRVEN_LYFT_BUSINESS_SANDBOX_TOKEN` is set, which only an approved application can supply.
    Store them with `bb secret`; never commit them. The transport takes a ready bearer token; the
-   client-credentials exchange for it is written once the carriers' partner documentation
-   confirms the flow.
+   client-credentials exchange for it is written once partner documentation confirms the flow.
+   The agent sees `service_unavailable`.
 2. **Live calls, blocked on Jose's approval** of the partner accounts and the money layer.
    `transport_for(..., "live")` always raises `LiveCallsBlocked`, and `SandboxTransport` refuses
    Uber's production host. Lyft's sandbox shares its production host, so a credential alone
@@ -70,20 +72,26 @@ Each is explicit in code; search for the names given.
    separate sandbox host or credential marker.
 3. **Fixtures are written, not recorded.** They follow the carriers' public references as read
    on 2026-10-11 (Uber Guest Rides: `/v1/guests/trips/estimates`, `/v1/guests/trips`; Lyft:
-   `/cost`, `/eta`, `/rides`, `/rides/{id}/cancel`). Lyft's Concierge path prefix
-   (`/v1/concierge/...`) and some field names are assumed. Re-record every scenario against the
-   sandboxes once seam 1 opens, and fix the adapters wherever the recordings disagree.
+   `/cost`, `/eta`, `/rides`, `/rides/{id}/cancel`). Assumed until partner documentation: the
+   Lyft Concierge path prefix (`/v1/concierge/...`), Lyft ride status names and price fields,
+   and the Uber receipt fields. Re-record every scenario once seam 1 opens and fix the adapters
+   wherever the recordings disagree.
 4. **Carrier policy constants to confirm** under the partner agreements: the two-minute free
-   cancellation window for both carriers, and the five-minute Lyft cost token lifetime.
-5. **Uber cancellation fees after the free window** arrive later on the trip receipt. The cancel
-   response says `pending_receipt` and the hold stays open until `settle_receipt` is called. The
-   receipt webhook handler that calls it waits on sandbox access.
-6. **Durable storage.** Quotes and bookings live in memory. They must survive a restart before
+   cancellation window and the five-dollar late cancellation fee for both carriers, and the
+   five-minute Lyft cost token lifetime.
+5. **Uber cancellation fee reconciliation.** Uber names a late cancellation fee on the receipt,
+   after the fact. The backend reports the policy fee the gateway expects; comparing it with
+   the receipt waits on sandbox access and the receipt webhook.
+6. **Rider identity.** The contract's backend calls carry no rider, but carriers need the
+   rider's name and phone number. One backend instance serves one person (`rider=`). Raised
+   with thread 08.
+7. **Geocoding.** Carriers need coordinates. An address-only place needs a `geocode` function;
+   without one the backend answers `no_service` for that quote.
+8. **Partial carrier failure.** When one carrier fails and the other answers, the gateway sees
+   one healthy backend, so the agent gets no `partial_results` notice. Raised with thread 08.
+9. **Durable storage.** Options and bookings live in memory. They must survive a restart before
    anything books a real ride.
-7. **Corporate account references** come from `SIRVEN_UBER_FOR_BUSINESS_ORGANIZATION` and
-   `SIRVEN_LYFT_BUSINESS_ORGANIZATION` outside fixture mode; they exist once the accounts do.
-8. **The tracking surface.** Bookings return `/rides/<booking_id>`, but nothing serves it yet.
-   It needs carrier trip status (Uber's status webhook, Lyft's ride details) behind it, which
-   waits on sandbox access.
-9. **Scheduled rides.** Only immediate pickups are quoted. A departure window that starts later
-   flags every option `pickup_outside_window`; scheduled pickups need confirmed partner support.
+10. **Corporate account references** come from `SIRVEN_UBER_FOR_BUSINESS_ORGANIZATION` and
+    `SIRVEN_LYFT_BUSINESS_ORGANIZATION` outside fixture mode; they exist once the accounts do.
+11. **Scheduled rides.** Only immediate pickups are quoted. A departure window that starts later
+    gets every option flagged `outside_departure_window` by the gateway.
