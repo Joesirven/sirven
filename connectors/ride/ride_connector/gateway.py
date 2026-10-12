@@ -50,10 +50,9 @@ NOTICES = {
     "partial_results": "Some ride services could not be reached, so the list may be incomplete.",
 }
 
-CONCIERGE_DISCLOSURE = (
-    "A person on the sirven concierge team books this ride for you using the details shown "
-    "here. They see the pickup, drop-off, and time, and nothing else."
-)
+# placeholder wording. the real sentence belongs to the concierge trust and safety protocol and
+# needs Jose's approval; a deployment passes it as concierge_disclosure.
+CONCIERGE_DISCLOSURE = "A person on the sirven concierge team books this ride for you."
 
 BACKEND_TO_CONTRACT = {
     "unavailable": "option_unavailable",
@@ -107,11 +106,12 @@ class RideConnector:
     allow_human_assisted: off by default. the human-concierge tier does not ship until its
         service-level targets, trust and safety protocol, and user-facing disclosure are all in
         place, so a production gateway drops human_assisted options until someone turns this on.
+    concierge_disclosure: the sentence shown with every human_assisted option.
     """
 
     def __init__(self, backends, clock=system_clock, token=random_token,
                  require_payment_reference=False, share_url_base=None, poll_interval_seconds=30,
-                 allow_human_assisted=False, validator=None):
+                 allow_human_assisted=False, concierge_disclosure=CONCIERGE_DISCLOSURE, validator=None):
         self.backends = dict(backends)
         self.clock = clock
         self.token = token
@@ -119,6 +119,7 @@ class RideConnector:
         self.share_url_base = share_url_base
         self.poll_interval_seconds = poll_interval_seconds
         self.allow_human_assisted = allow_human_assisted
+        self.concierge_disclosure = concierge_disclosure
         self.validator = validator or Validator()
         self.version = self.validator.schema["x-contract-version"]
         self.private_log = []  # backend detail for sirven's operators; never returned.
@@ -350,10 +351,9 @@ class RideConnector:
             "expires_at": _iso(option.expires_at),
         }
 
-    @staticmethod
-    def _fulfillment(human_assisted):
+    def _fulfillment(self, human_assisted):
         if human_assisted:
-            return {"method": "human_assisted", "disclosure": CONCIERGE_DISCLOSURE}
+            return {"method": "human_assisted", "disclosure": self.concierge_disclosure}
         return {"method": "automated", "disclosure": None}
 
     @staticmethod

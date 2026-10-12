@@ -29,7 +29,7 @@ Every call takes an optional `contract_version` argument and every result carrie
 
 ## Shared types
 
-**Money.** `{"amount_minor": 2350, "currency": "USD"}`. `amount_minor` is a whole number in the currency's smallest unit (cents for US dollars), never a floating point number. `currency` is a three-letter uppercase currency code. Every amount in one option or booking shares one currency.
+**Money.** `{"amount_minor": 2350, "currency": "USD"}`. `amount_minor` is a whole number in the currency's smallest unit (cents for United States dollars), never a floating point number. `currency` is a three-letter uppercase currency code. Every amount in one option or booking shares one currency.
 
 **Timestamps.** Request for Comments 3339 date and time with an explicit offset: `2026-10-12T15:00:00-07:00` or `2026-10-12T22:00:00Z`. A timestamp without an offset is refused.
 
@@ -234,7 +234,7 @@ The calling agent cannot tell which backend produced a quote or a booking. This 
 5. **Ranking is global** across backends, with random tie-breaking.
 6. **Tracking links are relayed** through sirven, never a ride service's own link.
 
-What remains visible, deliberately: the `provider` value (the person needs to know which car to get into) and `fulfillment.method` (the person must know when a human books on their behalf). A provider served by only one backend therefore reveals that backend's involvement by inference; that is a property of the market, not a leak in the contract, and the contract does not try to hide it.
+What remains visible, deliberately: the `provider` value (the person needs to know which car to get into) and `fulfillment.method` (the person must know when a human books on their behalf). A provider served by only one backend therefore reveals that backend's involvement by inference; that is a property of the market, not a leak in the contract, and the contract does not try to hide it. Backends may also differ in their default timings (how long quotes last, when free cancellation ends, how far away `confirm_by` is), and a careful observer could use those as a fingerprint. Version 1 does not normalize them; a gateway that needs to can round them to common values without a contract change.
 
 The test `connectors/ride/tests/test_backend_blindness.py` runs two backends selling an identical product and asserts their options and bookings are equal field for field apart from identifiers and rank.
 
@@ -243,6 +243,7 @@ The test `connectors/ride/tests/test_backend_blindness.py` runs two backends sel
 Some rides are booked by a person on the sirven concierge team rather than by software. The contract treats this as a back-end detail, disclosed plainly where it operates:
 
 - `fulfillment.method` is `human_assisted`, the option carries the `human_assisted` flag, and `fulfillment.disclosure` is a plain sentence the agent shows the person before they approve the booking. For automated options `disclosure` is `null`.
+- The wording of that sentence is not part of the contract. It belongs to the concierge trust and safety protocol and needs Jose's approval. A deployment sets it with `RideConnector(concierge_disclosure=...)`. The reference default ("A person on the sirven concierge team books this ride for you.") is placeholder text, not approved copy.
 - The booking starts as `requested` with a `confirm_by` deadline, moves to `confirmed` when the person on the concierge team confirms it, and becomes `failed` (with nothing charged) if they decline or the deadline passes.
 
 The contract carrying this shape does not ship the human-concierge tier. Per Jose's ship gate, that tier does not ship until the service-level targets, the concierge trust and safety protocol, and the user-facing disclosure of concierge involvement are all in place. The reference gateway enforces this: `RideConnector` drops every `human_assisted` option unless it is built with `allow_human_assisted=True`, which only the fake demo setup does.
@@ -304,8 +305,8 @@ Requests may send a bare major (`"1"`) or a full version. A gateway refuses a di
 
 **May change within a major version (minor release):**
 
-- A new optional argument, ignored by gateways that predate it.
-- A new result field. Because every result field is required, a new one is always present in newer results; agents must ignore result fields they do not know.
+- A new optional argument. Arguments are closed, so a gateway that predates the argument refuses it with `invalid_argument` rather than silently ignoring it (closed arguments catch typos, and silently dropping something like an accessibility need would be worse than failing). An agent sends a newer optional argument only after a result's `contract_version` shows the gateway supports that minor version.
+- A new result field. Because every result field is required, a new one is always present in newer results; agents must ignore result fields they do not know. The published result schemas are closed so that gateways cannot leak fields. An agent that validates results therefore validates against the schemas the running server returns from `tools/list`, never a pinned older copy.
 - A new value in a result enumeration that is documented as open to additions: `constraint_flags`, `notices`, `vehicle_class`, booking `status` (a new non-terminal status only). Agents treat an unknown constraint flag as advisory and an unknown non-terminal status as "in progress, keep polling".
 - A new tool.
 
@@ -346,4 +347,6 @@ cd connectors/ride/tests && python3 -m unittest            # the full suite
 cd connectors/ride && python3 -m ride_connector.server      # a model context protocol server on standard input and output
 ```
 
-In Python, `ride_connector.fake.demo_connector()` returns a gateway over two fake backends (an automated partner offering Uber and Lyft products, and a concierge desk offering Waymo), the controllable clock, and the backends. The concierge backend's `pending()`, `confirm(reference)`, and `decline(reference)` are the seam a rehearsal console drives. `connectors/ride/tests/test_round_trips.py` (`BarberScenarioTests`) walks the barber scenario: after the 2pm meeting, Waymo preferred, under 25 dollars.
+The server runs on the real clock, so departure windows built from the current time work. The unit tests use a frozen, controllable clock instead.
+
+In Python, `ride_connector.fake.demo_connector()` returns a gateway over two fake backends (an automated partner offering Uber and Lyft products, and a concierge desk offering Waymo), the clock, and the backends. It defaults to the frozen `FakeClock`; pass `ride_connector.gateway.system_clock` for the real one. The concierge backend's `pending()` (each waiting request with its reference, provider, origin, destination, pickup window, estimated pickup, `confirm_by`, and fare ceiling), `confirm(reference)`, and `decline(reference)` are the seam a rehearsal console drives. The standard input and output server does not expose that seam: a console runs in the same process as the gateway and holds the backend object directly. That seam belongs to the fake only. It is not part of the contract. `connectors/ride/tests/test_round_trips.py` (`BarberScenarioTests`) walks the barber scenario: after the 2pm meeting, Waymo preferred, under 25 dollars.

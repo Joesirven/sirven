@@ -1,6 +1,6 @@
 """a model context protocol server over standard input and output, serving the ride tools.
 
-    python3 -m ride_connector.server            serve the fake demo backends
+    python3 -m ride_connector.server            serve the fake demo backends on the real clock
     python3 -m ride_connector.server --tools    print the tool list and exit
 
 one JSON remote procedure call (JSON-RPC 2.0) message per line, as the model context protocol
@@ -12,7 +12,8 @@ sees changes.
 import json
 import sys
 
-from .fake import FakeClock, demo_connector
+from .fake import demo_connector
+from .gateway import system_clock
 from .schema import bundle_tools
 
 PROTOCOL_VERSION = "2025-06-18"
@@ -73,7 +74,7 @@ def main(argv):
     if "--tools" in argv:
         print(json.dumps(bundle_tools(), indent=2, sort_keys=True))
         return 0
-    connector, _, _ = demo_connector(FakeClock())
+    connector, _, _ = demo_connector(system_clock)
     serve(connector)
     return 0
 

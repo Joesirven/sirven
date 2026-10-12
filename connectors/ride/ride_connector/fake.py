@@ -60,6 +60,7 @@ def _distance_km(origin, destination):
 @dataclass
 class _Booking:
     option: BackendOption
+    trip: dict
     confirmed: bool
     pickup_at: datetime
     dropoff_at: datetime
@@ -85,6 +86,7 @@ class FakeRideBackend(RideBackend):
     tip_percent: int = 15  # what the rider tips on completion, when tips are accepted.
     serial: int = 0
     options: dict = field(default_factory=dict)
+    trips: dict = field(default_factory=dict)
     bookings: dict = field(default_factory=dict)
 
     def _next(self, prefix):
@@ -125,6 +127,12 @@ class FakeRideBackend(RideBackend):
                 human_assisted=self.human_assisted,
             )
             self.options[reference] = option
+            self.trips[reference] = {
+                "origin": request.origin,
+                "destination": request.destination,
+                "pickup_not_before": request.pickup_not_before.isoformat(timespec="seconds"),
+                "pickup_not_after": request.pickup_not_after.isoformat(timespec="seconds"),
+            }
             found.append(option)
         return BackendQuote(options=found)
 
@@ -138,6 +146,7 @@ class FakeRideBackend(RideBackend):
         dropoff = option.pickup_at + timedelta(minutes=option.trip_minutes)
         self.bookings[reference] = _Booking(
             option=option,
+            trip=self.trips[option_reference],
             confirmed=not self.human_assisted,
             pickup_at=option.pickup_at,
             dropoff_at=dropoff,
@@ -158,8 +167,22 @@ class FakeRideBackend(RideBackend):
     # the concierge seam: a person confirms or declines a requested booking.
 
     def pending(self):
-        return sorted(reference for reference, booking in self.bookings.items()
-                      if not booking.confirmed and not booking.cancelled and not booking.declined)
+        """requested bookings waiting for a person, oldest first, with what they need to book it."""
+        waiting = []
+        for reference, booking in self.bookings.items():
+            if booking.confirmed or booking.cancelled or booking.declined:
+                continue
+            waiting.append(dict(
+                booking.trip,
+                reference=reference,
+                provider=booking.option.provider,
+                vehicle_class=booking.option.vehicle_class,
+                pickup_at=booking.pickup_at.isoformat(timespec="seconds"),
+                confirm_by=booking.confirm_by.isoformat(timespec="seconds") if booking.confirm_by else None,
+                fare_ceiling_minor=booking.option.fare_maximum_minor,
+                currency=booking.option.currency,
+            ))
+        return waiting
 
     def confirm(self, reference, vehicle_description="White electric vehicle, no driver"):
         booking = self.bookings[reference]

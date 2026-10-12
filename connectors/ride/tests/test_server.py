@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 import unittest
+from datetime import datetime, timezone
 
 from helpers import HERE, VALIDATOR, quote_arguments
 from ride_connector.fake import FakeClock, demo_connector
@@ -72,14 +73,20 @@ class ServerTests(unittest.TestCase):
         self.assertEqual([1, None, 2], [reply["id"] for reply in replies])
         self.assertEqual(-32700, replies[1]["error"]["code"])
 
-    def test_runs_as_a_process(self):
+    def test_runs_as_a_process_on_the_real_clock(self):
+        now = datetime.now(timezone.utc)
+        arguments = quote_arguments(lambda: now)
+        lines = [request(1, "tools/list"), request(2, "tools/call", {"name": "quote_ride", "arguments": arguments})]
         process = subprocess.run(
             [sys.executable, "-m", "ride_connector.server"],
-            input=json.dumps(request(1, "tools/list")) + "\n",
+            input="".join(json.dumps(line) + "\n" for line in lines),
             capture_output=True, text=True, cwd=os.path.dirname(HERE), timeout=30,
         )
         self.assertEqual(0, process.returncode, process.stderr)
-        self.assertEqual(4, len(json.loads(process.stdout)["result"]["tools"]))
+        listed, quoted = [json.loads(line) for line in process.stdout.splitlines()]
+        self.assertEqual(4, len(listed["result"]["tools"]))
+        self.assertFalse(quoted["result"]["isError"], quoted)
+        self.assertTrue(quoted["result"]["structuredContent"]["options"])
 
 
 if __name__ == "__main__":

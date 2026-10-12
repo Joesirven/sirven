@@ -130,6 +130,14 @@ class QuoteTests(ConnectorCase, unittest.TestCase):
         arguments["budget_ceiling"] = {"amount_minor": 5000, "currency": "EUR"}
         self.assertEqual("no_service", self.error_code("quote_ride", arguments))
 
+    def test_unknown_arguments_are_refused_not_ignored(self):
+        # inputs are closed: a newer optional argument is sent only to a gateway whose
+        # contract_version shows it supports that minor version.
+        arguments = dict(quote_arguments(self.clock), passenger_count=2)
+        payload = self.call("quote_ride", arguments, expect_error=True)
+        self.assertEqual("invalid_argument", payload["error"]["code"])
+        self.assertEqual("/passenger_count", payload["error"]["field"])
+
     def test_unknown_tool(self):
         self.assertEqual("invalid_argument", self.error_code("order_pizza", {}))
 
@@ -251,8 +259,12 @@ class ConciergeTests(ConnectorCase, unittest.TestCase):
         self.assertEqual("human_assisted", booking["fulfillment"]["method"])
         self.assertIsNotNone(booking["confirm_by"])
         concierge = self.backends["concierge"]
-        [reference] = concierge.pending()
-        concierge.confirm(reference)
+        [request] = concierge.pending()
+        self.assertEqual("Waymo", request["provider"])
+        self.assertEqual(booking["origin"], request["origin"])
+        self.assertEqual(booking["destination"], request["destination"])
+        self.assertEqual(booking["confirm_by"], request["confirm_by"])
+        concierge.confirm(request["reference"])
         later = self.call("get_ride", {"booking_id": booking["booking_id"]})["booking"]
         self.assertEqual("confirmed", later["status"])
         self.assertIsNone(later["confirm_by"])
@@ -265,6 +277,12 @@ class ConciergeTests(ConnectorCase, unittest.TestCase):
         self.assertNotIn("Waymo", {o["provider"] for o in payload["options"]})
         self.assertTrue(all(o["fulfillment"]["method"] == "automated" for o in payload["options"]))
 
+    def test_disclosure_wording_is_configurable(self):
+        connector, clock, _ = demo_connector(FakeClock(), concierge_disclosure="Approved wording.")
+        _, payload = connector.call("quote_ride", quote_arguments(clock))
+        waymo = [o for o in payload["options"] if o["provider"] == "Waymo"][0]
+        self.assertEqual("Approved wording.", waymo["fulfillment"]["disclosure"])
+
     def test_unconfirmed_booking_fails_at_the_deadline_and_charges_nothing(self):
         booking = self.book_waymo()
         self.clock.advance(minutes=16)
@@ -276,7 +294,7 @@ class ConciergeTests(ConnectorCase, unittest.TestCase):
     def test_declined_booking_fails(self):
         booking = self.book_waymo()
         concierge = self.backends["concierge"]
-        concierge.decline(concierge.pending()[0])
+        concierge.decline(concierge.pending()[0]["reference"])
         self.assertEqual("failed", self.call("get_ride", {"booking_id": booking["booking_id"]})["booking"]["status"])
 
 
@@ -407,7 +425,7 @@ class BarberScenarioTests(ConnectorCase, unittest.TestCase):
         self.assertGreaterEqual(best["estimated_pickup_at"], "2026-10-12T15:00:00-07:00")
         booking = self.call("book_ride", {"quote_id": best["quote_id"], "payment_reference": "hold_barber01"})["booking"]
         concierge = self.backends["concierge"]
-        concierge.confirm(concierge.pending()[0])
+        concierge.confirm(concierge.pending()[0]["reference"])
         self.assertEqual("confirmed", self.call("get_ride", {"booking_id": booking["booking_id"]})["booking"]["status"])
 
 

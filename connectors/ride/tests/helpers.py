@@ -11,8 +11,8 @@ from ride_connector.schema import Validator  # noqa: E402
 
 VALIDATOR = Validator()
 
-ORIGIN = {"address": "1 Market St, San Francisco, CA", "label": "office"}
-BARBER = {"address": "500 Valencia St, San Francisco, CA", "label": "barber"}
+ORIGIN = {"address": "1 Market St, San Francisco, California", "label": "office"}
+BARBER = {"address": "500 Valencia St, San Francisco, California", "label": "barber"}
 OFFICE_POINT = {"coordinates": {"latitude": 37.7936, "longitude": -122.3958}}
 BARBER_POINT = {"coordinates": {"latitude": 37.7647, "longitude": -122.4216}}
 
