@@ -122,13 +122,13 @@ class RunnerTest(unittest.TestCase):
         options.setdefault("build_launcher", self.fake_launcher(launcher_lifetime))
         return phone_bridge.RunnerSupervisor(BUNDLE, **options)
 
-    def run_until_interrupt(self, supervisor, seconds, before=None):
-        """run until a Ctrl-C, sent by a timer after the seconds, and return what was printed."""
+    def run_until_interrupt(self, supervisor, seconds, before=None, signal_number=signal.SIGINT):
+        """run until a Ctrl-C or the given signal, sent by a timer after the seconds, and return what was printed."""
 
         def interrupt_later():
             if before is not None:
                 before()
-            os.kill(os.getpid(), signal.SIGINT)
+            os.kill(os.getpid(), signal_number)
 
         timer = threading.Timer(seconds, interrupt_later)
         timer.start()
@@ -284,6 +284,32 @@ class RunnerTest(unittest.TestCase):
         self.assertFalse(phone_bridge.process_alive(seen["launcher"]))
         self.assertFalse(os.path.exists(self.runner_file()))
         self.assertIn("the phone runner stopped", printed)
+
+    def test_a_hang_up_stops_both_children_like_a_ctrl_c(self):
+        supervisor = self.supervisor(tunnel_lifetime=300, launcher_lifetime=300)
+        seen = {}
+
+        def capture():
+            seen.update(self.record())
+
+        printed = self.run_until_interrupt(supervisor, 1.0, before=capture, signal_number=signal.SIGHUP)
+        self.assertFalse(phone_bridge.process_alive(seen["tunnel"]))
+        self.assertFalse(phone_bridge.process_alive(seen["launcher"]))
+        self.assertFalse(os.path.exists(self.runner_file()))
+        self.assertIn("the phone runner stopped", printed)
+
+    def test_a_failed_launcher_stop_still_stops_the_tunnel_and_keeps_the_runner_file(self):
+        supervisor = self.supervisor()
+        launcher = mock.Mock()
+        launcher.stop.side_effect = RuntimeError("the launcher would not stop")
+        tunnel = mock.Mock()
+        supervisor.launcher, supervisor.tunnel = launcher, tunnel
+        phone_bridge.write_private(self.runner_file(), "{}")
+        with self.assertRaises(RuntimeError):
+            supervisor.stop()
+        tunnel.stop.assert_called_once()
+        self.assertIsNone(supervisor.tunnel)
+        self.assertTrue(os.path.exists(self.runner_file()), "a child may still run, so the record stays")
 
     def test_the_runner_file_records_the_supervisor_and_both_children(self):
         supervisor = self.supervisor(tunnel_lifetime=300, launcher_lifetime=300)

@@ -459,6 +459,7 @@ MISSING_TOOL = ("pymobiledevice3 was not found on PATH. install it once with the
 RUNNER_BUNDLE_VARIABLE = "SIRVEN_PHONE_RUNNER_BUNDLE"
 RUNNER_FILE = "runner.json"
 RUNNER_LOCK = "runner.lock"
+STOP_SIGNALS = (signal.SIGTERM, signal.SIGHUP)
 TUNNEL_COMMAND = ["pymobiledevice3", "remote", "start-tunnel", "--native"]
 TUNNEL_ADDRESS = re.compile(r"RSD Address: (\S+)$")
 TUNNEL_PORT = re.compile(r"RSD Port: (\d+)$")
@@ -640,15 +641,18 @@ class RunnerSupervisor:
                           "terminal that started it", 1)
         try:
             self._refuse_leftovers()
-            previous = signal.signal(signal.SIGTERM, interrupt)
+            previous = {number: signal.signal(number, interrupt) for number in STOP_SIGNALS}
             try:
                 self.start()
                 self.supervise()
             except KeyboardInterrupt:
                 pass
             finally:
-                signal.signal(signal.SIGTERM, previous)
-                self.stop()
+                try:
+                    self.stop()
+                finally:
+                    for number, handler in previous.items():
+                        signal.signal(number, handler)
         finally:
             lock.close()
         print("the phone runner stopped", flush=True)
@@ -690,10 +694,16 @@ class RunnerSupervisor:
             self._restart_launcher()
 
     def stop(self):
-        for child in (self.launcher, self.tunnel):
-            if child is not None:
-                child.stop(self.stop_seconds)
-        self.launcher = self.tunnel = None
+        try:
+            if self.launcher is not None:
+                self.launcher.stop(self.stop_seconds)
+        finally:
+            self.launcher = None
+            try:
+                if self.tunnel is not None:
+                    self.tunnel.stop(self.stop_seconds)
+            finally:
+                self.tunnel = None
         if os.path.exists(state_file(RUNNER_FILE)):
             os.remove(state_file(RUNNER_FILE))
 
