@@ -31,7 +31,7 @@ SHOW_JSON = False
 
 
 class Connector:
-    """a minimal model context protocol client for the ride connector's stdio server."""
+    """a minimal model context protocol client for the ride connector's server over standard input and output."""
 
     def __init__(self, command):
         if not os.path.isdir(os.path.join(CONNECTOR_DIR, "ride_connector")):

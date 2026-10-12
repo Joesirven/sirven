@@ -23,16 +23,17 @@ The harness starts the connector against fake backends (no network, no money) an
 
 ## contract status
 
-Documented against contract version `1.0.0`, as committed by the contract thread on October 11, 2026.
+Documented against contract version `1.0.0`, as of the contract thread's first commit (`4424c92`, October 11, 2026). The contract thread is still active: the contract document `docs/ride-connector-contract.md` and its test suite are not written yet, so every row below can still change.
 
 | section | status |
 | --- | --- |
-| connecting, and the four calls | stable: matches the published schema and server |
-| budget ceilings and constraint flags | stable |
-| errors | stable |
-| idempotency | stable |
-| cancellation | stable |
-| the concierge disclosure | stable: the disclosure sentence comes from the connector itself |
+| connecting, and the four calls | matches commit `4424c92`; contract still in progress |
+| budget ceilings and constraint flags | matches commit `4424c92`; contract still in progress |
+| errors | matches commit `4424c92`; contract still in progress |
+| idempotency | matches commit `4424c92`; contract still in progress |
+| cancellation | matches commit `4424c92`; contract still in progress |
+| the concierge disclosure | matches commit `4424c92`; the sentence comes from the connector itself |
+| a replayed booking after its quote expired | **moving**: observed server behavior, not yet in the contract document |
 | authentication | **moving**: the contract does not define it yet |
 | obtaining a `payment_reference` from the money layer | **moving**: the money layer's interface is not published yet |
 | versioning policy | **moving**: waits on `docs/ride-connector-contract.md` |

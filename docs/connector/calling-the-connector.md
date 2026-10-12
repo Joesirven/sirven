@@ -29,7 +29,7 @@ Every tool result carries `structuredContent` (the result as JSON) and the same 
 
 > **Moving.** Contract version `1.0.0` does not define authentication. This section is tracked against the contract and will follow it when it does.
 
-What holds today, from the published server: the connector runs as a local child process of the agent, under the account sirven created for the agent, so it acts with that account's access and nothing more. No call takes a token, key, or password as an argument. Do not add one to the arguments; the schema rejects unknown fields with `invalid_argument`.
+What holds today, from the published server: the connector runs as a local child process of whatever starts it, with that account's access and nothing more. No call takes a token, key, or password as an argument. Do not add one to the arguments; the schema rejects unknown fields with `invalid_argument`.
 
 ## the calls
 
@@ -83,7 +83,9 @@ Required: `quote_id`. Optional: `payment_reference`.
 
 > **Moving.** How an agent obtains a `payment_reference` from the money layer is not published yet. Tracked against the money layer's interface.
 
-Book before `expires_at`. Quotes from the demo backends live ten minutes; after that `book_ride` fails with `quote_expired` and you quote again.
+Book before `expires_at`. Quotes from the demo backends live ten minutes; after that, a quote that was never booked fails with `quote_expired` and you quote again. A quote that was already booked keeps replaying its booking even after `expires_at` (see [idempotency](#idempotency)), so retrying a lost `book_ride` reply is safe at any time.
+
+> **Moving.** That a replay wins over expiry is the observed behavior of the published server, not yet written into the contract document. Tracked against the contract.
 
 The result is a `booking` and a `replayed` flag (see [idempotency](#idempotency)). A booking starts in one of two states:
 
@@ -155,7 +157,7 @@ Every failure has the same shape, and `isError` is true:
 | `over_budget` | no | ask the person to raise the limit or pick a bookable option |
 | `option_not_bookable` | no | pick another option; tell the person which flag ruled it out |
 | `option_unavailable`, `price_changed` | no | quote again and show the person the new options |
-| `idempotency_conflict` | no | the quote was booked with a different `payment_reference`; read that booking with `get_ride` rather than booking again |
+| `idempotency_conflict` | no | the quote was already booked with a different `payment_reference`; call `book_ride` again with the original `payment_reference` to get that booking back, and do not book a new option |
 | `payment_required`, `payment_declined` | no | go back to the money layer; do not book without held funds |
 | `booking_not_found` | no | check the `booking_id` |
 | `not_cancellable` | no | the trip started or ended; tell the person and show the returned `booking` |

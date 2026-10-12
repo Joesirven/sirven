@@ -101,7 +101,7 @@ The Lyft fare is 9.51 dollars, under the limit. But the budget ceiling covers th
 
 Only the Waymo, which takes no tips, fits. The over-budget options are still returned, ranked after the bookable one, so the agent can say what a higher limit would buy:
 
-> Within 11 dollars: a Waymo, 10.73 dollars, picks up around 3:00. Its booking is completed by a person on the sirven concierge team, who sees only the pickup, drop-off, and time.
+> Within 11 dollars: a Waymo, 10.73 dollars, picks up around 3:00. A person on the sirven concierge team books this ride for you using the details shown here. They see the pickup, drop-off, and time, and nothing else.
 > A Lyft would be 9.51 dollars, but up to 11.41 dollars once a tip is allowed for, which is over your limit.
 > Book the Waymo, or raise the limit?
 
