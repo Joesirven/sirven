@@ -835,6 +835,7 @@ class Phone:
         report = {"phone": found["result"], "said": found["said"],
                   "session": None if session is None else {"expires": session["expires"],
                                                            "allow_submit": session["allow_submit"]}}
+        report.update(runner_status())
         report["onboarding_due"] = found["result"] == "trusted" and onboarding_due()
         if found["result"] == "trusted":
             try:
