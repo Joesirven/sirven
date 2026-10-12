@@ -469,6 +469,7 @@ STOP_SECONDS = 5
 RECENT_LINES = 200
 OUTPUT_JOIN_SECONDS = 2
 LAUNCHER_FAILURES_BEFORE_TUNNEL_RESTART = 3
+LAST_OUTPUT_LINES = 5
 
 
 def tunnel_endpoint(lines):
@@ -511,6 +512,13 @@ def runner_status():
 
 def interrupt(signum, frame):
     raise KeyboardInterrupt()
+
+
+def show_last_output(children):
+    for child in children:
+        if child is not None:
+            for line in child.lines()[-LAST_OUTPUT_LINES:]:
+                print("  | %s" % line, flush=True)
 
 
 class Child:
@@ -680,11 +688,12 @@ class RunnerSupervisor:
 
     def _restart_tunnel(self, why):
         uptime = self.tunnel.uptime() if self.tunnel is not None else 0
+        stopped = (self.launcher, self.tunnel)
+        for child in stopped:
+            if child is not None:
+                child.stop(self.stop_seconds)
         print(why, flush=True)
-        if self.launcher is not None:
-            self.launcher.stop(self.stop_seconds)
-        if self.tunnel is not None:
-            self.tunnel.stop(self.stop_seconds)
+        show_last_output(stopped)
         self.tunnel = self.launcher = None
         self.sleep(self.tunnel_backoff.next_wait(uptime))
         try:
@@ -698,9 +707,11 @@ class RunnerSupervisor:
 
     def _restart_launcher(self):
         uptime = self.launcher.uptime() if self.launcher is not None else 0
-        print("the launcher stopped; starting it again", flush=True)
-        if self.launcher is not None:
-            self.launcher.stop(self.stop_seconds)
+        stopped = self.launcher
+        if stopped is not None:
+            stopped.stop(self.stop_seconds)
+        print("the launcher stopped; starting it again. its last output:", flush=True)
+        show_last_output([stopped])
         self.launcher = None
         self.sleep(self.launcher_backoff.next_wait(uptime))
         try:

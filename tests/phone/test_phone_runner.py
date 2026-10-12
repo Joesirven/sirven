@@ -227,6 +227,12 @@ class RunnerTest(unittest.TestCase):
         self.assertIn("the launcher stopped; starting it again", printed)
         self.assertNotIn("the tunnel to the phone stopped", printed)
 
+    def test_a_launcher_that_stops_shows_the_reason_it_printed(self):
+        complaint = [sys.executable, "-c", "import sys; print('the runner is not installed on the phone'); sys.exit(1)"]
+        supervisor = self.supervisor(tunnel_lifetime=300, build_launcher=lambda bundle, address, port: complaint)
+        printed = self.run_until_interrupt(supervisor, 0.5)
+        self.assertIn("  | the runner is not installed on the phone", printed)
+
     def test_a_dead_tunnel_restarts_the_tunnel_and_the_launcher_with_the_new_address(self):
         supervisor = self.supervisor(tunnel_lifetime=0.3, launcher_lifetime=300)
         printed = self.run_until_interrupt(supervisor, 1.5)
