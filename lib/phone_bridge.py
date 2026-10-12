@@ -49,6 +49,7 @@ the interface itself is described in docs/phone-interface.md.
 import base64
 import collections
 import datetime
+import fcntl
 import http.client
 import http.server
 import json
@@ -457,6 +458,7 @@ MISSING_TOOL = ("pymobiledevice3 was not found on PATH. install it once with the
                 "(needs Python 3.12 or newer): uv tool install pymobiledevice3==" + PYMOBILEDEVICE3_VERSION)
 RUNNER_BUNDLE_VARIABLE = "SIRVEN_PHONE_RUNNER_BUNDLE"
 RUNNER_FILE = "runner.json"
+RUNNER_LOCK = "runner.lock"
 TUNNEL_COMMAND = ["pymobiledevice3", "remote", "start-tunnel", "--native"]
 TUNNEL_ADDRESS = re.compile(r"RSD Address: (\S+)$")
 TUNNEL_PORT = re.compile(r"RSD Port: (\d+)$")
@@ -501,9 +503,25 @@ def process_alive(process_id):
     return True
 
 
+def take_runner_lock():
+    """the lock a running supervisor holds for its whole run, or None while another one holds it.
+    the system releases it when the process ends, even after a hard kill."""
+    handle = open(state_file(RUNNER_LOCK), "a")
+    try:
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        handle.close()
+        return None
+    return handle
+
+
 def runner_status():
-    """the tunnel and the launcher, each running or not, read from the runner file.
-    a missing or stale file says not running."""
+    """the tunnel and the launcher, each running or not, read from the runner file. with no
+    supervisor holding the lock, both say not running, whatever the file says."""
+    lock = take_runner_lock()
+    if lock is not None:
+        lock.close()
+        return {"tunnel": "not running", "launcher": "not running"}
     record = read_json(state_file(RUNNER_FILE))
     if not isinstance(record, dict):
         record = {}
@@ -616,16 +634,33 @@ class RunnerSupervisor:
         self.quick_failures = 0
 
     def run(self):
-        previous = signal.signal(signal.SIGTERM, interrupt)
+        lock = take_runner_lock()
+        if lock is None:
+            raise Refusal("already_running", "a phone runner is already running; stop it with Ctrl-C in the "
+                          "terminal that started it", 1)
         try:
-            self.start()
-            self.supervise()
-        except KeyboardInterrupt:
-            pass
+            self._refuse_leftovers()
+            previous = signal.signal(signal.SIGTERM, interrupt)
+            try:
+                self.start()
+                self.supervise()
+            except KeyboardInterrupt:
+                pass
+            finally:
+                signal.signal(signal.SIGTERM, previous)
+                self.stop()
         finally:
-            signal.signal(signal.SIGTERM, previous)
-            self.stop()
+            lock.close()
         print("the phone runner stopped", flush=True)
+
+    def _refuse_leftovers(self):
+        record = read_json(state_file(RUNNER_FILE))
+        if not isinstance(record, dict):
+            return
+        left = [str(record[name]) for name in ("tunnel", "launcher") if process_alive(record.get(name))]
+        if left:
+            raise Refusal("leftover_processes", "processes from an earlier phone runner are still running (process "
+                          "ID %s). stop them, for example with kill, then start again" % " and ".join(left), 1)
 
     def start(self):
         self.started = stamp(now())

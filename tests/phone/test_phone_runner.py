@@ -92,6 +92,16 @@ class RunnerTest(unittest.TestCase):
         os.environ.update(self.saved_environment)
         shutil.rmtree(self.folder, ignore_errors=True)
 
+    def sleeping_process(self):
+        sleeper = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+
+        def reap():
+            sleeper.kill()
+            sleeper.wait()
+
+        self.addCleanup(reap)
+        return sleeper
+
     def fake_tunnel(self, lifetime):
         return [sys.executable, "-c", TUNNEL, self.tunnel_starts, str(lifetime)]
 
@@ -302,7 +312,35 @@ class RunnerTest(unittest.TestCase):
         with open(self.runner_file(), "w") as handle:
             json.dump({"supervisor": os.getpid(), "tunnel": os.getpid(), "launcher": dead.pid,
                        "started": "2026-10-12T09:00:00Z"}, handle)
+        held = phone_bridge.take_runner_lock()
+        self.addCleanup(held.close)
         self.assertEqual(phone_bridge.runner_status(), {"tunnel": "running", "launcher": "not running"})
+
+    def test_children_left_behind_by_a_killed_supervisor_read_as_not_running(self):
+        sleeper = self.sleeping_process()
+        with open(self.runner_file(), "w") as handle:
+            json.dump({"supervisor": 999999, "tunnel": sleeper.pid, "launcher": sleeper.pid,
+                       "started": "2026-10-12T09:00:00Z"}, handle)
+        self.assertEqual(phone_bridge.runner_status(), {"tunnel": "not running", "launcher": "not running"})
+
+    def test_a_second_supervisor_is_refused_while_one_holds_the_lock(self):
+        held = phone_bridge.take_runner_lock()
+        self.addCleanup(held.close)
+        with self.assertRaises(phone_bridge.Refusal) as caught:
+            self.supervisor().run()
+        self.assertEqual(caught.exception.result, "already_running")
+        self.assertFalse(os.path.exists(self.runner_file()))
+
+    def test_processes_left_by_an_earlier_run_block_a_new_start(self):
+        sleeper = self.sleeping_process()
+        with open(self.runner_file(), "w") as handle:
+            json.dump({"supervisor": 999999, "tunnel": sleeper.pid, "launcher": sleeper.pid,
+                       "started": "2026-10-12T09:00:00Z"}, handle)
+        with self.assertRaises(phone_bridge.Refusal) as caught:
+            self.supervisor().run()
+        self.assertEqual(caught.exception.result, "leftover_processes")
+        self.assertIn(str(sleeper.pid), caught.exception.said)
+        self.assertTrue(os.path.exists(self.runner_file()))
 
     def test_phone_status_carries_the_tunnel_and_launcher_words(self):
         unplugged = {"result": "no_phone", "said": "no iPhone is plugged in over USB"}
