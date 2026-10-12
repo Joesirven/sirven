@@ -4,6 +4,8 @@
 #   make test       run tests/run.sh
 #   make lint       bash -n on every shell file, then shellcheck when it is installed
 #   make package    a tarball of the files git tracks, in dist/ (or DIST=path)
+#   make runtime    macos only: build the runtime's fetch helper, dist/runtime/sirven-fetch, for
+#                   Apple Silicon and Intel. needs the Xcode command line tools
 
 SHELL := /bin/sh
 PACKAGE := $(shell sed -n 's/^[[:space:]]*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' project.json | head -n 1 | tr '[:upper:]' '[:lower:]')
@@ -11,12 +13,13 @@ VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo unve
 DIST ?= dist
 SHELL_FILES := install.sh uninstall.sh bin/sirven $(wildcard lib/*.sh) tests/run.sh tests/golden/run.sh $(wildcard tests/lib/*.sh) $(wildcard tests/unit/*.sh)
 
-.PHONY: help test lint package
+.PHONY: help test lint package runtime
 
 help:
 	@echo "make test      run every test: tests/run.sh"
 	@echo "make lint      bash -n on every shell file, then shellcheck if it is installed"
 	@echo "make package   $(DIST)/$(PACKAGE)-$(VERSION).tar.gz from the files git tracks"
+	@echo "make runtime   macos: build dist/runtime/sirven-fetch, the runtime's fetch helper"
 
 test:
 	bash tests/run.sh
@@ -43,3 +46,21 @@ package:
 	tar -cf - -T "$$stage/files" | (cd "$$stage/$$name" && tar -xf -); \
 	tar -czf "$(DIST)/$$name.tar.gz" -C "$$stage" "$$name"; \
 	echo "package: $(DIST)/$$name.tar.gz, $$(grep -c . "$$stage/files") files"
+
+# one binary for both kinds of Mac. the module cache goes in a scratch folder, so the build
+# writes nothing outside dist/.
+RUNTIME_HELPER := dist/runtime/sirven-fetch
+RUNTIME_MACOS_MINIMUM := 12.0
+
+runtime:
+	@set -e; \
+	[ "$$(uname -s)" = Darwin ] || { echo "make runtime: the fetch helper is macos only; elsewhere the runtime uses its python fetcher"; exit 0; }; \
+	scratch="$$(mktemp -d "$${TMPDIR:-/tmp}/sirven-runtime-build.XXXXXX")"; \
+	trap 'rm -rf "$$scratch"' EXIT; \
+	mkdir -p "$$(dirname $(RUNTIME_HELPER))"; \
+	for arch in arm64 x86_64; do \
+	  xcrun swiftc -O -module-cache-path "$$scratch/cache" -target "$$arch-apple-macos$(RUNTIME_MACOS_MINIMUM)" \
+	    lib/sirven_runtime/fetch_helper.swift -o "$$scratch/sirven-fetch-$$arch"; \
+	done; \
+	lipo -create "$$scratch/sirven-fetch-arm64" "$$scratch/sirven-fetch-x86_64" -output $(RUNTIME_HELPER); \
+	echo "runtime: built $(RUNTIME_HELPER) for $$(lipo -archs $(RUNTIME_HELPER))"

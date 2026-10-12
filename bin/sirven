@@ -3,6 +3,8 @@
 #
 #   sirven grant inspect    the level in force and the active grants, read from state files
 #   sirven grant rollback   reverse the most recent grant change, found in the audit log
+#   sirven runtime ...      the Solo egress runtime for the owner's personal agent: see
+#                           docs/runtime-interface.md and sirven runtime --help
 #
 # inspect only reads. rollback is a plan like install.sh: --dry-run prints it and changes
 # nothing, and without --dry-run the identical plan is printed and then applied, under the
@@ -51,6 +53,8 @@ usage() {
 usage:
   sirven grant inspect [options]     show the level in force and the active grants
   sirven grant rollback [options]    reverse the most recent grant change
+  sirven runtime serve|status|fetch|classify|decisions|exec
+                                     the Solo egress runtime: sirven runtime --help
 
 options:
   --prefix PATH    read a fake root that install.sh was applied to with --prefix
@@ -412,7 +416,17 @@ rollback() {
   rollback_apply
 }
 
+# the runtime is its own program, in python, so hand it everything after the word runtime.
+run_runtime() {
+  need_python
+  PYTHONPATH="$ROOT_DIR/lib${PYTHONPATH:+:$PYTHONPATH}" exec python3 -m sirven_runtime "$@"
+}
+
 main() {
+  if [ "${1:-}" = runtime ]; then
+    shift
+    run_runtime "$@"
+  fi
   parse_arguments "$@"
   OPERATING_SYSTEM="$(detect_os)"
   PACKAGE="$(package_name "$ROOT_DIR/project.json")"
