@@ -1,0 +1,24 @@
+[
+  {
+    "allowed_categories": [
+      "taxicabs_limousines"
+    ],
+    "authorized_minor": 2140,
+    "card_id": "ic_test_2d366bbe7ffe",
+    "charge_record": {
+      "booking_id": "b_5b05f629d156",
+      "held_at": "2026-10-11T17:36:32-07:00",
+      "product": "Waymo One",
+      "provider": "Waymo",
+      "quote_id": "q_d1b3c7a531bd",
+      "quoted_minor": 2140,
+      "rationale": "Waymo One at $21.40 is the best option under $25.00 that arrives on time, and it is your preferred service",
+      "tip_ceiling_minor": 0
+    },
+    "currency": "USD",
+    "last4": "4242",
+    "mode": "test",
+    "spending_limit_minor": 2140,
+    "status": "held"
+  }
+]

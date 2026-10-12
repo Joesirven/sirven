@@ -1,0 +1,2 @@
+# the concierge queue locks each request file while it changes; the locks carry nothing.
+*.lock

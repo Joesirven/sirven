@@ -1,0 +1,24 @@
+[
+  {
+    "allowed_categories": [
+      "taxicabs_limousines"
+    ],
+    "authorized_minor": 0,
+    "card_id": "ic_test_d31024e7e670",
+    "charge_record": {
+      "booking_id": "b_211c1a578b67",
+      "held_at": "2026-10-11T17:37:19-07:00",
+      "product": "UberX",
+      "provider": "Uber",
+      "quote_id": "q_5078dbbde21a",
+      "quoted_minor": 1890,
+      "rationale": "UberX at $18.90 plus up to $3.00 tip is the best option under $25.00 that arrives on time",
+      "tip_ceiling_minor": 300
+    },
+    "currency": "USD",
+    "last4": "4242",
+    "mode": "test",
+    "spending_limit_minor": 2190,
+    "status": "held"
+  }
+]

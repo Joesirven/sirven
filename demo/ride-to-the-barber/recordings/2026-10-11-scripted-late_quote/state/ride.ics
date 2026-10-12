@@ -1,0 +1,18 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//sirven//ride rehearsal//EN
+BEGIN:VEVENT
+UID:evt-ride-b_211c1a578b67@sirven.invalid
+DTSTAMP:20261012T003719Z
+DTSTART:20261013T215400Z
+DTEND:20261013T221000Z
+SUMMARY:Ride to Mission Street Barbers (Uber)
+LOCATION:535 Mission St\, San Francisco\, CA 94105
+DESCRIPTION:Uber UberX\, $18.90\, booked by the sirven agent\nbooking: b_21
+ 1c1a578b67\nconfirmation: FIXTURE (fixture)\ntracking: https://example.inv
+ alid/track/partner-booking-38e042aa\nfree cancellation until: 2026-10-13T1
+ 4:52:00-07:00\npaid with: test card ending 4242\, limit $21.90\nwhy: UberX
+  at $18.90 plus up to $3.00 tip is the best option under $25.00 that arriv
+ es on time
+END:VEVENT
+END:VCALENDAR
