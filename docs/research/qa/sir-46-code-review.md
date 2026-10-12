@@ -63,3 +63,40 @@ Fix: count consecutive launcher failures that did not reach `STABLE_SECONDS` (th
 2. Findings 2 and 3 (small, same file).
 3. Finding 4 and finding 5 (setup text and docs together, one commit).
 4. Finding 6, then the nice-to-haves as time allows.
+
+## Re-review at 6eaa62d
+
+Reviewed `git diff d7cdf01 6eaa62d` (lib/phone_bridge.py, docs/phone-interface.md, tests/phone/test_phone_runner.py) in a scratch worktree at 6eaa62d. Read only; the phone was not touched. Test results are in the last table of this section.
+
+### Status of the first review's findings
+
+| # | Finding | Status | Evidence |
+|---|---|---|---|
+| 1 | Live tunnel never restarted after launcher failures (must fix) | **Resolved** | `_launcher_stopped` counts quick failures and, at `LAUNCHER_FAILURES_BEFORE_TUNNEL_RESTART` (3), calls `_restart_tunnel` with a new address. Test `test_three_quick_launcher_failures_restart_the_tunnel_for_a_new_address` asserts three launches on 10.0.0.1, then 10.0.0.2. |
+| 2 | Child output never shown | **Resolved for the launcher, with a regression** (see R1) | `show_last_output` prints the last 5 lines on each restart; test `test_a_launcher_that_stops_shows_the_reason_it_printed`. The initial tunnel failure (`tunnel_no_address`) still prints only the fixed message, which is acceptable. |
+| 3 | Two supervisors, orphans, stale identifiers | **Resolved** | `take_runner_lock` (an exclusive `flock` on `runner.lock`) is held for the whole run and released by the system on a hard kill; `run` refuses with `already_running`; `runner_status` says "not running" when the lock is free; `_refuse_leftovers` refuses a new start while recorded children are alive. Four new tests cover it. The lock file descriptor is non-inheritable (Python default), so orphaned children do not keep the lock held. |
+| 4 | No checksum on the runner zip | **Resolved in the setup text, broken in the document** (see R2) | `WEBDRIVERAGENT_RUNNER_SHA256` equals the digest GitHub reports (`6f7758f7…c47f`); setup prints `curl -fL … && echo '<sha>  path' \| shasum -a 256 -c - && unzip`. |
+| 5 | xtool route not in the document; zip pointless for route B | **Resolved** | Document step 4 now has route A (brew install, download, check, `xtool auth login`, `xtool install`, known limits) and route B marked as not using the download; the setup plan prints the same split and a test asserts the download sits between route A and route B. The brew line matches the research note (line 63). |
+| 6 | No hang-up handling; cleanup not exception-safe | **Resolved** | `STOP_SIGNALS` = terminate and hang-up; `stop()` nests `try/finally` so the tunnel is stopped even if the launcher stop raises; tests for hang-up and for a failing launcher stop. |
+| 7 | No test for a failed tunnel restart | **Resolved** | `test_a_tunnel_that_does_not_come_back_is_retried_and_no_launcher_starts_without_an_address`. |
+| 8 to 11 | Nice-to-haves (status code 1 in `Refusal`, leading dash in bundle, Python 3.6 floor, unquoted paths) | **Not changed** | Still open, low. `Refusal("already_running", …, 1)` repeats the odd status argument. |
+
+### The three gaps the implementer named
+
+- **Window between starting the tunnel process and assigning `self.tunnel` (`Child.__init__` then `_start_tunnel`).** Accept as nice to have. The window is a few Python statements long (thread creation, return, assignment) and needs a signal in exactly that moment. Cheap fix if wanted: in `Child.__init__`, wrap everything after `Popen` in `try/except BaseException` and kill the process before re-raising.
+- **Process identifiers in `runner.json` trusted while a supervisor holds the lock.** Accept. While the lock is held the supervisor itself is the writer, and the identifiers are rewritten on every restart through `_record`. A narrow stale window exists between a child dying and the next poll (0.5 seconds), which only makes status lag. Separately, the leftover check after a hard kill trusts bare identifiers: if the operating system reused an identifier for an unrelated process, start refuses and tells the owner to stop "process number N, for example with kill". That is a refusal, not a destructive action, but the advice could lead to killing an unrelated process (see R4).
+- **A status call that briefly takes the lock can make a simultaneous start refuse.** Real but negligible: the status call holds the exclusive lock for microseconds, and the refusal text ("already running") would be wrong for that instant. Two simple fixes: have `run` retry the lock for about 1 second before refusing, or make `runner_status` probe with a non-acquiring lock query (`fcntl.lockf` with `F_GETLK` is not available through Python directly, so the retry is simpler). Nice to have.
+
+### New findings introduced by the fixes
+
+**R1 (should fix). The new last-output feature prints the phone's device identifier.** `show_last_output` (lib/phone_bridge.py, near the supervisor) prints the last 5 lines of each stopped child. The tunnel's output includes `Identifier: <device identifier>` (it is line 2 of 6 in the real tunnel output, so it falls inside the last 5), and this happens on every tunnel restart. Reproduced by feeding the real tunnel lines to `show_last_output`: it printed `| Identifier: 00008101-00112DD42193001E`. `docs/phone-interface.md` line 31 promises the phone's serial number never appears in any output, and the module already treats `SerialNumber` as private. The device identifier is not literally the serial number, but it is a device-unique value that ends up in terminal scrollback or any log the owner redirects. Fix: skip lines that start with `Identifier:` in `show_last_output` (and add a test), or print only launcher output.
+
+**R2 (should fix). The checksum command in `docs/phone-interface.md` cannot succeed.** The block uses `echo '<sha>  ~/.sirven/WebDriverAgent/runner.zip' | shasum -a 256 -c -`; the tilde sits inside single quotes, so the shell does not expand it. Reproduced: `shasum` printed `~/nonexist/r.zip: No such file or directory`, `FAILED open or read`, exit 1. It fails closed (nothing is unzipped), so it is not a security problem, but the documented route A cannot be followed as written. The setup plan output is fine because it prints expanded paths. Fix: in the document, use `cd ~/.sirven/WebDriverAgent && echo '<sha>  runner.zip' | shasum -a 256 -c -` or use `"$HOME"` outside the single quotes.
+
+**R3 (nice to have). The count of quick launcher failures is not reset when the tunnel restarts for another reason.** `quick_failures` resets only on a stable launcher or at 3. Two failures, then a tunnel exit, then one failure of the new launcher causes an extra tunnel restart. Reset it in `_restart_tunnel`.
+
+**R4 (nice to have). The leftover refusal can name a reused process identifier.** Confirm the recorded identifier is still a `pymobiledevice3` process (`ps -o command= -p N`) before refusing or advising `kill`, or word the message "check what these are before stopping them".
+
+**R5 (nice to have, behaviour note).** When the launcher fails for a reason unrelated to the tunnel (wrong bundle identifier, interface automation off), the tunnel is now also restarted every third failure. The backoffs keep growing to the 30 second cap, so this is bounded, but it churns Apple's tunnel. The printed last output (R1 aside) tells the owner why; no change required.
+
+### Results at 6eaa62d
