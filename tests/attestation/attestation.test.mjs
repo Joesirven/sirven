@@ -11,7 +11,10 @@ import {
   issueCertificate,
   issueRevocationList,
   keyIdentifier,
+  makeCertificationRequest,
+  newPeerIdentifier,
   normalizeDomain,
+  openCertificationRequest,
   openRevocationList,
   periodOf,
   publicKeyText,
@@ -50,11 +53,13 @@ function world({ user = 'alice', revokedUsers = [], revokedKeys = [], listSequen
   const revocationList = openRevocationList(list, trustedIssuers);
   const ledger = new Map();
   const nonces = new Set();
+  const peer = newPeerIdentifier();
   const sign = (overrides = {}) =>
-    signRequest({ userPrivateKey: device.privateKey, certificate, domain: 'shop.example.com', requestBytes: 2048, usedBytes: 0, now: NOW, ...overrides });
+    signRequest({ userPrivateKey: device.privateKey, certificate, audience: peer, domain: 'shop.example.com', requestBytes: 2048, usedBytes: 0, now: NOW, ...overrides });
   const context = (overrides = {}) => ({
     trustedIssuers,
     revocationList,
+    audience: peer,
     allowlist: new Set(['shop.example.com']),
     host: 'shop.example.com',
     requestBytes: 2048,
@@ -68,7 +73,7 @@ function world({ user = 'alice', revokedUsers = [], revokedKeys = [], listSequen
     ledger.set(`${verdict.user} ${verdict.period}`, (ledger.get(`${verdict.user} ${verdict.period}`) || 0) + verdict.request_bytes);
     nonces.add(verdict.nonce);
   };
-  return { issuer, device, certificate, trustedIssuers, revocationList, ledger, sign, context, accept };
+  return { issuer, device, peer, certificate, trustedIssuers, revocationList, ledger, sign, context, accept };
 }
 
 function assertRefused(verdict, reason) {
@@ -125,7 +130,7 @@ test('refuses no envelope at all, and text that is not an envelope', () => {
 test('refuses an envelope signed by a key the certificate does not name', () => {
   const w = world();
   const stranger = generateSigningKey();
-  const forged = signRequest({ userPrivateKey: w.device.privateKey, certificate: w.certificate, domain: 'shop.example.com', requestBytes: 2048, usedBytes: 0, now: NOW });
+  const forged = signRequest({ userPrivateKey: w.device.privateKey, certificate: w.certificate, audience: w.peer, domain: 'shop.example.com', requestBytes: 2048, usedBytes: 0, now: NOW });
   // re-sign the same payload with a stranger's key.
   const payload = decode(forged);
   assertRefused(verifyRequest(signObject('request', payload, stranger.privateKey), w.context()), REFUSAL.BAD_SIGNATURE);
@@ -205,6 +210,44 @@ test('domains match exactly, after lowercasing and dropping a trailing dot', () 
   assert.equal(normalizeDomain('localhost'), null);
 });
 
+// audience ------------------------------------------------------------------------------------
+
+test('refuses an envelope addressed to a different peer', () => {
+  const w = world();
+  assertRefused(verifyRequest(w.sign(), w.context({ audience: newPeerIdentifier() })), REFUSAL.WRONG_AUDIENCE);
+});
+
+test('a peer with no identifier of its own refuses everything', () => {
+  const w = world();
+  assertRefused(verifyRequest(w.sign(), w.context({ audience: undefined })), REFUSAL.WRONG_AUDIENCE);
+});
+
+test('the originator cannot sign without naming the peer', () => {
+  const w = world();
+  assert.throws(() => w.sign({ audience: undefined }), /identifier of the peer/);
+});
+
+// certification requests ----------------------------------------------------------------------
+
+test('a certification request proves the asker holds the key', () => {
+  const device = generateSigningKey();
+  const request = makeCertificationRequest({ userPrivateKey: device.privateKey, user: 'alice', now: NOW });
+  const opened = openCertificationRequest(request);
+  assert.equal(opened.user, 'alice');
+  assert.equal(opened.key, keyIdentifier(device.publicKey));
+  assert.equal(JSON.stringify(request).includes('PRIVATE'), false);
+});
+
+test('a certification request for someone else\'s key does not verify', () => {
+  const victim = generateSigningKey();
+  const attacker = generateSigningKey();
+  const request = makeCertificationRequest({ userPrivateKey: attacker.privateKey, user: 'mallory', now: NOW });
+  const payload = decode(request);
+  payload.public_key = publicKeyText(victim.publicKey);
+  payload.key = keyIdentifier(victim.publicKey);
+  assert.throws(() => openCertificationRequest(encode(request, payload)), (error) => error.reason === REFUSAL.BAD_SIGNATURE);
+});
+
 // time ----------------------------------------------------------------------------------------
 
 test('refuses an expired envelope', () => {
@@ -216,7 +259,7 @@ test('refuses an expired envelope', () => {
 
 test('refuses an envelope from the future beyond the allowed clock skew', () => {
   const w = world();
-  const envelope = signRequest({ userPrivateKey: w.device.privateKey, certificate: w.certificate, domain: 'shop.example.com', requestBytes: 2048, usedBytes: 0, now: NOW + 120 });
+  const envelope = signRequest({ userPrivateKey: w.device.privateKey, certificate: w.certificate, audience: w.peer, domain: 'shop.example.com', requestBytes: 2048, usedBytes: 0, now: NOW + 120 });
   assertRefused(verifyRequest(envelope, w.context()), REFUSAL.NOT_YET_VALID);
 });
 
@@ -247,7 +290,7 @@ test('refuses envelopes signed by a revoked key, and only that key', () => {
   // the same user on a new device key, newly certified, is not caught by the key revocation.
   const newDevice = generateSigningKey();
   const newCertificate = issueCertificate({ issuerPrivateKey: w.issuer.privateKey, user: 'alice', userPublicKey: newDevice.publicKey, issuedAt: NOW - 60, expiresAt: NOW + DAY });
-  const fresh = signRequest({ userPrivateKey: newDevice.privateKey, certificate: newCertificate, domain: 'shop.example.com', requestBytes: 2048, usedBytes: 0, now: NOW });
+  const fresh = signRequest({ userPrivateKey: newDevice.privateKey, certificate: newCertificate, audience: w.peer, domain: 'shop.example.com', requestBytes: 2048, usedBytes: 0, now: NOW });
   assert.equal(verifyRequest(fresh, w.context({ revocationList })).accepted, true);
 });
 
@@ -258,7 +301,7 @@ test('a peer with no revocation list refuses everything', () => {
 
 test('a peer whose revocation list is past its next update refuses everything', () => {
   const w = world();
-  const envelope = signRequest({ userPrivateKey: w.device.privateKey, certificate: w.certificate, domain: 'shop.example.com', requestBytes: 2048, usedBytes: 0, now: NOW + DAY });
+  const envelope = signRequest({ userPrivateKey: w.device.privateKey, certificate: w.certificate, audience: w.peer, domain: 'shop.example.com', requestBytes: 2048, usedBytes: 0, now: NOW + DAY });
   assertRefused(verifyRequest(envelope, w.context({ now: NOW + DAY })), REFUSAL.REVOCATION_LIST_STALE);
 });
 
@@ -320,7 +363,7 @@ test('refuses an envelope from a different cap period', () => {
   const w = world();
   // check at a moment still inside that envelope's lifetime but in the next month.
   const monthStart = Date.parse('2026-10-01T00:00:00Z') / 1000;
-  const straddling = signRequest({ userPrivateKey: w.device.privateKey, certificate: w.certificate, domain: 'shop.example.com', requestBytes: 2048, usedBytes: 0, now: monthStart - 10 });
+  const straddling = signRequest({ userPrivateKey: w.device.privateKey, certificate: w.certificate, audience: w.peer, domain: 'shop.example.com', requestBytes: 2048, usedBytes: 0, now: monthStart - 10 });
   assertRefused(verifyRequest(straddling, w.context({ now: monthStart + 10 })), REFUSAL.WRONG_PERIOD);
 });
 
@@ -373,6 +416,7 @@ test('a verified envelope traces back to its user, even after expiry and revocat
   assert.equal(trace.key, keyIdentifier(w.device.publicKey));
   assert.equal(trace.certificate_serial, decode(w.certificate).serial);
   assert.equal(trace.domain, 'shop.example.com');
+  assert.equal(trace.audience, w.peer);
 });
 
 test('a tampered envelope cannot be traced to anyone', () => {
@@ -391,5 +435,5 @@ test('the issuer only signs certificates for valid user handles', () => {
 test('the originator will not sign with a key its certificate does not name', () => {
   const w = world();
   const other = generateSigningKey();
-  assert.throws(() => signRequest({ userPrivateKey: other.privateKey, certificate: w.certificate, domain: 'shop.example.com', requestBytes: 1, usedBytes: 0, now: NOW }), /different key/);
+  assert.throws(() => signRequest({ userPrivateKey: other.privateKey, certificate: w.certificate, audience: w.peer, domain: 'shop.example.com', requestBytes: 1, usedBytes: 0, now: NOW }), /different key/);
 });

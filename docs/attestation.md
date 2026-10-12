@@ -4,8 +4,8 @@ Status: built and tested for Jose's review, 2026-10-11. Code in `lib/attestation
 `tests/attestation/` and `tests/unit/test_attestation.sh`.
 
 Every request one sirven device carries for another sirven user travels with a signed envelope.
-The envelope says: this is a personal agent, acting for this identified sirven user, going to
-this one allowlisted domain, inside this user's cap for this month. A peer that cannot check
+The envelope says: this is a personal agent, acting for this identified sirven user, carried by
+this one peer, going to this one allowlisted domain, inside this user's cap for this month. A peer that cannot check
 every part of that refuses the request. Nothing is carried on trust.
 
 This is the primitive the ship gate rests on: "Do not ship any peer routing of authenticated
@@ -19,7 +19,7 @@ library described here before it carries a single byte.
 |---|---|---|
 | Identity issuer | The issuer signing key; a record of every certificate it issued; the revocation list it publishes | Any user's signing key |
 | Originator (the user's own device) | The user's signing key, generated on the device; the certificate for that key; bytes sent this month | Anyone else's key |
-| Peer (the device asked to carry a request) | The issuer public keys it trusts; its allowlist; the newest revocation list; its ledger of bytes carried per user per month; nonces it accepted; every envelope it carried; an audit log of every verification | Any signing key of anyone else |
+| Peer (the device asked to carry a request) | A random peer identifier, made once at `peer init`; the issuer public keys it trusts; its allowlist; the newest revocation list; its ledger of bytes carried per user per month; nonces it accepted; every envelope it carried; an audit log of every verification | Any signing key of anyone else |
 
 Who runs the identity issuer: the sirven network. For the first ship that means Jose. Binding a
 real person to a user handle is an identity-verification attestation, which stays Jose's call;
@@ -30,13 +30,18 @@ the tooling here signs a certificate once that decision is made, and never makes
 1. **The device key proves the request came from the device.** Each user's signing key is
    generated on that user's own device (`user init`), written once with mode 0600 in a directory
    with mode 0700, and never overwritten. The command refuses to sign with a key file that others
-   can read. Only the public key leaves the device.
+   can read. Only the public key leaves the device, inside a certification request the device
+   signs with the private key, so the issuer knows the asker holds it.
 2. **The certificate proves the device key belongs to a person.** The identity issuer signs a
-   certificate binding a user handle to that public key (`issuer certify`). A key the user made
+   certificate binding a user handle to that public key (`issuer certify`). It refuses a request
+   whose signature does not verify, and refuses to certify a key it already certified for a
+   different user: one key, one person. A key the user made
    alone proves nothing about who they are; the certificate is what makes the posture
    identity-attested.
-3. **The envelope proves the request is bounded.** The device key signs each request: domain,
-   cap, a lifetime of at most five minutes, and a random nonce. The certificate rides inside the
+3. **The envelope proves the request is bounded.** The device key signs each request: the peer
+   that will carry it, the domain, the cap, a lifetime of at most five minutes, and a random
+   nonce. Naming the peer means an envelope seen on its way to one peer cannot be spent at
+   another, so a peer's audit log never attributes someone else's traffic to the user. The certificate rides inside the
    signed envelope.
 4. **The revocation list proves the user is still in good standing.** The identity issuer signs
    a list of revoked users and revoked keys, with a sequence number that only goes up and a
@@ -57,7 +62,7 @@ All three object types share one outer shape:
 
 - `sirven_attestation` is the envelope format version. A peer refuses a version it does not know.
 - `payload` is base64url of the JSON payload bytes, exactly as signed.
-- `signature` is Ed25519 over a context line, `sirven attestation <type> v<version>` followed by
+- `signature` is Ed25519 (the Edwards-curve digital signature scheme over Curve25519) over a context line, `sirven attestation <type> v<version>` followed by
   a newline, then the payload bytes. The context line means a signature made for one type can
   never be passed off as another, and a signature made for version 1 cannot be replayed under a
   later version.
@@ -68,7 +73,17 @@ All three object types share one outer shape:
   `/usr/bin/openssl` (LibreSSL 3.3.6) has no Ed25519, which ruled out a shell implementation.
 
 Times are whole seconds since the epoch. Byte counts are whole numbers. A key identifier is the
-first 16 bytes of the SHA-256 of the raw 32-byte public key, in base64url.
+first 16 bytes of the SHA-256 hash (the 256-bit Secure Hash Algorithm) of the raw 32-byte
+public key, in base64url.
+
+### Certification request payload (signed by the user's own device key)
+
+| Field | Meaning |
+|---|---|
+| `version`, `type` | `1`, `"certification-request"` |
+| `user` | The user handle asked for |
+| `public_key`, `key` | The device's public key and its key identifier; the signature must verify against this key |
+| `issued_at` | When the device made the request |
 
 ### Certificate payload (signed by the identity issuer)
 
@@ -92,6 +107,7 @@ first 16 bytes of the SHA-256 of the raw 32-byte public key, in base64url.
 | `credential` | The whole signed certificate object |
 | `agent` | `"personal"`: a personal agent acting for its own user |
 | `user`, `key` | Must equal the certificate's |
+| `audience` | The identifier of the one peer this envelope is for |
 | `domain` | One exact domain, lowercase, no trailing dot, no wildcard, port, scheme, or path |
 | `cap.period` | The calendar month in universal time, like `2026-10` |
 | `cap.limit_bytes` | The user's cap for the month |
@@ -126,6 +142,7 @@ against the envelope's own claims. Each refusal has a stable reason string.
 | 3 | The peer has a revocation list from that issuer, and it is not stale | `revocation-list-missing`, `revocation-list-stale` |
 | 3 | Neither the user nor the key is revoked | `revoked` |
 | 4 | The envelope is in its lifetime (30 seconds of clock skew allowed), and the lifetime is at most 300 seconds | `expired`, `not-yet-valid`, `lifetime-too-long` |
+| 5 | The envelope names this peer | `wrong-audience` |
 | 5 | The envelope's domain is the host actually requested, and that domain is on this peer's allowlist | `wrong-domain`, `domain-not-allowlisted` |
 | 6 | The period is this month; the request is no bigger than declared; declared use fits the cap; this peer's own ledger for the user fits the cap | `wrong-period`, `over-declared-size`, `over-cap` |
 | 7 | The nonce has not been accepted before | `replayed` |
@@ -195,8 +212,9 @@ node lib/attestation/cli.mjs --help    # every command
 ```
 
 The demo runs the issuer, the originator, and the peer as separate processes that share only
-files: the originator signs, the peer verifies and accepts, then refuses a tampered envelope, a
-replay, and, after the issuer revokes the user, a fresh envelope from that user.
+files: the originator signs, the peer verifies and accepts, then refuses a tampered envelope and
+a replay; a second peer refuses the same envelope because it was meant for the first; and after
+the issuer revokes the user, the first peer refuses a fresh envelope from that user.
 
 Requires node 18 or newer. `SIRVEN_ATTESTATION_NOW` fixes the clock for tests.
 
@@ -204,6 +222,8 @@ Requires node 18 or newer. `SIRVEN_ATTESTATION_NOW` fixes the clock for tests.
 
 - **Serving the revocation list.** Peers install a list from a file. Fetching it on a schedule
   belongs with the egress path.
+- **Learning the peer identifier.** The originator passes `--audience` by hand. The egress path
+  will learn it when it picks a peer.
 - **Concurrent verification.** The peer command reads and writes its ledger and nonce files
   without a lock. A peer daemon has to verify one request at a time per peer, or hold a lock.
 - **Key rotation and recovery.** A new device means a new `user init`, a new certificate, and

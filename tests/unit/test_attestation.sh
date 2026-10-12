@@ -62,14 +62,14 @@ test_a_signing_key_readable_by_others_is_refused() {
   have_node || return 0
   setup_roles
   chmod 644 "$TEST_TMP/originator/signing.key"
-  assert_status 1 attest sign --dir "$TEST_TMP/originator" --domain shop.example.com --bytes 10
+  assert_status 1 attest sign --dir "$TEST_TMP/originator" --audience "$(cat "$TEST_TMP/peer/peer-identifier")" --domain shop.example.com --bytes 10
   assert_contains "$CAPTURED_STDERR" "readable by others"
 }
 
 test_peer_accepts_then_refuses_a_replay() {
   have_node || return 0
   setup_roles
-  attest sign --dir "$TEST_TMP/originator" --domain shop.example.com --bytes 100 > "$TEST_TMP/envelope.json"
+  attest sign --dir "$TEST_TMP/originator" --audience "$(cat "$TEST_TMP/peer/peer-identifier")" --domain shop.example.com --bytes 100 > "$TEST_TMP/envelope.json"
   assert_status 0 attest peer verify --dir "$TEST_TMP/peer" --host shop.example.com --bytes 100 --envelope "$TEST_TMP/envelope.json"
   assert_contains "$CAPTURED_STDOUT" '"accepted": true'
   assert_status 3 attest peer verify --dir "$TEST_TMP/peer" --host shop.example.com --bytes 100 --envelope "$TEST_TMP/envelope.json"
@@ -79,7 +79,7 @@ test_peer_accepts_then_refuses_a_replay() {
 test_peer_refuses_unsigned_wrong_domain_expired_and_tampered() {
   have_node || return 0
   setup_roles
-  attest sign --dir "$TEST_TMP/originator" --domain shop.example.com --bytes 100 --lifetime 60 > "$TEST_TMP/envelope.json"
+  attest sign --dir "$TEST_TMP/originator" --audience "$(cat "$TEST_TMP/peer/peer-identifier")" --domain shop.example.com --bytes 100 --lifetime 60 > "$TEST_TMP/envelope.json"
 
   sed '/"signature"/d; s/"payload": \("[^"]*"\),/"payload": \1/' "$TEST_TMP/envelope.json" > "$TEST_TMP/unsigned.json"
   assert_status 3 attest peer verify --dir "$TEST_TMP/peer" --host shop.example.com --bytes 100 --envelope "$TEST_TMP/unsigned.json"
@@ -105,13 +105,54 @@ test_peer_refuses_unsigned_wrong_domain_expired_and_tampered() {
   assert_not_contains "$CAPTURED_STDOUT" '"reason": "replayed"'
 }
 
+test_an_envelope_is_good_at_its_own_peer_only() {
+  have_node || return 0
+  setup_roles
+  attest peer init --dir "$TEST_TMP/other-peer" --issuer-public-key "$TEST_TMP/issuer/issuer.pub" --allowlist "$TEST_TMP/allowlist" > /dev/null
+  attest peer install-revocation-list --dir "$TEST_TMP/other-peer" --list "$TEST_TMP/issuer/revocation-list.json" > /dev/null
+  attest sign --dir "$TEST_TMP/originator" --audience "$(cat "$TEST_TMP/peer/peer-identifier")" --domain shop.example.com --bytes 100 > "$TEST_TMP/envelope.json"
+  assert_status 3 attest peer verify --dir "$TEST_TMP/other-peer" --host shop.example.com --bytes 100 --envelope "$TEST_TMP/envelope.json"
+  assert_contains "$CAPTURED_STDOUT" '"reason": "wrong-audience"'
+  assert_status 0 attest peer verify --dir "$TEST_TMP/peer" --host shop.example.com --bytes 100 --envelope "$TEST_TMP/envelope.json"
+}
+
+test_issuer_needs_proof_the_requester_holds_the_key() {
+  have_node || return 0
+  setup_roles
+  # bob asks for a certificate on alice's public key, with a request he could not sign.
+  node -e '
+    const fs = require("fs");
+    const request = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+    const payload = JSON.parse(Buffer.from(request.payload, "base64url").toString("utf8"));
+    payload.user = "bob";
+    request.payload = Buffer.from(JSON.stringify(payload)).toString("base64url");
+    fs.writeFileSync(process.argv[2], JSON.stringify(request));
+  ' "$TEST_TMP/request.json" "$TEST_TMP/forged-request.json"
+  assert_status 3 attest issuer certify --dir "$TEST_TMP/issuer" --request "$TEST_TMP/forged-request.json"
+  assert_contains "$CAPTURED_STDERR" "bad-signature"
+}
+
+test_issuer_never_certifies_one_key_for_two_users() {
+  have_node || return 0
+  setup_roles
+  # alice's own device signs a request for a second handle; the issuer still refuses.
+  node --input-type=module -e "
+    import { readFileSync, writeFileSync } from 'node:fs';
+    const { makeCertificationRequest, privateKeyFromPem } = await import('$REPO_DIR/lib/attestation/attestation.mjs');
+    const key = privateKeyFromPem(readFileSync('$TEST_TMP/originator/signing.key', 'utf8'));
+    writeFileSync('$TEST_TMP/second-request.json', JSON.stringify(makeCertificationRequest({ userPrivateKey: key, user: 'alice2', now: 1792065600 })));
+  " || fail "could not make the second request"
+  assert_status 1 attest issuer certify --dir "$TEST_TMP/issuer" --request "$TEST_TMP/second-request.json"
+  assert_contains "$CAPTURED_STDERR" "already certified for another user"
+}
+
 test_revocation_reaches_the_peer() {
   have_node || return 0
   setup_roles
   attest issuer revoke --dir "$TEST_TMP/issuer" --user alice --reason test > /dev/null
   attest issuer publish --dir "$TEST_TMP/issuer" > /dev/null
   attest peer install-revocation-list --dir "$TEST_TMP/peer" --list "$TEST_TMP/issuer/revocation-list.json" > /dev/null
-  attest sign --dir "$TEST_TMP/originator" --domain shop.example.com --bytes 100 > "$TEST_TMP/envelope.json"
+  attest sign --dir "$TEST_TMP/originator" --audience "$(cat "$TEST_TMP/peer/peer-identifier")" --domain shop.example.com --bytes 100 > "$TEST_TMP/envelope.json"
   assert_status 3 attest peer verify --dir "$TEST_TMP/peer" --host shop.example.com --bytes 100 --envelope "$TEST_TMP/envelope.json"
   assert_contains "$CAPTURED_STDOUT" '"reason": "revoked"'
 }
@@ -130,7 +171,7 @@ test_peer_without_a_revocation_list_refuses() {
   have_node || return 0
   setup_roles
   rm "$TEST_TMP/peer/revocation-list.json"
-  attest sign --dir "$TEST_TMP/originator" --domain shop.example.com --bytes 100 > "$TEST_TMP/envelope.json"
+  attest sign --dir "$TEST_TMP/originator" --audience "$(cat "$TEST_TMP/peer/peer-identifier")" --domain shop.example.com --bytes 100 > "$TEST_TMP/envelope.json"
   assert_status 3 attest peer verify --dir "$TEST_TMP/peer" --host shop.example.com --bytes 100 --envelope "$TEST_TMP/envelope.json"
   assert_contains "$CAPTURED_STDOUT" '"reason": "revocation-list-missing"'
 }
@@ -142,8 +183,8 @@ test_peer_ledger_holds_the_cap() {
   rm -rf "$TEST_TMP/peer"
   attest peer init --dir "$TEST_TMP/peer" --issuer-public-key "$TEST_TMP/issuer/issuer.pub" --allowlist "$TEST_TMP/allowlist" --cap-bytes 150 > /dev/null
   attest peer install-revocation-list --dir "$TEST_TMP/peer" --list "$TEST_TMP/issuer/revocation-list.json" > /dev/null
-  attest sign --dir "$TEST_TMP/originator" --domain shop.example.com --bytes 100 > "$TEST_TMP/first.json"
-  attest sign --dir "$TEST_TMP/originator" --domain shop.example.com --bytes 100 > "$TEST_TMP/second.json"
+  attest sign --dir "$TEST_TMP/originator" --audience "$(cat "$TEST_TMP/peer/peer-identifier")" --domain shop.example.com --bytes 100 > "$TEST_TMP/first.json"
+  attest sign --dir "$TEST_TMP/originator" --audience "$(cat "$TEST_TMP/peer/peer-identifier")" --domain shop.example.com --bytes 100 > "$TEST_TMP/second.json"
   assert_status 0 attest peer verify --dir "$TEST_TMP/peer" --host shop.example.com --bytes 100 --envelope "$TEST_TMP/first.json"
   assert_status 3 attest peer verify --dir "$TEST_TMP/peer" --host shop.example.com --bytes 100 --envelope "$TEST_TMP/second.json"
   assert_contains "$CAPTURED_STDOUT" '"reason": "over-cap"'
@@ -152,7 +193,7 @@ test_peer_ledger_holds_the_cap() {
 test_every_verification_is_audited_and_traceable() {
   have_node || return 0
   setup_roles
-  attest sign --dir "$TEST_TMP/originator" --domain shop.example.com --bytes 100 > "$TEST_TMP/envelope.json"
+  attest sign --dir "$TEST_TMP/originator" --audience "$(cat "$TEST_TMP/peer/peer-identifier")" --domain shop.example.com --bytes 100 > "$TEST_TMP/envelope.json"
   attest peer verify --dir "$TEST_TMP/peer" --host shop.example.com --bytes 100 --envelope "$TEST_TMP/envelope.json" > /dev/null
   attest peer verify --dir "$TEST_TMP/peer" --host bank.example.com --bytes 100 --envelope "$TEST_TMP/envelope.json" > /dev/null || true
   assert_eq 2 "$(grep -c '"event":"attestation_verify"' "$TEST_TMP/peer/audit.jsonl")" "audit entries"

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # the local attestation demo: an originator signs, a separate peer process verifies, and the
-# peer refuses a tampered envelope, a replay, and a revoked user. nothing touches the network:
+# peer refuses a tampered envelope, a replay, the same envelope at a peer it was not meant
+# for, and a revoked user. nothing touches the network:
 # the processes share files in a scratch directory, the way a peer would receive an envelope
 # alongside the request it is asked to carry.
 #
@@ -29,6 +30,7 @@ fi
 ISSUER="$WORK/issuer"
 ORIGINATOR="$WORK/originator"
 PEER="$WORK/peer"
+OTHER_PEER="$WORK/other-peer"
 failures=0
 
 attest() {
@@ -78,9 +80,12 @@ say "peer: trust the issuer, set the allowlist, install the revocation list"
 printf 'shop.example.com\n' > "$WORK/allowlist"
 attest peer init --dir "$PEER" --issuer-public-key "$ISSUER/issuer.pub" --allowlist "$WORK/allowlist"
 attest peer install-revocation-list --dir "$PEER" --list "$ISSUER/revocation-list.json"
+attest peer init --dir "$OTHER_PEER" --issuer-public-key "$ISSUER/issuer.pub" --allowlist "$WORK/allowlist" > /dev/null
+attest peer install-revocation-list --dir "$OTHER_PEER" --list "$ISSUER/revocation-list.json" > /dev/null
+AUDIENCE="$(cat "$PEER/peer-identifier")"
 
-say "originator: sign a 2048 byte request to shop.example.com"
-attest sign --dir "$ORIGINATOR" --domain shop.example.com --bytes 2048 > "$WORK/envelope.json"
+say "originator: sign a 2048 byte request to shop.example.com, for this one peer"
+attest sign --dir "$ORIGINATOR" --audience "$AUDIENCE" --domain shop.example.com --bytes 2048 > "$WORK/envelope.json"
 
 say "peer: verify the signed envelope"
 peer_verify shop.example.com 2048 "$WORK/envelope.json" "$WORK/verdict-good.json"
@@ -102,6 +107,11 @@ say "attacker: replay the envelope the peer already accepted"
 peer_verify shop.example.com 2048 "$WORK/envelope.json" "$WORK/verdict-replay.json"
 expect replayed "$WORK/verdict-replay.json"
 
+say "attacker: spend the same envelope at a different peer"
+attest peer verify --dir "$OTHER_PEER" --host shop.example.com --bytes 2048 --envelope "$WORK/envelope.json" > "$WORK/verdict-other-peer.json" || true
+cat "$WORK/verdict-other-peer.json"
+expect wrong-audience "$WORK/verdict-other-peer.json"
+
 say "abuse report: trace the carried envelope back to its user"
 attest trace --dir "$PEER" --envelope "$WORK/envelope.json" > "$WORK/trace.json"
 cat "$WORK/trace.json"
@@ -118,7 +128,7 @@ attest issuer publish --dir "$ISSUER" > /dev/null
 attest peer install-revocation-list --dir "$PEER" --list "$ISSUER/revocation-list.json"
 
 say "originator: sign a fresh request; the peer must refuse it"
-attest sign --dir "$ORIGINATOR" --domain shop.example.com --bytes 1024 > "$WORK/envelope-after.json"
+attest sign --dir "$ORIGINATOR" --audience "$AUDIENCE" --domain shop.example.com --bytes 1024 > "$WORK/envelope-after.json"
 peer_verify shop.example.com 1024 "$WORK/envelope-after.json" "$WORK/verdict-revoked.json"
 expect revoked "$WORK/verdict-revoked.json"
 
