@@ -87,8 +87,8 @@ The end-to-end demo thread can drive it as the scripted concierge console's back
 
 ## 5. Two ways in: a person quotes, or a person only confirms
 
-The ride connector contract thread (branch `model-context-protocol-connector-contract-for-ri-thr_jzapafb9uf`,
-commit 5e9d5f9, not yet merged) already settled a shape for human-assisted rides that differs
+The ride connector contract (`docs/ride-connector-contract.md`, merged into main on 2026-10-11)
+already settled a shape for human-assisted rides that differs
 from the flow in section 2:
 
 - Software produces the quote for a concierge-served option (an estimate with a fare ceiling).
