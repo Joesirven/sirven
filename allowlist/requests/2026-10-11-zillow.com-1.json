@@ -1,0 +1,25 @@
+{
+  "request": "2026-10-11-zillow.com-1",
+  "domain": "zillow.com",
+  "received": "2026-10-11",
+  "requested_by": "sirven",
+  "case_for_personal_agent_use": "a personal agent searches listings and saves homes for a user who is house hunting, and sends tour requests the user approved.",
+  "risk_notes": "the primary terms page refused an automated fetch (HTTP 403) on 2026-10-11, so the terms text below comes from a secondary source until read by hand.",
+  "public_positions": [
+    {
+      "kind": "statement",
+      "url": "https://techcrunch.com/2026/10/06/the-next-hurdle-for-ai-agents-getting-websites-to-let-them-in/",
+      "retrieved": "2026-10-11"
+    },
+    {
+      "kind": "terms",
+      "url": "https://www.zillow.com/z/corp/terms/",
+      "retrieved": "2026-10-11"
+    },
+    {
+      "kind": "other",
+      "url": "https://conductatlas.com/platform/zillow/zillow-terms-of-use/services-limited-to-own-transactions-only/",
+      "retrieved": "2026-10-11"
+    }
+  ]
+}

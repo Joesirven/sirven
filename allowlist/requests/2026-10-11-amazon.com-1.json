@@ -1,0 +1,25 @@
+{
+  "request": "2026-10-11-amazon.com-1",
+  "domain": "amazon.com",
+  "received": "2026-10-11",
+  "requested_by": "sirven_user",
+  "case_for_personal_agent_use": "a personal agent compares prices and places orders on the user's own Amazon account, the most common shopping request users make of agents.",
+  "risk_notes": "Amazon sued Perplexity in November 2025 over its Comet agent shopping in signed-in accounts; a preliminary injunction in March 2026 was vacated by the Ninth Circuit in August 2026; the case is ongoing.",
+  "public_positions": [
+    {
+      "kind": "enforcement",
+      "url": "https://www.cooley.com/news/insight/2026/2026-03-17-court-finds-ai-agent-may-violate-state-federal-law-by-accessing-amazon-accounts-without-authorization",
+      "retrieved": "2026-10-11"
+    },
+    {
+      "kind": "enforcement",
+      "url": "https://www.law360.com/technology/articles/2509559",
+      "retrieved": "2026-10-11"
+    },
+    {
+      "kind": "statement",
+      "url": "https://techcrunch.com/2026/10/06/the-next-hurdle-for-ai-agents-getting-websites-to-let-them-in/",
+      "retrieved": "2026-10-11"
+    }
+  ]
+}

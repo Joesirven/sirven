@@ -1,6 +1,6 @@
 {
   "format": "sirven-allowlist-registry/1",
-  "version": 1,
+  "version": 2,
   "updated": "2026-10-11",
   "about": "sites a sirven node may carry for other sirven users. only the approved list is eligible; pending and declined are published so operators see what is coming and what was refused. the matching rules and the review rubric are in docs/allowlist-review.md.",
   "matching": {
@@ -13,13 +13,61 @@
   ],
   "quorum": 1,
   "approved": [],
-  "pending": [],
+  "pending": [
+    {
+      "domain": "amazon.com",
+      "includes_subdomains": false,
+      "decision_record": "decisions/2026-10-11-amazon.com-1.json",
+      "requested": "2026-10-11",
+      "rationale": "decline for both scopes: Amazon treats personal-agent shopping as unauthorized access and is litigating it, so peers would carry legal and blocking risk. a user's agent can still reach Amazon over the user's own Solo egress, where blocking is surfaced honestly.",
+      "recommended": {
+        "decision": "decline",
+        "scope": []
+      },
+      "status": "pending reviewer approval"
+    },
+    {
+      "domain": "waymo.com",
+      "includes_subdomains": false,
+      "decision_record": "decisions/2026-10-11-waymo.com-1.json",
+      "requested": "2026-10-11",
+      "rationale": "approve public pages only: personal-agent reads of service information are legitimate and low risk for peers. do not approve authenticated sessions until Waymo gives written consent, which the terms require; booking goes through an official partner path instead.",
+      "recommended": {
+        "decision": "approve",
+        "scope": [
+          "public_pages"
+        ]
+      },
+      "status": "pending reviewer approval"
+    },
+    {
+      "domain": "zillow.com",
+      "includes_subdomains": false,
+      "decision_record": "decisions/2026-10-11-zillow.com-1.json",
+      "requested": "2026-10-11",
+      "rationale": "defer: the statement is the most welcoming of the three, but the terms were not read at the primary source. before any approval: read the primary terms by hand, and ask Zillow to confirm in writing that a user's own agent counts as the user acting on their own behalf.",
+      "recommended": {
+        "decision": "defer",
+        "scope": []
+      },
+      "status": "pending reviewer approval"
+    }
+  ],
   "declined": [],
   "history": [
     {
       "version": 1,
       "date": "2026-10-11",
       "note": "registry created"
+    },
+    {
+      "version": 2,
+      "date": "2026-10-11",
+      "added_to_pending": [
+        "amazon.com",
+        "waymo.com",
+        "zillow.com"
+      ]
     }
   ]
 }

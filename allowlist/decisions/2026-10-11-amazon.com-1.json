@@ -1,0 +1,29 @@
+{
+  "decision": "2026-10-11-amazon.com-1",
+  "request": "2026-10-11-amazon.com-1",
+  "domain": "amazon.com",
+  "includes_subdomains": false,
+  "supersedes": null,
+  "prepared_by": "sirven allowlist review thread (agent)",
+  "prepared": "2026-10-11",
+  "rubric": {
+    "legitimate_personal_agent_use": {
+      "rating": "pass",
+      "finding": "comparing prices and ordering on the user's own account is personal use; the user is the customer."
+    },
+    "peer_operator_risk": {
+      "rating": "fail",
+      "finding": "Amazon has litigated exactly this traffic. a residential peer carrying signed-in agent sessions would be the network address Amazon sees, in a dispute where Amazon claims unauthorized computer access. no peer operator should carry that."
+    },
+    "site_position": {
+      "rating": "fail",
+      "finding": "Amazon sued Perplexity in November 2025 over the Comet agent shopping in signed-in accounts; a district court granted a preliminary injunction in March 2026; the Ninth Circuit vacated it in August 2026; the case continues. Amazon also blocked Meta's Muse agent (TechCrunch, 2026-10-06). the site plainly treats this traffic as abuse."
+    }
+  },
+  "recommendation": {
+    "decision": "decline",
+    "scope": [],
+    "rationale": "decline for both scopes: Amazon treats personal-agent shopping as unauthorized access and is litigating it, so peers would carry legal and blocking risk. a user's agent can still reach Amazon over the user's own Solo egress, where blocking is surfaced honestly."
+  },
+  "votes": []
+}

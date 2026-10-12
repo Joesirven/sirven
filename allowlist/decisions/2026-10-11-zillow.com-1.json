@@ -1,0 +1,29 @@
+{
+  "decision": "2026-10-11-zillow.com-1",
+  "request": "2026-10-11-zillow.com-1",
+  "domain": "zillow.com",
+  "includes_subdomains": false,
+  "supersedes": null,
+  "prepared_by": "sirven allowlist review thread (agent)",
+  "prepared": "2026-10-11",
+  "rubric": {
+    "legitimate_personal_agent_use": {
+      "rating": "pass",
+      "finding": "house hunting for one person (searching, saving homes, requesting a tour the user approved) is personal use. Zillow told TechCrunch on 2026-10-06 that it allows AI agents acting on behalf of consumers."
+    },
+    "peer_operator_risk": {
+      "rating": "concern",
+      "finding": "Zillow refused an automated fetch of its own terms page (HTTP 403, 2026-10-11), so it runs bot defenses that may flag residential peers carrying agent traffic, and a flagged operator could lose access to Zillow for their own use."
+    },
+    "site_position": {
+      "rating": "concern",
+      "finding": "the public statement is supportive, but the terms as quoted by a secondary source say that without a commercial agreement the services may be used only for transactions on your own behalf, and acting for someone needs proof of authorization. the primary terms page was not read; this finding is unverified until the reviewer reads it by hand."
+    }
+  },
+  "recommendation": {
+    "decision": "defer",
+    "scope": [],
+    "rationale": "defer: the statement is the most welcoming of the three, but the terms were not read at the primary source. before any approval: read the primary terms by hand, and ask Zillow to confirm in writing that a user's own agent counts as the user acting on their own behalf."
+  },
+  "votes": []
+}
