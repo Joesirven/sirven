@@ -25,3 +25,18 @@ test_no_acronyms() {
   hits="$(cd "$REPO_DIR" && package_files | while IFS= read -r file; do grep -n -E "$pattern" "$file" | sed "s|^|$file:|"; done)"
   assert_eq "" "$hits" "acronyms found; spell the term out"
 }
+
+# concierge-ops is operations material, not shipped, but it carries the same rules: terms
+# spelled out (plus the operations shorthand that tends to creep in), and em-dashes sparingly.
+test_concierge_documents_keep_the_house_style() {
+  local em pattern hits
+  em="$(printf '\342\200\224')"
+  pattern='\b(ACLs?|OS|CLI|UID|GID|PID|TODO|FIXME|IP|DNS|UTC|ISO|PIN|OTP|VM|VPN|TCP|UDP|EOF|TTY|CPU|YAML|CI|UI|IDs?|OK|SLA|SLO|PA|MCP|KB|T&S|PTO|W-2|1099|FAQ|ETA|KPI|ASAP|FYI)\b|\be\.g\.|\bi\.e\.'
+  hits="$(cd "$REPO_DIR" && find concierge-ops -type f | sort | while IFS= read -r file; do grep -n -E "$pattern" "$file" | sed "s|^|$file:|"; done)"
+  assert_eq "" "$hits" "acronyms found in concierge-ops; spell the term out"
+  # em-dashes sparingly: never more than one in a paragraph.
+  hits="$(cd "$REPO_DIR" && find concierge-ops -name '*.md' | sort | while IFS= read -r file; do
+    awk -v em="$em" -v file="$file" 'BEGIN { RS = "" } { n = gsub(em, em); if (n > 1) print file ": paragraph " NR " has " n }' "$file"
+  done)"
+  assert_eq "" "$hits" "more than one em-dash in a paragraph"
+}

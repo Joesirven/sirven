@@ -1,0 +1,7 @@
+{
+  "concierges": [
+    {"concierge": "concierge-1", "display_name": "Example A., sirven concierge", "status": "active"},
+    {"concierge": "concierge-2", "display_name": "Example B., sirven concierge", "status": "active"},
+    {"concierge": "concierge-3", "display_name": "Example C., sirven concierge", "status": "offboarded"}
+  ]
+}
