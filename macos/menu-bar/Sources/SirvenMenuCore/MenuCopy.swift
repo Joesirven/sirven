@@ -3,7 +3,15 @@ import Foundation
 /// Every word the menu bar app shows, in one place. The consent text for hiding Tailscale's
 /// menu bar item is mirrored in copy/menu-bar-tailscale.md for Jose's review; change both together.
 public enum MenuCopy {
-    public static let appName = "Sirven"
+    /// The product name is a working name that lives in project.json; build-app.sh writes it into
+    /// the bundle, and the app reads it back from there. Outside a bundle (tests, `--print-menu`
+    /// from a bare build) it falls back to the working name.
+    public static let appName: String = {
+        guard Bundle.main.bundleURL.pathExtension == "app",
+              let name = Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String,
+              !name.isEmpty else { return "Sirven" }
+        return name
+    }()
 
     public static let tierLabel = "Tier:"
     public static let tierSettings = "Tier settings\u{2026}"
@@ -20,6 +28,7 @@ public enum MenuCopy {
     public static let agentNotConnected = "not connected"
     public static let agentIdle = "idle"
     public static let agentWorking = "working"
+    public static let agentWorkingOn = "working on"
     public static let agentWaiting = "waiting for you"
 
     public static let keepAwakeLabel = "Keep awake:"
@@ -51,7 +60,7 @@ public enum MenuCopy {
 
     public static let hideTailscaleItem = "Hide Tailscale\u{2019}s menu bar item\u{2026}"
     public static let openTailscale = "Open Tailscale"
-    public static let quit = "Quit Sirven"
+    public static var quit: String { "Quit \(appName)" }
 
     // the consent moment for hiding Tailscale's own menu bar item. sirven cannot hide another
     // app's item, and Tailscale has no setting for it, so the person flips the macOS switch.

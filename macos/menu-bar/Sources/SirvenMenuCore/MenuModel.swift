@@ -83,7 +83,9 @@ public enum MenuModel {
         switch agent.activity {
         case .notConnected: return "\(MenuCopy.agentLabel) \(MenuCopy.agentNotConnected)"
         case .idle: return "\(MenuCopy.agentLabel) \(MenuCopy.agentIdle)"
-        case .working: return "\(MenuCopy.agentLabel) \(withTask(MenuCopy.agentWorking, agent.task))"
+        case .working:
+            guard let task = agent.task, !task.isEmpty else { return "\(MenuCopy.agentLabel) \(MenuCopy.agentWorking)" }
+            return "\(MenuCopy.agentLabel) \(MenuCopy.agentWorkingOn) \(task)"
         case .waitingForYou: return "\(MenuCopy.agentLabel) \(withTask(MenuCopy.agentWaiting, agent.task))"
         }
     }

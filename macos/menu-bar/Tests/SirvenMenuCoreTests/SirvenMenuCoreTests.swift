@@ -207,7 +207,7 @@ final class MenuModelTests: XCTestCase {
               Nothing shared. Your agent asks before every real-world action.
               ---
               Tier settings\u{2026}
-          Agent: working: comparing flights
+          Agent: working on comparing flights
           Keep awake: on for comparing flights, since 2:00 PM
           ---
           Tailscale: connected

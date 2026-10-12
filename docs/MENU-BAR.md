@@ -9,7 +9,7 @@ cares about. The source is `macos/menu-bar/`, a Swift package.
 ```
 # Sirven
   Tier: Solo >                      Solo checked; Neighborly and Co-op shown, not choosable yet
-  Agent: working: comparing flights
+  Agent: working on comparing flights
   Keep awake: on for comparing flights, since 2:00 PM
   ---
   Tailscale: connected
@@ -48,9 +48,8 @@ The tool is found in this order: `SIRVEN_TAILSCALE` (tests point it at a fake), 
 eight-second timeout. The menu refreshes when it opens and after every change. When Tailscale
 refuses a change, the menu shows Tailscale's own words on a "That did not work:" line.
 
-Tailscale's local API was considered and not used. The App Store build of Tailscale does not
-serve it over the socket other builds use, and the command-line tool already speaks it correctly
-on every build.
+Tailscale's local API was considered and not used directly: the command-line tool already
+handles each Tailscale build's local interface, so Sirven depends on one documented surface.
 
 The app must not be sandboxed: a sandboxed app cannot start Tailscale's command-line tool. The
 download and onboarding pipeline needs to sign it with the hardened runtime and without the App
@@ -131,10 +130,15 @@ it is coming.
 ## Build, test, run
 
 ```
-make menu-bar           builds macos/menu-bar/build/Sirven.app (release build, LSUIElement, ad hoc signature)
+make menu-bar           builds macos/menu-bar/build/<name>.app (release build, LSUIElement, ad hoc signature)
 make test-menu-bar      swift test: parsing, the command-line tool calls against a fake, and the menu as text
 open macos/menu-bar/build/Sirven.app
 ```
+
+The product name is read from `project.json` (it is a working name), into the bundle and from
+there into the menu. The bundle identifier defaults to a placeholder, `org.example.sirven.menu-bar`;
+`BUNDLE_IDENTIFIER=...` sets the real one once the signed bundle and the keep-awake helper settle
+a shared identifier. The menu copy in `MenuCopy.swift` still says "Sirven" in prose.
 
 Changing actions (connect, disconnect, exit node) are tested against
 `Tests/SirvenMenuCoreTests/Fixtures/fake-tailscale.sh`, never against a real tailnet. The
@@ -148,7 +152,15 @@ fixtures are synthetic: no real device names, addresses, or logins.
 - The built app runs, and macOS reports it as an agent app (`lsappinfo` type `UIElement`): no
   Dock icon.
 
-Not yet verified by hand: clicking Connect, Disconnect, and an exit node in the real menu. The
-build machine reaches the coordinator over the same tailnet, so these were not run here. To
-check: open the app, choose an exit node and see Tailscale's own app agree, choose No exit node,
-then Disconnect and Connect.
+Not yet verified by hand, for Jose to check on his Mac (the build machine reaches the
+coordinator over the same tailnet, so changing Tailscale was not run here):
+
+1. Open the app. The ring icon appears in the menu bar, the menu opens, and each submenu (Tier,
+   This device, Exit node) draws.
+2. Choose an exit node, and see Tailscale's own app agree. Choose No exit node.
+3. Disconnect, then Connect.
+4. Choose "Hide Tailscale's menu bar item…", then Open Menu Bar Settings. System Settings opens
+   at the Menu Bar pane.
+5. In that pane, Tailscale appears under "Allow in the Menu Bar", and turning it off hides
+   Tailscale's item. The whole suppression route depends on this step.
+6. Choose Open Tailscale, and Tailscale's window opens.
