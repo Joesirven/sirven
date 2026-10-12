@@ -13,11 +13,13 @@ import http.client
 import json
 import os
 import shutil
+import signal
 import ssl
 import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -423,6 +425,76 @@ class ProxyChannelTests(RuntimeCase):
         self.assertEqual(0, completed.returncode, completed.stderr)
         self.assertIn(b"hello from the origin", completed.stdout)
         self.assertEqual("tunnel", self.decisions()[-1]["channel"])
+
+
+PLUGGED_POLICY = '''
+from sirven_runtime.policy import SoloPolicy
+from sirven_runtime.seam import Decision
+
+
+class Plugged:
+    name = "plugged"
+
+    def __init__(self, settings):
+        self.solo = SoloPolicy(settings)
+
+    def classify(self, request):
+        decision = self.solo.classify(request)
+        if decision.route == "refuse":
+            return decision
+        return Decision("local", "plugged_allowed", "The plugged policy allowed it.", self.name)
+
+
+def make(settings):
+    return Plugged(settings)
+'''
+
+
+class CommandLifecycleTests(RuntimeCase):
+    """bin/sirven runtime serve as its own process, with a policy engine plugged into the seam."""
+
+    def test_serve_with_a_plugged_policy_then_stop(self):
+        modules = os.path.join(self.folder, "modules")
+        os.makedirs(modules)
+        with open(os.path.join(modules, "plugged_policy.py"), "w") as handle:
+            handle.write(PLUGGED_POLICY)
+        state = os.path.join(self.folder, "served")
+        settings = os.path.join(self.folder, "settings.json")
+        environment = dict(os.environ, PYTHONPATH=modules)
+        sirven = os.path.join(REPO, "bin", "sirven")
+        process = subprocess.Popen([sirven, "runtime", "--state-dir", state, "serve", "--port", "0",
+                                    "--settings", settings, "--fetcher", "python",
+                                    "--policy", "plugged_policy:make"],
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=environment)
+        self.addCleanup(process.stderr.close)
+        self.addCleanup(process.stdout.close)
+        self.addCleanup(lambda: process.poll() is None and process.kill())
+        discovery = os.path.join(state, "runtime.json")
+        for _ in range(100):
+            if os.path.exists(discovery) or process.poll() is not None:
+                break
+            time.sleep(0.1)
+        self.assertTrue(os.path.exists(discovery), process.stderr.read().decode("utf-8") if process.poll() is not None else "")
+
+        def agent(*arguments):
+            completed = subprocess.run([sirven, "runtime", "--state-dir", state] + list(arguments),
+                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
+            return completed.returncode, json.loads(completed.stdout.decode("utf-8"))
+
+        code, record = agent("fetch", self.origin_url("/page"))
+        self.assertEqual((0, "ok", "plugged", "plugged_allowed"),
+                         (code, record["outcome"], record["decision"]["policy"], record["decision"]["reason"]))
+        code, record = agent("fetch", "http://www.blocked.example/")
+        self.assertEqual((2, "blocked_by_owner"), (code, record["decision"]["reason"]))
+        self.assertEqual("plugged", agent("status")[1]["policy"])
+
+        process.send_signal(signal.SIGTERM)
+        self.assertEqual(0, process.wait(timeout=10))
+        self.assertFalse(os.path.exists(discovery))
+        completed = subprocess.run([sirven, "runtime", "--state-dir", state, "status"],
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
+        self.assertEqual(69, completed.returncode)
+        self.assertIn(b"the runtime is not running", completed.stderr)
 
 
 # the Swift helper: the browser-like fingerprint ------------------------------------------
