@@ -11,18 +11,42 @@ import SirvenKeepAwake
 let markerDirectory = URL(fileURLWithPath: "/Library/Application Support/sirven/keep-awake-helper", isDirectory: true)
 let marker = markerDirectory.appendingPathComponent("sleep-disabled-by-sirven")
 
-/// the supported command for this setting. fixed arguments only; nothing from the caller reaches it.
-func setSystemSleepDisabled(_ disabled: Bool) -> String? {
+/// run pmset with fixed arguments only; nothing from the caller reaches it.
+func pmset(_ arguments: [String]) -> (status: Int32, output: String) {
     let process = Process()
+    let pipe = Pipe()
     process.executableURL = URL(fileURLWithPath: "/usr/bin/pmset")
-    process.arguments = ["-a", "disablesleep", disabled ? "1" : "0"]
+    process.arguments = arguments
+    process.standardOutput = pipe
     do {
         try process.run()
-        process.waitUntilExit()
     } catch {
-        return "pmset could not run: \(error.localizedDescription)"
+        return (-1, "pmset could not run: \(error.localizedDescription)")
     }
-    guard process.terminationStatus == 0 else { return "pmset exited with status \(process.terminationStatus)" }
+    let output = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+    process.waitUntilExit()
+    return (process.terminationStatus, output)
+}
+
+/// true when the system's sleep-disabled setting is on right now, whoever turned it on.
+func systemSleepIsDisabled() -> Bool {
+    pmset(["-g"]).output.split(separator: "\n").contains {
+        let words = $0.split(whereSeparator: \.isWhitespace)
+        return words.count >= 2 && words[0] == "SleepDisabled" && words[1] == "1"
+    }
+}
+
+/// turn the setting on for sirven, or put it back. it only ever turns off what it turned on: if
+/// the user already had the setting on, sirven leaves it alone and writes no marker.
+func setSystemSleepDisabled(_ disabled: Bool) -> String? {
+    let ours = FileManager.default.fileExists(atPath: marker.path)
+    if disabled {
+        if ours || systemSleepIsDisabled() { return nil }
+    } else if !ours {
+        return nil
+    }
+    let result = pmset(["-a", "disablesleep", disabled ? "1" : "0"])
+    guard result.status == 0 else { return "pmset exited with status \(result.status)" }
     if disabled {
         try? FileManager.default.createDirectory(at: markerDirectory, withIntermediateDirectories: true)
         FileManager.default.createFile(atPath: marker.path, contents: Data())
@@ -78,9 +102,7 @@ final class Helper: NSObject, NSXPCListenerDelegate {
 }
 
 // an earlier run that ended without reverting (a crash, a power loss) left the marker behind.
-if FileManager.default.fileExists(atPath: marker.path) {
-    if let problem = setSystemSleepDisabled(false) { NSLog("sirven keep-awake helper: could not revert at start: \(problem)") }
-}
+if let problem = setSystemSleepDisabled(false) { NSLog("sirven keep-awake helper: could not revert at start: \(problem)") }
 
 let helper = Helper()
 let listener = NSXPCListener(machServiceName: KeepAwakeIdentity.helperLabel)
@@ -88,7 +110,7 @@ listener.delegate = helper
 listener.resume()
 for signalNumber in [SIGTERM, SIGINT] {
     signal(signalNumber) { _ in
-        if FileManager.default.fileExists(atPath: marker.path) { _ = setSystemSleepDisabled(false) }
+        _ = setSystemSleepDisabled(false)
         exit(0)
     }
 }

@@ -4,14 +4,15 @@
 # keeps its state in TEST_TMP. skipped on linux, and when the program is not built (make keep-awake).
 
 keep_awake_ready() {
+  # set these first, so no path through here can reach the user's real keep-awake state.
+  export SIRVEN_KEEP_AWAKE_DIR="$TEST_TMP/keep-awake"
+  export SIRVEN_KEEP_AWAKE_GRACE=0.3
   [ "$(uname -s)" = Darwin ] || return 1
   [ -x "${SIRVEN_KEEP_AWAKE_BIN:-}" ] && return 0
   for SIRVEN_KEEP_AWAKE_BIN in "$REPO_DIR/macos/keep-awake/.build/release/sirven-keep-awake" \
     "$REPO_DIR/macos/keep-awake/.build/debug/sirven-keep-awake"; do
     if [ -x "$SIRVEN_KEEP_AWAKE_BIN" ]; then
       export SIRVEN_KEEP_AWAKE_BIN
-      export SIRVEN_KEEP_AWAKE_DIR="$TEST_TMP/keep-awake"
-      export SIRVEN_KEEP_AWAKE_GRACE=0.3
       return 0
     fi
   done
@@ -69,8 +70,11 @@ test_keep_awake_help_and_about_carry_the_credit() {
   assert_contains "$CAPTURED_STDOUT" "Inspired by Sleepless by itskoosh (MIT)."
   assert_status 64 awake begin
   assert_status 64 awake begin "bad name" --reason x
-  assert_status 64 awake begin fine-name
+  assert_status 64 awake begin fine-name --owner $$
   assert_contains "$CAPTURED_STDERR" "a reason is needed"
+  assert_status 64 awake begin fine-name --reason "no owner"
+  assert_contains "$CAPTURED_STDERR" "begin needs --owner"
+  assert_eq "" "$(ls "$SIRVEN_KEEP_AWAKE_DIR/work" 2>/dev/null)" "a refused begin records nothing"
 }
 
 test_keep_awake_asserts_while_work_is_in_flight_and_releases_on_end() {
@@ -79,7 +83,7 @@ test_keep_awake_asserts_while_work_is_in_flight_and_releases_on_end() {
   sleep 60 &
   owner=$!
   assert_status 0 awake begin inbox --reason "summarize the inbox" --owner "$owner"
-  assert_contains "$CAPTURED_STDOUT" "holding the Mac awake for inbox: summarize the inbox"
+  assert_contains "$CAPTURED_STDOUT" "holding the Mac awake for inbox: summarize the inbox (until it ends, or owner process $owner exits)"
   holder="$(status_field holderProcess)"
   assert_eq true "$(status_field holding)" "holding after begin"
   pmset_lists_sirven_for "$holder" || fail "pmset does not list sirven's assertion for holder process $holder"
@@ -177,4 +181,23 @@ test_keep_awake_run_holds_for_one_command_and_passes_its_exit_status_through() {
   assert_contains "$(cat "$seen")" "nightly digest"
   eventually holder_gone || fail "the holder did not stop after the command exited"
   assert_eq "" "$(ls "$SIRVEN_KEEP_AWAKE_DIR/work")" "no work left behind"
+}
+
+test_keep_awake_work_that_arrives_as_the_holder_drains_is_still_held() {
+  local owner pause
+  keep_awake_ready || return 0
+  sleep 60 &
+  owner=$!
+  # the holder exits about 0.3 seconds after the queue drains; begin new work right around then.
+  for pause in 0.2 0.28 0.3 0.32 0.36 0.45; do
+    assert_status 0 awake begin "first-$pause" --reason "first" --owner "$owner"
+    assert_status 0 awake end "first-$pause"
+    sleep "$pause"
+    assert_status 0 awake begin "second-$pause" --reason "second" --owner "$owner"
+    assert_contains "$CAPTURED_STDOUT" "holding the Mac awake for second-$pause"
+    assert_not_contains "$CAPTURED_STDERR" "has not confirmed"
+    assert_status 0 awake end "second-$pause"
+  done
+  eventually holder_gone || fail "the holder did not stop"
+  stop_owner "$owner"
 }

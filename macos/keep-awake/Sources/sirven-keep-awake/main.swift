@@ -5,7 +5,7 @@ import SirvenKeepAwake
 
 let usage = """
 usage:
-  sirven awake begin TASK --reason TEXT [--owner PROCESS] [--lease SECONDS]
+  sirven awake begin TASK --reason TEXT --owner PROCESS [--lease SECONDS]
   sirven awake end TASK
   sirven awake run [--task TASK] --reason TEXT -- COMMAND [ARGUMENTS...]
   sirven awake status [--json]
@@ -15,9 +15,10 @@ usage:
   sirven awake about
 
 begin records work in flight and holds the Mac awake until end, until the owner process
-exits (by default the process that ran begin), or until the lease runs out (12 hours by
-default; begin again to renew). run wraps one command: work begins when it starts and ends
-when it exits, however it exits.
+exits, or until the lease runs out (12 hours by default; begin again to renew). the owner is
+the process number of the agent doing the work: a long-lived process, not a shell that exits
+right after begin. run wraps one command: work begins when it starts and ends when it exits,
+however it exits, and owns the work itself.
 
 \(KeepAwakeIdentity.credit)
 """
@@ -81,6 +82,9 @@ func startHolder() {
 func waitForHold(of task: String, seconds: Double = 5) -> Bool {
     let deadline = Date().addingTimeInterval(seconds)
     while Date() < deadline {
+        // a holder that saw an empty queue may be exiting just as this work arrived. starting
+        // one again does nothing while it runs, and replaces it once it is gone.
+        startHolder()
         if store.holderIsRunning(), let state = store.readHolder(), state.heldFor.contains(task) { return true }
         usleep(50_000)
     }
@@ -135,10 +139,15 @@ func begin(_ arguments: [String]) {
         return seconds
     }
     guard rest.count == 1 else { usageError("begin needs exactly one task name") }
+    // no default owner: the process that runs begin is often a shell that exits at once, and
+    // work owned by it would be reaped a moment later.
+    guard let owner else {
+        usageError("begin needs --owner: the process number of the agent doing the work. to hold for one command, use sirven awake run")
+    }
     let task = rest[0]
     let item: WorkItem
     do {
-        item = try client.begin(task: task, reason: reason, owner: owner ?? getppid(),
+        item = try client.begin(task: task, reason: reason, owner: owner,
                                 lease: lease ?? KeepAwakeClient.defaultLease)
     } catch {
         usageError("\(error)")
@@ -149,7 +158,7 @@ func begin(_ arguments: [String]) {
     }
     startHolder()
     if waitForHold(of: task) {
-        say("holding the Mac awake for \(task): \(item.reason)")
+        say("holding the Mac awake for \(task): \(item.reason) (until it ends, or owner process \(owner) exits)")
     } else {
         FileHandle.standardError.write(Data("warning: \(task) is recorded, but the holder has not confirmed the hold; see sirven awake status\n".utf8))
     }

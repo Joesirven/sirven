@@ -47,12 +47,14 @@ changes it): `settings.json`, `work/<task>.json`, `holder.json`, `holder.lock`, 
 
 Until the runtime has its own work queue, these are the integration points:
 
-- `sirven awake begin TASK --reason TEXT [--owner PROCESS] [--lease SECONDS]` when a task starts.
-  The owner defaults to the calling process; pass the agent's own process number when a wrapper
-  calls it. `begin` returns once the holder confirms the hold. Beginning the same task again
-  renews its lease.
+- `sirven awake run --task TASK --reason TEXT -- COMMAND` wraps one command end to end, and owns
+  the work itself. Prefer it whenever the work is one command.
+- `sirven awake begin TASK --reason TEXT --owner PROCESS [--lease SECONDS]` when a task starts.
+  `--owner` is required: it is the process number of the agent doing the work, a long-lived
+  process. There is no default, because an agent's shell tool runs each command in a shell that
+  exits at once, and work owned by that shell would be reaped a moment later. `begin` returns
+  once the holder confirms the hold. Beginning the same task again renews its lease.
 - `sirven awake end TASK` when it finishes.
-- `sirven awake run --task TASK --reason TEXT -- COMMAND` wraps one command end to end.
 - From Swift: `KeepAwakeClient().begin(task:reason:owner:lease:)` and `end(task:)`. The library
   does not start the holder; run `sirven-keep-awake hold` (or call `begin` through the command).
 

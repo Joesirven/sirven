@@ -16,7 +16,7 @@ What it does, and what it never does:
 - Every assertion names its work. `pmset -g assertions` lists it as "sirven keep-awake: your agent
   has work in flight", and its details name each task and its reason. sirven never holds an
   assertion without work to point to.
-- Work is tied to the process that started it. If that process exits or crashes, the hold ends
+- Work is tied to the agent process doing it. If that process exits or crashes, the hold ends
   by itself. Every task also has a lease (12 hours unless the agent renews it).
 - You are in charge. `sirven awake off` turns it off; `sirven awake release` lets the Mac sleep
   right now without stopping the work.
@@ -25,7 +25,7 @@ What it does, and what it never does:
 ### Commands
 
 ```
-sirven awake begin TASK --reason TEXT    the agent starts work (holds the Mac awake)
+sirven awake begin TASK --reason TEXT --owner PROCESS   the agent starts work (holds the Mac awake)
 sirven awake end TASK                    the work is done (the hold ends when no work remains)
 sirven awake run --reason TEXT -- COMMAND   hold for exactly as long as one command runs
 sirven awake status [--json]             what is holding the Mac awake, since when, and why
@@ -67,12 +67,14 @@ How the helper gets installed, step by step:
 2. The first time you turn lid-closed operation on (`sirven awake lid on`, or the switch in the
    sirven menu), sirven asks macOS to register its helper through the Service Management
    framework (`SMAppService`). sirven never asks for your password.
-3. macOS takes it from there with its own approval: it notes that sirven added a background item
-   and opens System Settings, General, Login Items and Extensions, where you allow sirven. macOS
-   asks for your fingerprint or your password there, in its own prompt. sirven never sees either.
-4. That is the only prompt, ever. The signed helper stays installed, and sirven never asks again.
-   You can switch it off in the same System Settings pane at any time, and lid-closed operation
-   then stops working until you allow it again.
+3. macOS takes it from there with its own approval. It shows a notice that sirven added a
+   background item, and sirven opens System Settings at General, Login Items and Extensions, where
+   you switch sirven on. macOS asks for your fingerprint or your password there, in its own
+   prompt. sirven never sees either.
+4. That is the one approval. The signed helper stays installed, and sirven never asks for it
+   again. You can switch it off in the same System Settings pane at any time, and lid-closed
+   operation then stops working until you allow it again. Not yet verified: whether macOS asks
+   again after a signed update of the sirven app. That gets checked once the app is signed.
 
 What the helper does while it is allowed:
 
@@ -82,8 +84,8 @@ What the helper does while it is allowed:
 - If sirven crashes or quits, the connection to the helper drops, and the helper turns the
   setting back off by itself. If the Mac loses power mid-hold, the helper turns it off at its next
   start.
-- It only ever turns off a setting it turned on itself. It accepts connections only from the
-  signed sirven app.
+- It only ever turns off a setting it turned on itself: if you already had the setting on, it
+  leaves it alone. It accepts connections only from the signed sirven app.
 
 Two honest notes. The setting the helper uses (`pmset disablesleep`) is the only way macOS offers
 to keep a Mac awake with the lid closed and no external display, and Apple's `pmset` manual page
