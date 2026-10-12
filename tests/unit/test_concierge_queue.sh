@@ -117,8 +117,9 @@ test_handback_needs_a_known_reason() {
   assert_contains "$CAPTURED_STDERR" "reason must be one of"
 }
 
-test_weekly_report_counts_timings_and_breaches() {
-  local log="$TEST_TMP/log"
+# the week the weekly report tests and the sample in concierge-ops/monitoring.md both use.
+sample_week() {
+  local log="$1"
   booked_request "$log" r1 2026-10-12
   booked_request "$log" r2 2026-10-13
   # r3: quoted late (45 seconds), then booked on time.
@@ -132,7 +133,11 @@ test_weekly_report_counts_timings_and_breaches() {
   queue handback --log "$log" --request r4 --reason unavailable --at 2026-10-15T09:00:20Z
   # r5: outside the week.
   booked_request "$log" r5 2026-10-20
+}
 
+test_weekly_report_counts_timings_and_breaches() {
+  local log="$TEST_TMP/log"
+  sample_week "$log"
   capture queue report --log "$log" --from 2026-10-12 --to 2026-10-18
   assert_eq 0 "$CAPTURED_STATUS"
   assert_contains "$CAPTURED_STDOUT" "## Concierge service levels, 2026-10-12 to 2026-10-18"
@@ -143,6 +148,13 @@ test_weekly_report_counts_timings_and_breaches() {
   assert_contains "$CAPTURED_STDOUT" "Handback reasons: unavailable 1."
   assert_contains "$CAPTURED_STDOUT" "  - concierge-1: 2 worked, 2 booked."
   assert_contains "$CAPTURED_STDOUT" "  - concierge-2: 1 worked, 1 booked."
+}
+
+test_monitoring_sample_is_the_real_report() {
+  local documented
+  sample_week "$TEST_TMP/log"
+  documented="$(sed -n '/^## Concierge service levels/,/concierge-2: 1 worked/p' "$REPO_DIR/concierge-ops/monitoring.md")"
+  assert_eq "$documented" "$(queue report --log "$TEST_TMP/log" --from 2026-10-12 --to 2026-10-18)" "monitoring.md sample drifted from the tool"
 }
 
 test_concierge_documents_keep_the_house_style() {
