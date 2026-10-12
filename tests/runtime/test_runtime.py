@@ -329,9 +329,12 @@ class FetchChannelTests(RuntimeCase):
 
 
 class ControlInterfaceTests(RuntimeCase):
-    def test_status_reports_solo_and_no_peer_routing(self):
+    def test_status_reports_solo_and_the_peer_transport_module_state(self):
+        # the carrier transport module is built (lib/peer_transport.py), so status reports
+        # it as "built". peer_routing_available stays false until the carrying node is also
+        # configured end to end; the next test checks that.
         status = self.client.status()
-        self.assertEqual(("solo", ["solo"], "not_built", "own_connection"),
+        self.assertEqual(("solo", ["solo"], "built", "own_connection"),
                          (status["tier"], status["tiers_available"], status["peer_routing"], status["egress"]))
 
     def test_status_tells_the_tier_dial_about_peer_routing_and_the_latest_block(self):

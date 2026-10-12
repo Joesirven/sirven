@@ -54,9 +54,14 @@ RECIPROCITY = os.path.join(LIB, "reciprocity.py")
 
 REGISTRY_FORMAT = "sirven-allowlist-registry/1"
 
-# the peer transport, the part that moves bytes between two nodes, is not built. until it is,
-# no node offers peer routing, even with every piece above configured and current.
-TRANSPORT_BUILT = False
+# the peer transport, the part that moves bytes between two nodes, is lib/peer_transport.py:
+# a loopback carrier HTTP endpoint that runs peer_routing.carry over every decision and, on an
+# allow, fetches the request from its own connection and returns the bytes. the end-to-end
+# proof is tests/peer_routing/test_transport.py. the user-side wiring in the sirven runtime
+# seam is still open and the authenticated-traffic ship gate is still closed, so this flag by
+# itself does not route anything for any user: peer_routing_available in readiness becomes
+# true for a configured carrying node, nothing more.
+TRANSPORT_BUILT = True
 
 TIER_NAMES = {"solo": "Solo", "neighborly": "Neighborly", "coop": "Co-op", "co-op": "Co-op"}
 LEDGER_TIERS = {"Solo": "solo", "Neighborly": "neighborly", "Co-op": "co-op"}

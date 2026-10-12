@@ -232,13 +232,13 @@ class EndToEnd(unittest.TestCase):
 
     # what the runtime and the tier dial see
 
-    def test_readiness_sees_both_components_but_peer_routing_stays_unavailable(self):
+    def test_readiness_sees_both_components_and_the_built_transport(self):
         report = peer_routing.readiness(self.state, NOW)
         self.assertEqual("ready", report["attestation"])
         self.assertEqual("current", report["registry"])
         self.assertTrue(report["components_ready"])
-        self.assertEqual("not_built", report["transport"])
-        self.assertFalse(report["peer_routing_available"])
+        self.assertEqual("built", report["transport"])
+        self.assertTrue(report["peer_routing_available"])
 
     def test_a_fresh_node_is_not_ready(self):
         report = peer_routing.readiness(tempfile.mkdtemp(dir=self.scratch), NOW)
