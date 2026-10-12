@@ -2,6 +2,13 @@
 
 Secure access levels for your personal agent. Install it, own it, no hosted middleman.
 
+- [docs/WALKTHROUGH.md](docs/WALKTHROUGH.md): install in three steps
+- [docs/PERMISSIONS.md](docs/PERMISSIONS.md): the access levels and what each one allows
+- [docs/phone-interface.md](docs/phone-interface.md): let your agent drive your own plugged-in
+  iPhone, opt in per session, every action logged in plain words
+- [docs/peer-routing.md](docs/peer-routing.md): how attestation, site review, the policy engine,
+  and the sharing ledger connect, and what still stands before peer routing ships
+
 ## Keep my Mac awake for my agent
 
 Your personal agent often works while you are away from the keyboard. If the Mac goes to sleep
@@ -92,7 +99,17 @@ to keep a Mac awake with the lid closed and no external display, and Apple's `pm
 does not document it. A closed laptop in a bag can get warm, which is why lid-closed operation is
 off by default and only active while there is work to point to.
 
-### Credit
+### Credit for keep-awake
 
 Inspired by Sleepless by itskoosh (MIT): https://github.com/itskoosh/Sleepless. sirven's
 keep-awake is its own implementation.
+
+## Credits
+
+- The iPhone integration follows the approach of
+  [iPhone-use](https://github.com/zhongerxin/iPhone-use) by ZHONG XIN (MIT license): an agent
+  drives a real iPhone over USB through WebDriverAgent. sirven's integration layer is its own
+  code.
+- [WebDriverAgent](https://github.com/appium/WebDriverAgent) is from the Appium project, under
+  the BSD license (Berkeley Software Distribution). You fetch and sign it yourself at setup;
+  sirven does not bundle it.

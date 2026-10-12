@@ -6,6 +6,7 @@
 #   sirven runtime ...      the Solo egress runtime for the owner's personal agent: see
 #                           docs/runtime-interface.md and sirven runtime --help
 #   sirven awake ...        keep the Mac awake while the agent has work in flight (macos only)
+#   sirven phone ...        the owner's iPhone, driven by the owner's agent: lib/phone_bridge.py
 #
 # inspect only reads. rollback is a plan like install.sh: --dry-run prints it and changes
 # nothing, and without --dry-run the identical plan is printed and then applied, under the
@@ -57,6 +58,8 @@ usage:
   sirven runtime serve|status|fetch|classify|decisions|exec
                                      the Solo egress runtime: sirven runtime --help
   sirven awake [command]             keep the Mac awake while your agent works; sirven awake --help
+  sirven phone COMMAND               let your agent drive your plugged-in iPhone, with consent.
+                                     sirven phone --help lists the commands
 
 options:
   --prefix PATH    read a fake root that install.sh was applied to with --prefix
@@ -447,6 +450,11 @@ main() {
   if [ "${1:-}" = awake ]; then
     shift
     keep_awake "$@"
+  fi
+  if [ "${1:-}" = phone ]; then
+    shift
+    command -v python3 >/dev/null 2>&1 || die "python3 was not found on PATH; the phone bridge needs it"
+    exec python3 "$ROOT_DIR/lib/phone_bridge.py" "$@"
   fi
   parse_arguments "$@"
   OPERATING_SYSTEM="$(detect_os)"
