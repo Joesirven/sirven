@@ -32,17 +32,17 @@ Sirven only, as a company cardholder. End users are never cardholders, never rec
 From sirven's Issuing balance, topped up from sirven's business bank account. Separately, sirven takes payment from the user for the ride as an ordinary card sale: a manual-capture payment intent holds the quoted fare plus tip ceiling at booking and sirven captures what the ride actually cost when it completes. Sirven holds no balance for users.
 
 **Expected volume (early estimate, for Jose to adjust).**
-Launch in San Francisco. [Number] rides a month in the first quarter, average fare around 20 USD, so roughly [number times 20] USD a month of card spend, one virtual card per ride.
+Launch in San Francisco. [Number] rides a month in the first quarter, average fare around 20 dollars, so roughly [number times 20] dollars a month of card spend, one virtual card per ride.
 
 **Merchant categories.**
 `taxicabs_limousines` only, at launch.
 
 **Countries.**
-United States only. Cardholder (sirven) and merchants are US.
+United States only. The cardholder (sirven) and the merchants are all in the United States.
 
 ## Questions to put to Stripe in the application
 
 1. Please confirm this model fits commercial Issuing. Your use case guidance says cards "may not be used for personal, family, or household purposes" and "may not be funded partially or entirely by an individual's personal funds". Here the cardholder and funder is sirven, and the purchase fulfills a service sirven sold, but the ride is for an individual's own travel. If you see it as consumer use, which program would you recommend? ([source](https://support.stripe.com/questions/supported-business-use-cases-for-stripe-issuing))
-2. Pricing for virtual cards and authorizations at this volume, and whether the 0.10 USD virtual card fee applies per card.
+2. Pricing for virtual cards and authorizations at this volume, and whether the 10 cent virtual card fee applies per card.
 3. Whether any user-facing material needs compliance review given that users never see or hold a card.
 4. Whether ride services' tip and fare adjustment patterns (over-capture after the trip) need any program setting beyond spending controls.

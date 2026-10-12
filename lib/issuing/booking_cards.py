@@ -1,4 +1,10 @@
-"""the per-booking card flow: reserve and mint, authorize, reconcile, settle, cancel.
+"""the per-booking card flow: reserve and mint, attach the booking, authorize, reconcile,
+settle, cancel.
+
+order matters. the orchestrator calls reserve_and_mint when the user picks a quote, and only
+calls book_ride if that succeeds; then attach_booking, or release if book_ride fails. so a
+card that refuses the hold stops the booking before anything is committed. the reservation
+is keyed by quote_id until a booking exists.
 
 money moves in two places and sirven holds a balance in neither:
 
@@ -14,13 +20,15 @@ amount moved.
 import json
 
 from . import records as R
+from .contract import booking_details, final_charge_total
 from .stripe_api import STRIPE_VERSION, StripeError
 from .webhook import SignatureError, verify
 
 # ride services settle under merchant category code 4121, which Stripe names
 # taxicabs_limousines (docs.stripe.com/issuing/testing uses it for a ride service).
 ALLOWED_CATEGORIES = ("taxicabs_limousines",)
-METADATA_BOOKING = "sirven_booking_id"
+# the reservation is keyed by quote: it exists before book_ride commits, so it can gate it.
+METADATA_QUOTE = "sirven_quote_id"
 TERMINAL_AUTHORIZATION_STATUSES = ("closed", "reversed", "expired")
 
 
@@ -50,7 +58,7 @@ def card_parameters(terms, cardholder_id, single_use=True):
                 {"amount": terms["cap"], "interval": "all_time"},
             ],
         },
-        "metadata": {METADATA_BOOKING: terms["booking_id"], "sirven_quote_id": terms["quote_id"]},
+        "metadata": {METADATA_QUOTE: terms["quote_id"]},
     }
     if single_use:
         # one payment for the fare, and one more when a tip ceiling allows a separate tip charge.
@@ -70,14 +78,15 @@ class BookingCards:
     # booking time ------------------------------------------------------------------------
 
     def reserve_and_mint(self, terms, rationale, user):
-        """hold the cap on the user's card, then mint the booking card. idempotent per booking.
+        """hold the cap on the user's card, then mint the booking card. call it after the user
+        picks a quote and before book_ride; book only if it succeeds. idempotent per quote.
 
         user is {"reference": opaque user reference, "customer": Stripe customer,
         "payment_method": the user's saved card}. returns the charge record.
         """
-        booking_id = terms["booking_id"]
-        with self.store.locked(booking_id):
-            record = self.store.get(booking_id)
+        quote_id = terms["quote_id"]
+        with self.store.locked(quote_id):
+            record = self.store.get(quote_id)
             if record is not None:
                 return record
             record = R.new_record(terms, rationale, user.get("reference"), self.clock)
@@ -90,20 +99,20 @@ class BookingCards:
                     "payment_method_types": ["card"],
                     "capture_method": "manual",
                     "confirm": True,
-                    "description": f"sirven ride booking {booking_id}",
-                    "metadata": {METADATA_BOOKING: booking_id, "sirven_quote_id": terms["quote_id"]},
-                }, idempotency_key=f"sirven-reserve-{booking_id}")
+                    "description": f"sirven ride, quote {quote_id}",
+                    "metadata": {METADATA_QUOTE: quote_id},
+                }, idempotency_key=f"sirven-reserve-{quote_id}")
             except StripeError as error:
                 raise ReservationFailed(f"the user's card did not accept the hold: {error}") from error
             if intent.get("status") != "requires_capture":
                 raise ReservationFailed(f"the hold on the user's card is {intent.get('status')}, not requires_capture")
             try:
                 card = self.client.post("/v1/issuing/cards", card_parameters(terms, self.cardholder_id, self.single_use),
-                                        idempotency_key=f"sirven-card-{booking_id}")
+                                        idempotency_key=f"sirven-card-{quote_id}")
             except StripeError as error:
                 # no card means no booking can be paid; release the user's hold right away.
                 self.client.post(f"/v1/payment_intents/{intent['id']}/cancel",
-                                 idempotency_key=f"sirven-release-{booking_id}")
+                                 idempotency_key=f"sirven-release-{quote_id}")
                 raise ReservationFailed(f"the booking card could not be minted, hold released: {error}") from error
             record["stripe"].update(payment_intent=intent["id"], card=card["id"],
                                     card_last4=card.get("last4"), cardholder=self.cardholder_id)
@@ -115,20 +124,53 @@ class BookingCards:
             R.add_timeline(record, "card_minted",
                            f"virtual card ending {card.get('last4')} limited to ride services and the cap",
                            terms["cap"], self.clock)
-            self.store.index_card(card["id"], booking_id)
+            self.store.index_card(card["id"], quote_id)
+            self.store.index_reference(record["payment_reference"], quote_id)
             self.store.put(record)
             return record
 
+    def attach_booking(self, quote_id, booking):
+        """book_ride returned: record which booking this reservation pays for."""
+        details = booking_details(quote_id, booking)
+        with self.store.locked(quote_id):
+            record = self._require(quote_id)
+            if record.get("booking_id") not in (None, details["booking_id"]):
+                raise FlowError(f"quote {quote_id} already pays for booking {record['booking_id']}")
+            if record["state"] not in R.OPEN_STATES:
+                raise FlowError(f"the reservation for quote {quote_id} is already {record['state']}")
+            if record.get("booking_id") is None:
+                record["booking_id"] = details["booking_id"]
+                record["rationale"]["booking"] = details
+                R.add_timeline(record, "booked", f"booking {details['booking_id']} confirmed", clock=self.clock)
+                self.store.put(record)
+            return record
+
+    def card_for_payment_reference(self, reference):
+        """the backend's lookup: book_ride hands it the payment_reference, and this returns the
+        Stripe card reference to pay the ride service with. server side only."""
+        quote_id = self.store.quote_for_reference(reference)
+        if quote_id is None:
+            raise FlowError("no funds are held under that payment reference")
+        return self.card_for_quote(quote_id)
+
+    def card_for_quote(self, quote_id):
+        """the Stripe card reference for the backend that pays the ride service. server side
+        only: it never goes back through the agent-facing connector contract."""
+        record = self._require(quote_id)
+        if record["state"] not in R.OPEN_STATES:
+            raise FlowError(f"the reservation for quote {quote_id} is {record['state']}")
+        return record["stripe"]["card"]
+
     # real-time authorization --------------------------------------------------------------
 
-    def _booking_for_authorization(self, authorization):
+    def _quote_for_authorization(self, authorization):
         card = authorization.get("card")
         if isinstance(card, dict):
-            booking_id = (card.get("metadata") or {}).get(METADATA_BOOKING)
-            if booking_id:
-                return booking_id
+            quote_id = (card.get("metadata") or {}).get(METADATA_QUOTE)
+            if quote_id:
+                return quote_id
             card = card.get("id")
-        return self.store.booking_for_card(card) if card else None
+        return self.store.quote_for_card(card) if card else None
 
     def decide(self, record, authorization):
         """return (approved, reason). pure: reads the record, changes nothing."""
@@ -150,11 +192,11 @@ class BookingCards:
         return True, "within_cap"
 
     def authorize(self, authorization):
-        booking_id = self._booking_for_authorization(authorization)
-        if booking_id is None:
+        quote_id = self._quote_for_authorization(authorization)
+        if quote_id is None:
             return False, "unknown_card"
-        with self.store.locked(booking_id):
-            record = self.store.get(booking_id)
+        with self.store.locked(quote_id):
+            record = self.store.get(quote_id)
             approved, reason = self.decide(record, authorization)
             if record is not None:
                 requested = (authorization.get("pending_request") or {}).get("amount", 0)
@@ -185,16 +227,16 @@ class BookingCards:
         kind = event.get("type", "")
         obj = (event.get("data") or {}).get("object") or {}
         if kind.startswith("issuing_authorization."):
-            booking_id = self._booking_for_authorization(obj)
+            quote_id = self._quote_for_authorization(obj)
         elif kind.startswith("issuing_transaction."):
             card = obj.get("card")
-            booking_id = self.store.booking_for_card(card.get("id") if isinstance(card, dict) else card)
+            quote_id = self.store.quote_for_card(card.get("id") if isinstance(card, dict) else card)
         else:
             return None
-        if booking_id is None:
+        if quote_id is None:
             return None
-        with self.store.locked(booking_id):
-            record = self.store.get(booking_id)
+        with self.store.locked(quote_id):
+            record = self.store.get(quote_id)
             if record is None or event.get("id") in record["processed_events"]:
                 return record
             if kind.startswith("issuing_authorization."):
@@ -207,8 +249,8 @@ class BookingCards:
         if ready:
             # an event may be the last one, but webhooks can be lost or reordered: settle only
             # after pulling the card's full history from Stripe.
-            self.reconcile(booking_id)
-        return self.store.get(booking_id)
+            self.reconcile(quote_id)
+        return self.store.get(quote_id)
 
     def _upsert_authorization(self, record, obj):
         known = record["authorizations"].get(obj["id"], {})
@@ -271,38 +313,56 @@ class BookingCards:
             return
         count = sum(1 for e in record["timeline"] if e["kind"] == "refunded_to_user")
         self.client.post("/v1/refunds", {"payment_intent": record["stripe"]["payment_intent"], "amount": amount,
-                                         "metadata": {METADATA_BOOKING: record["booking_id"]}},
-                         idempotency_key=f"sirven-refund-{record['booking_id']}-{count}")
+                                         "metadata": {METADATA_QUOTE: record["quote_id"]}},
+                         idempotency_key=f"sirven-refund-{record['quote_id']}-{count}")
         record["amounts"]["refunded_to_user"] += amount
         R.add_timeline(record, "refunded_to_user", "the ride service refunded the card; passed on to the user",
                        amount, self.clock)
 
     # completion, settlement, cancellation ----------------------------------------------------
 
-    def complete(self, booking_id):
-        """the ride finished. settle now if nothing is still waiting to be captured."""
-        with self.store.locked(booking_id):
-            record = self._require(booking_id)
+    def _note_final_charge(self, record, booking):
+        if booking is None:
+            return
+        total = final_charge_total(booking, record["amounts"]["currency"])
+        if total is not None and record["amounts"]["reported_by_ride_service"] != total:
+            record["amounts"]["reported_by_ride_service"] = total
+            R.add_timeline(record, "final_charge_reported", "the ride connector reported the final charge",
+                           total, self.clock)
+
+    def complete(self, quote_id, booking=None):
+        """the ride finished (get_ride reports completed). settle now if nothing is still
+        waiting to be captured. pass the booking so its final_charge is checked against what
+        the card actually paid."""
+        with self.store.locked(quote_id):
+            record = self._require(quote_id)
+            self._note_final_charge(record, booking)
             if not record.get("ride_completed"):
                 record["ride_completed"] = True
                 R.add_timeline(record, "ride_completed", "the ride service reported the trip complete", clock=self.clock)
                 self.store.put(record)
-        self.reconcile(booking_id)
-        return self.store.get(booking_id)
+        self.reconcile(quote_id)
+        return self.store.get(quote_id)
 
-    def cancel(self, booking_id):
-        """the booking was cancelled. release everything if nothing was spent; otherwise
-        settle the cancellation fee once it is captured. no new authorizations either way."""
-        with self.store.locked(booking_id):
-            record = self._require(booking_id)
+    def release(self, quote_id):
+        """book_ride failed or was abandoned after the reservation: give everything back."""
+        return self.cancel(quote_id, detail="book_ride did not complete; the reservation is released")
+
+    def cancel(self, quote_id, booking=None, detail="the booking was cancelled"):
+        """the booking was cancelled (cancel_ride returned). release everything if nothing was
+        spent; otherwise settle the cancellation fee once it is captured. no new
+        authorizations either way."""
+        with self.store.locked(quote_id):
+            record = self._require(quote_id)
+            self._note_final_charge(record, booking)
             if record["state"] not in R.OPEN_STATES:
                 return record
             record["accepting_authorizations"] = False
             record["ride_completed"] = True
-            R.add_timeline(record, "ride_cancelled", "the booking was cancelled", clock=self.clock)
+            R.add_timeline(record, "ride_cancelled", detail, clock=self.clock)
             self.store.put(record)
-        self.reconcile(booking_id)
-        return self.store.get(booking_id)
+        self.reconcile(quote_id)
+        return self.store.get(quote_id)
 
     def _settle_if_ready(self, record):
         """settle a record that the caller has just refreshed from Stripe, under its lock."""
@@ -313,23 +373,29 @@ class BookingCards:
         self._settle(record)
 
     def _settle(self, record):
-        booking_id = record["booking_id"]
+        quote_id = record["quote_id"]
         amounts = record["amounts"]
         spent = max(R.net_card_spend(record), 0)
         charge = min(spent, amounts["reserved_on_user_card"])
+        reported = amounts.get("reported_by_ride_service")
+        if reported is not None and reported != spent:
+            # the user pays the lower of what the card paid and what the ride connector reported;
+            # a person reconciles the difference with the ride service.
+            self._review(record, f"the card paid {spent} but the ride connector reported {reported}")
+            charge = min(charge, reported)
         intent = record["stripe"]["payment_intent"]
         if charge > 0:
             self.client.post(f"/v1/payment_intents/{intent}/capture", {"amount_to_capture": charge},
-                             idempotency_key=f"sirven-settle-{booking_id}")
+                             idempotency_key=f"sirven-settle-{quote_id}")
             R.add_timeline(record, "charged_to_user", "captured exactly what the booking card spent", charge, self.clock)
         else:
-            self.client.post(f"/v1/payment_intents/{intent}/cancel", idempotency_key=f"sirven-release-{booking_id}")
+            self.client.post(f"/v1/payment_intents/{intent}/cancel", idempotency_key=f"sirven-release-{quote_id}")
             R.add_timeline(record, "hold_released", "nothing was spent; the hold on the user's card is released",
                            clock=self.clock)
         card = record["stripe"]["card"]
         try:
             self.client.post(f"/v1/issuing/cards/{card}", {"status": "canceled"},
-                             idempotency_key=f"sirven-close-card-{booking_id}")
+                             idempotency_key=f"sirven-close-card-{quote_id}")
         except StripeError:
             # single-use lifecycle controls may have cancelled it already; that is the goal.
             if self.client.get(f"/v1/issuing/cards/{card}").get("status") != "canceled":
@@ -344,17 +410,17 @@ class BookingCards:
 
     # reconciliation --------------------------------------------------------------------------
 
-    def reconcile(self, booking_id):
+    def reconcile(self, quote_id):
         """pull the card's authorizations and transactions from Stripe, fold in anything the
         webhooks missed, and settle if the ride is done. settlement only ever happens here, so
         no one is charged or released on webhook state alone. returns the number of objects
         that changed the record."""
-        card = self._require(booking_id)["stripe"]["card"]
+        card = self._require(quote_id)["stripe"]["card"]
         authorizations = self.client.get("/v1/issuing/authorizations", {"card": card, "limit": 100})["data"]
         transactions = self.client.get("/v1/issuing/transactions", {"card": card, "limit": 100})["data"]
         changed = 0
-        with self.store.locked(booking_id):
-            record = self._require(booking_id)
+        with self.store.locked(quote_id):
+            record = self._require(quote_id)
             for obj in authorizations:
                 before = json.dumps(record["authorizations"].get(obj["id"]), sort_keys=True)
                 self._upsert_authorization(record, obj)
@@ -369,8 +435,8 @@ class BookingCards:
             self.store.put(record)
         return changed
 
-    def _require(self, booking_id):
-        record = self.store.get(booking_id)
+    def _require(self, quote_id):
+        record = self.store.get(quote_id)
         if record is None:
-            raise FlowError(f"no charge record for booking {booking_id}")
+            raise FlowError(f"no charge record for quote {quote_id}")
         return record

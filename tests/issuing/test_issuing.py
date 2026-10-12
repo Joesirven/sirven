@@ -12,21 +12,39 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "lib"))
 
 from issuing import demo, records as R, webhook  # noqa: E402
 from issuing.booking_cards import BookingCards, ReservationFailed, card_parameters  # noqa: E402
-from issuing.contract import ContractError, booking_terms  # noqa: E402
+from issuing.booking_cards import FlowError  # noqa: E402
+from issuing.contract import ContractError, booking_details, quote_terms  # noqa: E402
 from issuing.fake_stripe import FakeStripe, decode_form  # noqa: E402
 from issuing.stripe_api import LiveModeRefused, StripeClient, encode_form  # noqa: E402
 
 SECRET = "whsec_test_unit"
 
 
-def quote(price=1840, tip=500, currency="usd"):
-    return {"quote_id": "q-1", "provider": "a ride service",
-            "price": {"amount_minor": price, "currency": currency},
-            "tip_ceiling": {"amount_minor": tip, "currency": currency}}
+def money(amount, currency="USD"):
+    return {"amount_minor": amount, "currency": currency}
+
+
+def quote(price=1840, tip=500, currency="USD", fare_ceiling=None):
+    """a quoted option shaped like the ride connector contract version 1."""
+    ceiling = price if fare_ceiling is None else fare_ceiling
+    cap = ceiling + tip if isinstance(ceiling, int) and isinstance(tip, int) else 0
+    return {"quote_id": "q-1", "rank": 1, "bookable": True, "provider": "a ride service",
+            "price": {"kind": "fixed", "amount": money(price, currency), "maximum": money(ceiling, currency)},
+            "charge_terms": {"quoted_amount": money(price, currency), "fare_ceiling": money(ceiling, currency),
+                             "tip_ceiling": money(tip, currency), "authorization_cap": money(cap, currency),
+                             "currency": currency},
+            "constraint_flags": [], "estimated_pickup_at": None, "estimated_trip_minutes": 12}
 
 
 def booking():
-    return {"booking_id": "b-1", "quote_id": "q-1", "cancellation_window": "two minutes"}
+    return {"booking_id": "b-1", "quote_id": "q-1", "status": "confirmed",
+            "cancellation_policy": {"free_until": "2026-10-12T14:32:00-07:00", "fee_after_free_period": money(500)},
+            "final_charge": None}
+
+
+def finished(total):
+    return dict(booking(), final_charge={"fare": money(total), "tip": money(0), "cancellation_fee": money(0),
+                                         "total": money(total), "amount_to_release": money(2340 - total)})
 
 
 class Wired:
@@ -47,9 +65,13 @@ class Wired:
     def user(self, method="pm_card_visa"):
         return {"reference": "user-1", "customer": self.customer, "payment_method": method}
 
-    def mint(self, price=1840, tip=500):
-        return self.cards.reserve_and_mint(booking_terms(quote(price, tip), booking()),
+    def reserve(self, price=1840, tip=500):
+        return self.cards.reserve_and_mint(quote_terms(quote(price, tip)),
                                            {"reasoning_summary": "cheapest arriving on time"}, self.user())
+
+    def mint(self, price=1840, tip=500):
+        self.reserve(price, tip)
+        return self.cards.attach_booking("q-1", booking())
 
     def authorize(self, record, amount, category="taxicabs_limousines"):
         return self.client.post("/v1/test_helpers/issuing/authorizations", {
@@ -61,7 +83,7 @@ class Wired:
         return self.client.post(f"/v1/test_helpers/issuing/authorizations/{authorization['id']}/capture", params)
 
     def record(self):
-        return self.store.get("b-1")
+        return self.store.get("q-1")
 
     def intents(self):
         return [o for o in self.fake.objects.values() if o.get("object") == "payment_intent"]
@@ -138,34 +160,41 @@ class Signatures(unittest.TestCase):
 
 
 class ContractFields(unittest.TestCase):
-    def test_cap_is_quote_plus_tip_ceiling(self):
-        terms = booking_terms(quote(1840, 500), booking())
-        self.assertEqual((1840, 500, 2340, "usd"), (terms["quoted"], terms["tip_ceiling"], terms["cap"], terms["currency"]))
+    def test_cap_is_the_contract_authorization_cap(self):
+        terms = quote_terms(quote(1840, 500, fare_ceiling=2100))
+        self.assertEqual((1840, 2100, 500, 2600, "usd"),
+                         (terms["quoted"], terms["fare_ceiling"], terms["tip_ceiling"], terms["cap"], terms["currency"]))
 
     def test_bad_money_is_refused(self):
-        bad = [quote(18.40), quote(-1), quote(0), quote(currency="eur"),
-               dict(quote(), tip_ceiling={"amount_minor": 1, "currency": "eur"})]
+        wrong_cap = quote()
+        wrong_cap["charge_terms"]["authorization_cap"] = money(9999)
+        mixed = quote()
+        mixed["charge_terms"]["tip_ceiling"] = money(500, "EUR")
+        bad = [quote(18.40), quote(-1), quote(0), quote(currency="EUR"), quote(2000, fare_ceiling=1900),
+               wrong_cap, mixed, dict(quote(), bookable=False), dict(quote(), charge_terms=None)]
         for item in bad:
             with self.assertRaises(ContractError):
-                booking_terms(item, booking())
+                quote_terms(item)
 
     def test_a_booking_for_another_quote_is_refused(self):
         with self.assertRaises(ContractError):
-            booking_terms(quote(), dict(booking(), quote_id="q-other"))
+            booking_details("q-1", dict(booking(), quote_id="q-other"))
+        with self.assertRaises(ContractError):
+            booking_details("q-1", {"quote_id": "q-1"})
 
 
 class CardParameters(unittest.TestCase):
     def test_card_is_virtual_ride_only_and_capped(self):
-        params = card_parameters(booking_terms(quote(1840, 500), booking()), "ich_1")
+        params = card_parameters(quote_terms(quote(1840, 500)), "ich_1")
         self.assertEqual("virtual", params["type"])
         self.assertEqual(["taxicabs_limousines"], params["spending_controls"]["allowed_categories"])
         self.assertEqual([{"amount": 2340, "interval": "per_authorization"}, {"amount": 2340, "interval": "all_time"}],
                          params["spending_controls"]["spending_limits"])
         self.assertEqual(2, params["lifecycle_controls"]["cancel_after"]["payment_count"])
-        self.assertEqual("b-1", params["metadata"]["sirven_booking_id"])
+        self.assertEqual("q-1", params["metadata"]["sirven_quote_id"])
 
     def test_no_tip_ceiling_means_a_single_use_card(self):
-        params = card_parameters(booking_terms(quote(1840, 0), booking()), "ich_1")
+        params = card_parameters(quote_terms(quote(1840, 0)), "ich_1")
         self.assertEqual(1, params["lifecycle_controls"]["cancel_after"]["payment_count"])
 
 
@@ -189,7 +218,7 @@ class Minting(unittest.TestCase):
     def test_a_declined_user_card_mints_nothing(self):
         wired = Wired()
         with self.assertRaises(ReservationFailed):
-            wired.cards.reserve_and_mint(booking_terms(quote(), booking()), {}, wired.user("pm_card_chargeDeclined"))
+            wired.cards.reserve_and_mint(quote_terms(quote()), {}, wired.user("pm_card_chargeDeclined"))
         self.assertEqual([], wired.cards_minted())
         self.assertIsNone(wired.record())
 
@@ -200,6 +229,49 @@ class Minting(unittest.TestCase):
             wired.mint()
         self.assertEqual("canceled", wired.intents()[0]["status"])
         self.assertIsNone(wired.record())
+
+
+class BookingOrder(unittest.TestCase):
+    def test_the_reservation_exists_before_any_booking(self):
+        wired = Wired()
+        record = wired.reserve()
+        self.assertIsNone(record["booking_id"])
+        self.assertEqual("requires_capture", wired.intents()[0]["status"])
+        self.assertEqual(record["stripe"]["card"], wired.cards.card_for_quote("q-1"))
+        self.assertEqual("sirven_hold_q-1", record["payment_reference"])
+        self.assertEqual(record["stripe"]["card"], wired.cards.card_for_payment_reference(record["payment_reference"]))
+        for unknown in ("sirven_hold_other", "../q-1", ""):
+            with self.assertRaises(FlowError):
+                wired.cards.card_for_payment_reference(unknown)
+
+    def test_attaching_the_booking_records_it_once(self):
+        wired = Wired()
+        wired.reserve()
+        record = wired.cards.attach_booking("q-1", booking())
+        self.assertEqual("b-1", record["booking_id"])
+        self.assertEqual(money(500), record["rationale"]["booking"]["cancellation_policy"]["fee_after_free_period"])
+        self.assertEqual(record, wired.cards.attach_booking("q-1", booking()))
+        with self.assertRaises(FlowError):
+            wired.cards.attach_booking("q-1", dict(booking(), booking_id="b-2"))
+
+    def test_a_booking_for_another_quote_is_refused(self):
+        wired = Wired()
+        wired.reserve()
+        with self.assertRaises(ContractError):
+            wired.cards.attach_booking("q-1", dict(booking(), quote_id="q-other"))
+        self.assertIsNone(wired.record()["booking_id"])
+
+    def test_a_failed_book_ride_releases_the_hold_and_closes_the_card(self):
+        wired = Wired()
+        record = wired.reserve()
+        record = wired.cards.release("q-1")
+        self.assertEqual("cancelled", record["state"])
+        self.assertEqual("canceled", wired.intents()[0]["status"])
+        self.assertEqual("canceled", wired.fake.objects[record["stripe"]["card"]]["status"])
+        with self.assertRaises(FlowError):
+            wired.cards.card_for_quote("q-1")
+        with self.assertRaises(FlowError):
+            wired.cards.attach_booking("q-1", booking())
 
 
 class Authorizations(unittest.TestCase):
@@ -258,7 +330,7 @@ class Settlement(unittest.TestCase):
         record = wired.mint()
         wired.capture(wired.authorize(record, 1840))
         wired.capture(wired.authorize(record, 300))
-        record = wired.cards.complete("b-1")
+        record = wired.cards.complete("q-1")
         intent = wired.intents()[0]
         self.assertEqual(("settled", 2140), (record["state"], record["amounts"]["charged_to_user"]))
         self.assertEqual(("succeeded", 2140), (intent["status"], intent["amount_received"]))
@@ -268,7 +340,7 @@ class Settlement(unittest.TestCase):
         wired = Wired()
         record = wired.mint()
         fare = wired.authorize(record, 1840)
-        self.assertEqual("reserved", wired.cards.complete("b-1")["state"])
+        self.assertEqual("reserved", wired.cards.complete("q-1")["state"])
         wired.capture(fare)
         self.assertEqual("settled", wired.record()["state"])
 
@@ -278,21 +350,21 @@ class Settlement(unittest.TestCase):
         fare = wired.authorize(record, 1840)
         wired.client.post(f"/v1/test_helpers/issuing/authorizations/{fare['id']}/reverse", {"reverse_amount": 340})
         wired.capture(fare, 1500)
-        self.assertEqual(1500, wired.cards.complete("b-1")["amounts"]["charged_to_user"])
+        self.assertEqual(1500, wired.cards.complete("q-1")["amounts"]["charged_to_user"])
 
     def test_expired_authorization_is_not_charged(self):
         wired = Wired()
         record = wired.mint()
         fare = wired.authorize(record, 1840)
         wired.client.post(f"/v1/test_helpers/issuing/authorizations/{fare['id']}/expire", {})
-        record = wired.cards.complete("b-1")
+        record = wired.cards.complete("q-1")
         self.assertEqual(("cancelled", 0), (record["state"], record["amounts"]["charged_to_user"]))
         self.assertEqual("canceled", wired.intents()[0]["status"])
 
     def test_cancel_with_nothing_spent_releases_the_hold(self):
         wired = Wired()
         wired.mint()
-        record = wired.cards.cancel("b-1")
+        record = wired.cards.cancel("q-1")
         self.assertEqual("cancelled", record["state"])
         self.assertEqual("canceled", wired.intents()[0]["status"])
 
@@ -300,7 +372,7 @@ class Settlement(unittest.TestCase):
         wired = Wired()
         record = wired.mint()
         fee = wired.authorize(record, 500)
-        wired.cards.cancel("b-1")
+        wired.cards.cancel("q-1")
         self.assertFalse(wired.authorize(record, 1000)["approved"])
         wired.capture(fee)
         self.assertEqual(("settled", 500), (wired.record()["state"], wired.record()["amounts"]["charged_to_user"]))
@@ -309,7 +381,7 @@ class Settlement(unittest.TestCase):
         wired = Wired()
         record = wired.mint()
         wired.capture(wired.authorize(record, 1840), 2600)
-        record = wired.cards.complete("b-1")
+        record = wired.cards.complete("q-1")
         self.assertEqual(("needs_review", 2340), (record["state"], record["amounts"]["charged_to_user"]))
         self.assertTrue(record["review_reasons"])
 
@@ -317,7 +389,7 @@ class Settlement(unittest.TestCase):
         wired = Wired()
         record = wired.mint()
         wired.capture(wired.authorize(record, 1840))
-        wired.cards.complete("b-1")
+        wired.cards.complete("q-1")
         capture = next(o for o in wired.fake.objects.values() if o.get("object") == "issuing.transaction")
         wired.client.post(f"/v1/test_helpers/issuing/transactions/{capture['id']}/refund", {"refund_amount": 500})
         record = wired.record()
@@ -328,7 +400,7 @@ class Settlement(unittest.TestCase):
         wired = Wired()
         record = wired.mint()
         wired.capture(wired.authorize(record, 1840))
-        wired.cards.complete("b-1")
+        wired.cards.complete("q-1")
         wired.client.post("/v1/test_helpers/issuing/transactions/create_force_capture",
                           {"card": record["stripe"]["card"], "amount": 700,
                            "merchant_data": {"category": "taxicabs_limousines"}})
@@ -337,13 +409,37 @@ class Settlement(unittest.TestCase):
         self.assertEqual(1840, wired.intents()[0]["amount_received"])
 
 
+class FinalCharge(unittest.TestCase):
+    def test_a_matching_final_charge_settles_cleanly(self):
+        wired = Wired()
+        record = wired.mint()
+        wired.capture(wired.authorize(record, 1840))
+        record = wired.cards.complete("q-1", finished(1840))
+        self.assertEqual(("settled", 1840, 1840), (record["state"], record["amounts"]["charged_to_user"],
+                                                   record["amounts"]["reported_by_ride_service"]))
+
+    def test_a_lower_reported_total_caps_the_user_charge_and_flags_review(self):
+        wired = Wired()
+        record = wired.mint()
+        wired.capture(wired.authorize(record, 1840))
+        record = wired.cards.complete("q-1", finished(1500))
+        self.assertEqual(("needs_review", 1500), (record["state"], record["amounts"]["charged_to_user"]))
+
+    def test_an_open_booking_reports_nothing(self):
+        wired = Wired()
+        record = wired.mint()
+        wired.capture(wired.authorize(record, 1840))
+        record = wired.cards.complete("q-1", booking())
+        self.assertIsNone(record["amounts"]["reported_by_ride_service"])
+
+
 class Reconciliation(unittest.TestCase):
     def test_lost_webhooks_are_recovered_before_settling(self):
         wired = Wired(deliver=False)
         record = wired.mint()
         wired.capture(wired.authorize(record, 1840))
         self.assertEqual({}, wired.record()["transactions"])
-        record = wired.cards.complete("b-1")
+        record = wired.cards.complete("q-1")
         self.assertEqual(("settled", 1840), (record["state"], record["amounts"]["charged_to_user"]))
 
     def test_duplicate_deliveries_count_once(self):
@@ -371,7 +467,7 @@ class Reconciliation(unittest.TestCase):
         wired = Wired()
         record = wired.mint()
         wired.capture(wired.authorize(record, 1840))
-        self.assertEqual(0, wired.cards.reconcile("b-1"))
+        self.assertEqual(0, wired.cards.reconcile("q-1"))
 
 
 class Statement(unittest.TestCase):
@@ -379,7 +475,7 @@ class Statement(unittest.TestCase):
         wired = Wired()
         record = wired.mint()
         wired.capture(wired.authorize(record, 1840))
-        text = R.statement(wired.cards.complete("b-1"))
+        text = R.statement(wired.cards.complete("q-1"))
         for expected in ("why: cheapest arriving on time", "$18.40", "tip allowed up to $5.00",
                          "held on your card at booking: $23.40", "charged to you: $18.40"):
             self.assertIn(expected, text)
@@ -389,18 +485,23 @@ class Demo(unittest.TestCase):
     def test_every_scenario_ends_where_it_should(self):
         with tempfile.TemporaryDirectory() as directory:
             harness = demo.run(directory, out=io.StringIO())
-            states = {r["booking_id"]: (r["state"], r["amounts"]["charged_to_user"], r["amounts"]["refunded_to_user"])
-                      for r in harness.store.all()}
+            states = {r["quote_id"]: (r["booking_id"], r["state"], r["amounts"]["charged_to_user"],
+                                      r["amounts"]["refunded_to_user"]) for r in harness.store.all()}
         self.assertEqual({
-            "booking-demo-1": ("settled", 2140, 0),
-            "booking-demo-2": ("cancelled", 0, 0),
-            "booking-demo-3": ("settled", 1500, 0),
-            "booking-demo-4": ("settled", 500, 0),
-            "booking-demo-5": ("cancelled", 0, 0),
-            "booking-demo-6": ("settled", 1840, 500),
-            "booking-demo-7": ("needs_review", 2340, 0),
-            "booking-demo-9": ("settled", 1840, 0),
+            "qt_demo1": ("bk_demo1", "settled", 2140, 0),
+            "qt_demo2": ("bk_demo2", "cancelled", 0, 0),
+            "qt_demo3": ("bk_demo3", "settled", 1500, 0),
+            "qt_demo4": ("bk_demo4", "settled", 500, 0),
+            "qt_demo5": ("bk_demo5", "cancelled", 0, 0),
+            "qt_demo6": ("bk_demo6", "settled", 1840, 500),
+            "qt_demo7": ("bk_demo7", "needs_review", 2340, 0),
+            "qt_demo9": ("bk_demo9", "settled", 1840, 0),
+            "qt_demo10": (None, "cancelled", 0, 0),
         }, states)
+
+    def test_test_mode_runs_get_fresh_quote_ids(self):
+        first, second = (demo.sample_quote(1, run_tag=f"r{t}")[0]["quote_id"] for t in ("a", "b"))
+        self.assertNotEqual(first, second)
 
 
 if __name__ == "__main__":

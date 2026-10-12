@@ -1,6 +1,6 @@
 """the charge-with-rationale record: every amount, paired with why the agent spent it.
 
-one JSON file per booking. the record never holds card numbers, security codes, or expiry
+one JSON file per reservation, keyed by quote_id because it exists before the booking does. the record never holds card numbers, security codes, or expiry
 dates; the card appears only as its Stripe object reference and last four digits.
 
 states
@@ -25,16 +25,24 @@ def now_iso(clock=time.time):
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(clock()))
 
 
+def payment_reference(quote_id):
+    """the opaque handle book_ride carries for funds already held: letters, digits, _ and -,
+    8 to 128 characters, never anything card-shaped (the connector contract's rule)."""
+    safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in quote_id)
+    return f"sirven_hold_{safe}"[:128]
+
+
 def new_record(terms, rationale, user_reference, clock=time.time):
     return {
         "record_version": RECORD_VERSION,
-        "booking_id": terms["booking_id"],
         "quote_id": terms["quote_id"],
+        "booking_id": None,
         "user": user_reference,
         "state": "reserved",
         "amounts": {
             "currency": terms["currency"],
             "quoted": terms["quoted"],
+            "fare_ceiling": terms["fare_ceiling"],
             "tip_ceiling": terms["tip_ceiling"],
             "cap": terms["cap"],
             "reserved_on_user_card": 0,
@@ -42,19 +50,20 @@ def new_record(terms, rationale, user_reference, clock=time.time):
             "refunded_to_card": 0,
             "charged_to_user": 0,
             "refunded_to_user": 0,
+            "reported_by_ride_service": None,
         },
+        "payment_reference": payment_reference(terms["quote_id"]),
         "rationale": {
             "quote": {
                 "quote_id": terms["quote_id"],
                 "provider": terms.get("provider"),
-                "price_minor": terms["quoted"],
-                "estimated_arrival": terms.get("estimated_arrival"),
-                "estimated_trip_time": terms.get("estimated_trip_time"),
+                "rank": terms.get("rank"),
+                "price_kind": terms.get("price_kind"),
+                "constraint_flags": terms.get("constraint_flags", []),
+                "estimated_pickup_at": terms.get("estimated_pickup_at"),
+                "estimated_trip_minutes": terms.get("estimated_trip_minutes"),
             },
-            "booking": {
-                "booking_id": terms["booking_id"],
-                "cancellation_window": terms.get("cancellation_window"),
-            },
+            "booking": None,
             "reasoning_summary": rationale.get("reasoning_summary", ""),
             "user_request": rationale.get("user_request", ""),
         },
@@ -108,13 +117,16 @@ def statement(record):
     money = lambda value: format_money(value, currency)  # noqa: E731
     quote = record["rationale"]["quote"]
     lines = [
-        f"booking {record['booking_id']} ({record['state']})",
+        f"booking {record['booking_id'] or 'not yet confirmed'} ({record['state']})",
         f"  why: {record['rationale']['reasoning_summary'] or 'no reason recorded'}",
     ]
     if record["rationale"].get("user_request"):
         lines.append(f"  you asked: {record['rationale']['user_request']}")
+    fare = money(amounts["quoted"])
+    if amounts.get("fare_ceiling", amounts["quoted"]) != amounts["quoted"]:
+        fare += f" expected, at most {money(amounts['fare_ceiling'])}"
     lines.append(f"  quote {quote['quote_id']} from {quote.get('provider') or 'the ride service'}: "
-                 f"{money(amounts['quoted'])}, tip allowed up to {money(amounts['tip_ceiling'])}")
+                 f"{fare}, tip allowed up to {money(amounts['tip_ceiling'])}")
     lines.append(f"  held on your card at booking: {money(amounts['reserved_on_user_card'])}")
     lines.append(f"  paid to the ride service: {money(net_card_spend(record))}")
     lines.append(f"  charged to you: {money(amounts['charged_to_user'])}")
@@ -126,37 +138,37 @@ def statement(record):
 
 
 class RecordStore:
-    """a directory of charge records, one file per booking, written atomically."""
+    """a directory of charge records, one file per reservation (keyed by quote), written atomically."""
 
     def __init__(self, directory):
         self.directory = directory
         os.makedirs(directory, mode=0o700, exist_ok=True)
 
-    def _path(self, booking_id):
-        safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in booking_id)
+    def _path(self, quote_id):
+        safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in quote_id)
         return os.path.join(self.directory, f"{safe}.json")
 
     @contextlib.contextmanager
-    def locked(self, booking_id):
-        """hold an exclusive lock on one booking's record. webhook deliveries, settlement, and
+    def locked(self, quote_id):
+        """hold an exclusive lock on one reservation's record. webhook deliveries, settlement, and
         reconciliation all read, change, and write the same file; the lock keeps them from
         overwriting each other."""
-        with open(self._path(booking_id) + ".lock", "a", encoding="utf-8") as handle:
+        with open(self._path(quote_id) + ".lock", "a", encoding="utf-8") as handle:
             fcntl.flock(handle, fcntl.LOCK_EX)
             try:
                 yield
             finally:
                 fcntl.flock(handle, fcntl.LOCK_UN)
 
-    def get(self, booking_id):
+    def get(self, quote_id):
         try:
-            with open(self._path(booking_id), encoding="utf-8") as handle:
+            with open(self._path(quote_id), encoding="utf-8") as handle:
                 return json.load(handle)
         except FileNotFoundError:
             return None
 
     def put(self, record):
-        path = self._path(record["booking_id"])
+        path = self._path(record["quote_id"])
         fd, temp = tempfile.mkstemp(dir=self.directory, prefix=".record.")
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             json.dump(record, handle, indent=2, sort_keys=True)
@@ -167,15 +179,29 @@ class RecordStore:
         safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in card_id)
         return os.path.join(self.directory, "cards", safe)
 
-    def index_card(self, card_id, booking_id):
+    def index_card(self, card_id, quote_id):
         """transactions name their card but carry none of its metadata, so keep the way back."""
         os.makedirs(os.path.join(self.directory, "cards"), mode=0o700, exist_ok=True)
         with open(self._card_index_path(card_id), "w", encoding="utf-8") as handle:
-            handle.write(booking_id + "\n")
+            handle.write(quote_id + "\n")
 
-    def booking_for_card(self, card_id):
+    def quote_for_card(self, card_id):
         try:
             with open(self._card_index_path(card_id), encoding="utf-8") as handle:
+                return handle.read().strip() or None
+        except FileNotFoundError:
+            return None
+
+    def index_reference(self, reference, quote_id):
+        os.makedirs(os.path.join(self.directory, "references"), mode=0o700, exist_ok=True)
+        with open(os.path.join(self.directory, "references", reference), "w", encoding="utf-8") as handle:
+            handle.write(quote_id + "\n")
+
+    def quote_for_reference(self, reference):
+        if not isinstance(reference, str) or not reference or any(not (c.isalnum() or c in "-_") for c in reference):
+            return None
+        try:
+            with open(os.path.join(self.directory, "references", reference), encoding="utf-8") as handle:
                 return handle.read().strip() or None
         except FileNotFoundError:
             return None

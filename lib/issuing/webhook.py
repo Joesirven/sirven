@@ -1,8 +1,8 @@
 """Stripe-Signature headers: verify what Stripe sends, and sign what the stand-in sends.
 
-the header is t=TIMESTAMP,v1=HEX where HEX is the HMAC with SHA-256 of "TIMESTAMP.PAYLOAD"
-under the endpoint's signing secret. a stale timestamp is refused so a captured event cannot
-be replayed later.
+the header is t=<timestamp>,v1=<signature>, where the signature is a keyed hash (hmac with
+hashlib.sha256, in hexadecimal) of "<timestamp>.<payload>" under the endpoint's signing
+secret. a stale timestamp is refused so a captured event cannot be replayed later.
 """
 import hashlib
 import hmac
