@@ -1394,7 +1394,7 @@ def command_setup(team, bundle):
                         "-allowProvisioningUpdates DEVELOPMENT_TEAM=%s CODE_SIGN_STYLE=Automatic "
                         "PRODUCT_BUNDLE_IDENTIFIER=%s test, then press Ctrl-C once the test starts on the phone"
                         % (source_folder, team, bundle)),
-        ("on the phone", "the first time: Settings > General > VPN & Device Management, "
+        ("on the phone", "the first time: Settings > General, the device management page, "
                          "trust your developer certificate"),
         ("on the phone", "Settings > Developer: turn on the user interface automation switch"),
         ("on this Mac", "SIRVEN_PHONE_RUNNER_BUNDLE=%s sirven phone start, and leave it running" % runner_identifier),

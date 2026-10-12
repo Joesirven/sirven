@@ -56,8 +56,8 @@ because it signs software with your Apple account.
    WebDriverAgent at the commit iPhone-use pins into `~/.sirven/WebDriverAgent-source`, then run
    `xcodebuild ... test` there with your own development team and a bundle name you own, and
    press Ctrl-C once the test starts on the phone.
-6. On the phone, the first time: trust your developer certificate (Settings > General > VPN &
-   Device Management), and turn on the user interface automation switch under Settings > Developer.
+6. On the phone, the first time: trust your developer certificate (Settings > General, the device
+   management page), and turn on the user interface automation switch under Settings > Developer.
 7. Run `SIRVEN_PHONE_RUNNER_BUNDLE=BUNDLE.xctrunner sirven phone start` and leave it running.
    The runner identifier is the bundle name you gave setup, with `.xctrunner` added.
 8. From another terminal, `sirven phone status`.

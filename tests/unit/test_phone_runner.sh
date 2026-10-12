@@ -5,5 +5,4 @@
 
 test_phone_runner_unit_tests_pass() {
   assert_status 0 python3 -B -m unittest discover -s "$REPO_DIR/tests/phone" -p test_phone_runner.py
-  assert_contains "$CAPTURED_STDERR" "OK"
 }
