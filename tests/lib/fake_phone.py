@@ -17,7 +17,7 @@ DIRECTORY/ready appears once both are listening.
 world mode: when DIRECTORY/world.json exists (copy tests/lib/phone_world.json there), the
 fake is a small phone with a home screen and several apps instead of one fixed screen. taps
 move between screens, typing fills fields, launch and home switch apps, and the position lives
-in DIRECTORY/world-state.json. a screen with "awaits_owner" is the phone's own Face ID payment
+in DIRECTORY/world-state.json. a screen with "awaits_owner" is the phone's own face recognition payment
 sheet: it stays until the test plays the owner by creating DIRECTORY/owner_approves (go to the
 "awaits_owner" screen) or DIRECTORY/owner_declines (go to the "declined" screen).
 """
@@ -139,6 +139,9 @@ def world_action(method, path, body):
                 return current_screen(the_world, state).get("focused", "XCUIElementTypeTextField")
             return None
         if bare.endswith("/wda/tap"):
+            if "awaits_owner" in current_screen(the_world, state):
+                # only the owner answers the phone's own payment sheet; a tap here is a failure
+                open(os.path.join(DIRECTORY, "sheet_touched"), "w").close()
             state = world_tap(the_world, state, body["x"], body["y"])
         elif bare.endswith("/wda/keys"):
             text = body["value"][0]
@@ -152,7 +155,9 @@ def world_action(method, path, body):
             app = the_world["apps"].get(body["bundleId"])
             if app is None:
                 return {"error": "unknown error", "message": "no app %s is installed" % body["bundleId"]}
-            state = dict(state, app=body["bundleId"], screen=app["first"], typed="")
+            if body["bundleId"] != state["app"]:
+                # like iOS: an app that is already in front resumes where it was
+                state = dict(state, app=body["bundleId"], screen=app["first"], typed="")
         elif bare.endswith("/wda/dragfromtoforduration"):
             screen = current_screen(the_world, state)
             if body["fromX"] > body["toX"] and screen.get("next_page"):
