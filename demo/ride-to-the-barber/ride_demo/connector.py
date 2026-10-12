@@ -52,9 +52,12 @@ BOOKING_FIELDS = (
 class ConnectorError(Exception):
     """an error from the error taxonomy: code is the stable part, message is for people."""
 
-    def __init__(self, code, message):
+    def __init__(self, code, message, seen_by=None):
         super().__init__(message)
         self.code = code
+        # who, if anyone, saw the trip before it failed. the user is told; see seen_by in the
+        # unavailable entries of quote_ride.
+        self.seen_by = seen_by
 
 
 def money(amount_minor, currency="USD"):

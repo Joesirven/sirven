@@ -38,15 +38,19 @@ class FixtureCalendar:
         moment = datetime.fromisoformat(text)
         return moment if moment.tzinfo else moment.replace(tzinfo=self.zone)
 
+    def theirs(self):
+        """the user's own events: never one the agent wrote, like an earlier run's ride."""
+        return [event for event in self.events() if "written_by" not in event]
+
     def meeting_at(self, hour, minute=0):
         """the first event that starts at hour:minute, on the earliest day that has one."""
-        for event in self.events():
+        for event in self.theirs():
             if (event["start"].hour, event["start"].minute) == (hour, minute):
                 return event
         return None
 
     def next_event_matching(self, after, words):
-        for event in self.events():
+        for event in self.theirs():
             text = (event["title"] + " " + event.get("location", "")).lower()
             if event["start"] >= after and any(word in text for word in words):
                 return event

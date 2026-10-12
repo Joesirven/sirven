@@ -35,8 +35,8 @@ class Temporary(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.tmp)
 
-    def run_demo(self, *extra):
-        state = os.path.join(self.tmp, "state")
+    def run_demo(self, *extra, state=None):
+        state = state or os.path.join(self.tmp, "state")
         record = os.path.join(self.tmp, "record")
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
@@ -167,6 +167,24 @@ class EndToEndTest(Temporary):
         self.assertEqual([(entry["leg"], entry["met"]) for entry in levels], [("quote", True), ("booking", True)])
         for name in ("transcript.txt", "run.cast", "events.jsonl"):
             self.assertTrue(os.path.getsize(os.path.join(record, name)) > 0)
+        # the agent's own lines never show which backend answered; the backend's are labeled.
+        self.assertNotIn("\n    request req_", out)
+        self.assertIn("backend   | request req_", out)
+
+    def test_the_concierge_sees_only_what_the_disclosure_says(self):
+        status, out, state, _ = self.run_demo("--yes", "--scripted-concierge")
+        self.assertEqual(status, 0, out)
+        request = ConciergeQueue(os.path.join(state, "concierge-queue")).list(("booked",))[0]
+        self.assertEqual(sorted(request["trip"]), ["departure_window", "destination", "origin", "provider"])
+        self.assertEqual(sorted(request["payment"]),
+                         ["allowed_categories", "card_id", "last4", "mode", "spending_limit_minor"])
+
+    def test_a_second_run_on_the_same_state_still_finds_the_barber(self):
+        state = os.path.join(self.tmp, "shared")
+        for _ in range(2):
+            status, out, _, _ = self.run_demo("--yes", "--scripted-concierge", state=state)
+            self.assertEqual(status, 0, out)
+            self.assertIn("next: Haircut at 3:30pm", out)
 
     def test_late_quote_is_surfaced_not_routed_around(self):
         status, out, state, _ = self.run_demo("--yes", "--scripted-concierge", "--scenario", "late_quote",
@@ -175,6 +193,7 @@ class EndToEndTest(Temporary):
         self.assertIn("Waymo  unavailable: quote_target_missed", out)
         self.assertIn("I am not going to keep trying behind your back", out)
         self.assertIn("Ride to Mission Street Barbers (Uber)", out)
+        self.assertIn("agent: Jose (rehearsal), a sirven concierge, saw this trip request.", out)
 
     def test_fare_over_the_limit_releases_the_card(self):
         status, out, state, _ = self.run_demo("--yes", "--scripted-concierge", "--scenario", "fare_over_cap")
@@ -184,6 +203,7 @@ class EndToEndTest(Temporary):
         self.assertEqual((card["status"], card["authorized_minor"]), ("released", 0))
         withdrawn = ConciergeQueue(os.path.join(state, "concierge-queue")).list(("withdrawn",))
         self.assertIn("cancel this ride", withdrawn[0]["withdrawn_because"])
+        self.assertIn("agent: Jose (rehearsal), a sirven concierge, saw this trip request.", out)
 
     def test_no_answer_means_no(self):
         status, out, state, _ = self.run_demo("--scripted-concierge")

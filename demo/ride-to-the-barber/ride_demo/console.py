@@ -18,7 +18,7 @@ from . import service_levels
 from .concierge_queue import ConciergeQueue, QueueError, now
 
 RULES = (
-    "you may see: the pickup, the destination, the time window, the budget, and the user's consent",
+    "you may see: the pickup, the destination, the time window, and the user's consent; at booking, the card's last four digits and limit",
     "never: contact the user yourself, keep or share the trip, or use the card for anything but this ride",
     "never: book another service, another time, or above the card's limit; decline and say why instead",
     "anything unsafe or unclear: decline with the reason; sirven tells the user, honestly",
@@ -48,7 +48,6 @@ def describe_request(request):
         "  leave:       between %s and %s" % (
             datetime.fromisoformat(window["earliest"]).strftime("%-I:%M%p").lower(),
             datetime.fromisoformat(window["latest"]).strftime("%-I:%M%p").lower()),
-        "  budget:      under %s" % dollars_from_minor(trip["budget_ceiling"]["amount_minor"]),
         "  consent:     the user agreed at %s that a concierge may see this trip" % request["consent"]["at"],
     ]
     if "payment" in request:

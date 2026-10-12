@@ -68,12 +68,17 @@ follows it line for line.
 3. **The request and the calendar.** The agent finds the 2:00pm design review (ends 2:45pm),
    sees the 3:30pm haircut, and works out: leave between 2:50pm and 3:05pm, arrive by 3:25pm.
 4. **Consent before a person sees the trip.** The disclosure says plainly that a person books
-   Waymo rides, and exactly what they will and will not see. Answering no is shown in
-   `--no-concierge`: the trip never reaches the queue and Waymo is reported unavailable.
+   Waymo rides, and exactly what they will and will not see: the pickup, the destination, and
+   the time window, then at booking the card's last four digits and limit. That is all the queue
+   carries; a test holds it to exactly those fields, so no budget and nothing from the calendar
+   reaches a person. Answering no is shown in `--no-concierge`: the trip never reaches the
+   queue and Waymo is reported unavailable.
 5. **Quotes through one connector.** `quote_ride` returns Waymo, UberX, Lyft, and Uber Black,
    ranked, with flags (`preferred_provider`, `over_budget`). The agent cannot tell that the
-   Waymo option came from a person and the others from a partner backend. On the concierge
-   side, the quote lands well inside the 30 second target.
+   Waymo option came from a person and the others from a partner backend. Lines labeled
+   `backend |` are the demo's narration of what happens behind the connector, not the agent's
+   view; lines labeled `concierge |` are the console. The quote lands well inside the 30
+   second target.
 6. **The choice and the reason.** Waymo One at $21.40: under $25, on time, and preferred.
 7. **Solo asks before every real-world action.** The booking question names the price, the
    pickup, the arrival, the card's limit, and that a concierge books it.
@@ -91,11 +96,12 @@ follows it line for line.
 The two failures, both recorded:
 
 - **`late_quote`**: the concierge claims the request and never quotes. At 30 seconds the agent
-  withdraws it, records the missed target, tells the user it will not keep trying behind their
-  back, and offers UberX instead, asking first.
+  withdraws it, records the missed target, tells the user who saw the trip, says it will not
+  keep trying behind their back, and offers UberX instead, asking first.
 - **`fare_over_cap`**: the concierge reports a $26.90 fare against a $21.40 card. The card
   declines it, the agent releases the hold, nothing is charged, the console is told to cancel
-  the ride, and the agent offers the next option without booking it.
+  the ride, the user is told who saw the trip, and the agent offers the next option without
+  booking it.
 
 ## Recordings
 
@@ -106,9 +112,9 @@ concierge request as the queue left it).
 
 | Recording | Result | Quote | Booking |
 | --- | --- | --- | --- |
-| [2026-10-11-scripted-normal](recordings/2026-10-11-scripted-normal/transcript.txt) | Waymo booked through the concierge, exit 0 | 8.4 seconds of 30 | 16.2 seconds of 90 |
+| [2026-10-11-scripted-normal](recordings/2026-10-11-scripted-normal/transcript.txt) | Waymo booked through the concierge, exit 0 | 8.4 seconds of 30 | 16.4 seconds of 90 |
 | [2026-10-11-scripted-late_quote](recordings/2026-10-11-scripted-late_quote/transcript.txt) | Waymo withdrawn, UberX booked with consent, exit 0 | missed after 30 seconds | not used |
-| [2026-10-11-scripted-fare_over_cap](recordings/2026-10-11-scripted-fare_over_cap/transcript.txt) | fare declined, card released, nothing booked, exit 4 | 8.3 seconds of 30 | 16.2 seconds of 90 |
+| [2026-10-11-scripted-fare_over_cap](recordings/2026-10-11-scripted-fare_over_cap/transcript.txt) | fare declined, card released, nothing booked, exit 4 | 8.4 seconds of 30 | 16.4 seconds of 90 |
 
 These were made with the scripted operator. A recording with Jose at the console is the next
 one to make (see below).
@@ -145,6 +151,9 @@ Then the dependencies:
    of that file. One design point for thread 08: the concierge backend needs the held card at
    booking time, and the stand-in passes the quote identifier to the backend for that lookup.
    The contract should say how a backend finds its booking's card without the agent seeing it.
+   A second point: when a person saw a trip that then failed, the user is told who. The
+   stand-in carries that as `seen_by` on an unavailable entry and on a booking error; the
+   contract needs a field for it.
 5. Thread 11 delivers test-mode minting, the cap, the ride-services restriction, and webhook
    reconciliation, and settles on ride completion (the rehearsal stops at authorized). Stripe
    Issuing approval and live mode wait for Jose.
@@ -185,5 +194,7 @@ python3 -m unittest discover -s tests
 From the repo root, `make test` runs them too (`tests/unit/test_ride_demo.sh`). They cover the
 request reading, ranking and the budget (the tip ceiling counts), backend blindness, booking
 idempotency and cancellation, the card's cap and category, a late answer never overwriting a
-withdrawal, the gate staying closed until all three items are in place, every end to end path
-above, a person driving the interactive console, and Jose's language rules on every file here.
+withdrawal, the gate staying closed until all three items are in place, the concierge receiving
+exactly the disclosed fields, a second run on the same state, every end to end path above, a
+person driving the interactive console, and Jose's language rules on every file here. They pass
+on Python 3.9 and 3.12.

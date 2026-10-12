@@ -25,33 +25,37 @@
     0.0    next: Haircut at 3:30pm, so I will aim to have you there by 3:25pm
     0.0    leave between 2:50pm and 3:05pm, from 535 Mission St, San Francisco, CA 94105 to Mission Street Barbers, 2400 Mission St, San Francisco, CA 94110
     0.0  
-    0.0    ? Waymo rides are booked for you by a person on the sirven team (a concierge). To get a price and book, they will see your pickup (535 Mission St, San Francisco, CA 94105), where you are going (Mission Street Barbers, 2400 Mission St, San Francisco, CA 94110), and when (2:50pm to 3:05pm). They will not see your calendar, your card number, or anything else. Is that all right?
+    0.0    ? Waymo rides are booked for you by a person on the sirven team (a concierge). To get a price and book, they will see your pickup (535 Mission St, San Francisco, CA 94105), where you are going (Mission Street Barbers, 2400 Mission St, San Francisco, CA 94110), and when (2:50pm to 3:05pm). They will not see your calendar or anything else about you. If you book, they pay with the one-time card for this ride, which they see only as its last four digits and its limit. Is that all right?
     0.0      yes (answered by --yes, for the recording)
     0.0  
     0.0  agent: quote_ride(535 Mission St, San Francisco, CA 94105 -> Mission Street Barbers, 2400 Mission St, San Francisco, CA 94110, leave 2:50pm to 3:05pm, prefer Waymo, under $25.00)
-    0.0      request req_a2177e67 is in the concierge queue, waiting for a quote
-    0.3  concierge | new request req_a2177e67; the rules are on screen
+    0.0  backend   | request req_600acbb9 is in the concierge queue, waiting for a quote
+    0.3  concierge | new request req_600acbb9; the rules are on screen
     2.3  concierge | claimed by Jose (rehearsal); opening the Waymo app for a price
-    2.6      concierge Jose (rehearsal) claimed the request
-    8.3  concierge | quote sent: $21.40, pickup in 7 minutes, 16 minute trip, at 8.3 seconds of 30
-    8.5      quote: 8.3 seconds against a 30 second target (met)
-    8.5    1. Waymo  Waymo One       $21.40  pickup 2:57pm, arrive 3:13pm  flags: preferred_provider
-    8.5    2. Uber   UberX           $18.90  pickup 2:54pm, arrive 3:10pm  flags: none
-    8.5    3. Lyft   Lyft Standard   $19.50  pickup 2:56pm, arrive 3:12pm  flags: none
-    8.5    4. Uber   Uber Black      $34.20  pickup 2:57pm, arrive 3:12pm  flags: over_budget
-    8.5  agent: choosing option 1: Waymo One at $21.40 is the best option under $25.00 that arrives on time, and it is your preferred service.
-    8.5  
-    8.5    ? Book Waymo One for $21.40? Pickup about 2:57pm at 535 Mission St, San Francisco, CA 94105, arriving about 3:13pm. A one-time card limited to $21.40, for ride services only, pays for it. A sirven concierge books this one in the Waymo app for you, and I will tell you who.
-    8.5      yes (answered by --yes, for the recording)
-    8.5  agent: held test card ic_test_cfdcf7ebf714 ending 4242, limit $21.40, ride services only
-    8.5  agent: book_ride(q_47868bb4f21c)
-    8.5      request req_a2177e67 is waiting for the concierge to book
-    8.5  concierge | booking requested for req_a2177e67
-    8.5  concierge | pay with:    test card ending 4242, limit $21.40, ride services only
-   10.6  concierge | booking in the Waymo app
-   10.6      concierge Jose (rehearsal) claimed the request
-   24.7  concierge | confirmation REHEARSAL-WAYMO-0001 sent, fare $26.90, at 16.2 seconds of 90
-   24.7      booking: 16.2 seconds against a 90 second target (met)
-   24.8  agent: the booking did not go through (payment_declined): the fare the concierge saw was declined: amount is over the card's limit; the concierge must cancel the ride
-   24.8  agent: I released the card; nothing was charged. I have not booked anything else.
-   24.8  agent: if you want, I can book option 2 (Uber UberX, $18.90) instead; I will ask first.
+    2.5  backend   | concierge Jose (rehearsal) claimed the request
+    8.4  concierge | quote sent: $21.40, pickup in 7 minutes, 16 minute trip, at 8.4 seconds of 30
+    8.4  backend   | quote: 8.4 seconds against a 30 second target (met)
+    8.4    1. Waymo  Waymo One       $21.40  pickup 2:57pm, arrive 3:13pm  flags: preferred_provider
+    8.4    2. Uber   UberX           $18.90  pickup 2:54pm, arrive 3:10pm  flags: none
+    8.4    3. Lyft   Lyft Standard   $19.50  pickup 2:56pm, arrive 3:12pm  flags: none
+    8.4    4. Uber   Uber Black      $34.20  pickup 2:57pm, arrive 3:12pm  flags: over_budget
+    8.4  agent: choosing option 1: Waymo One at $21.40 is the best option under $25.00 that arrives on time, and it is your preferred service.
+    8.4  
+    8.4    ? Book Waymo One for $21.40? Pickup about 2:57pm at 535 Mission St, San Francisco, CA 94105, arriving about 3:13pm. A one-time card limited to $21.40, for ride services only, pays for it. A sirven concierge books this one in the Waymo app for you, and I will tell you who.
+    8.4      yes (answered by --yes, for the recording)
+    8.4  agent: held test card ic_test_4c2a92642fa2 ending 4242, limit $21.40, ride services only
+    8.4  agent: book_ride(q_e1a50c01852d)
+    8.4  backend   | request req_600acbb9 is waiting for the concierge to book
+    8.6  concierge | booking requested for req_600acbb9
+    8.6  concierge | pay with:    test card ending 4242, limit $21.40, ride services only
+   10.7  concierge | booking in the Waymo app
+   10.9  backend   | concierge Jose (rehearsal) claimed the request
+   24.8  concierge | confirmation REHEARSAL-WAYMO-0001 sent, fare $26.90, at 16.4 seconds of 90
+   24.9  backend   | booking: 16.4 seconds against a 90 second target (met)
+   24.9  agent: the booking did not go through (payment_declined): the fare the concierge saw was declined: amount is over the card's limit; the concierge must cancel the ride
+   24.9  agent: Jose (rehearsal), a sirven concierge, saw this trip request.
+   24.9  agent: I released the card; nothing was charged. I have not booked anything else.
+   24.9  agent: if you want, I can book option 2 (Uber UberX, $18.90) instead; I will ask first.
+   24.9  backend   | service levels:
+   24.9  backend   | quote: 8.4 seconds against a 30 second target (met)
+   24.9  backend   | booking: 16.4 seconds against a 90 second target (met)

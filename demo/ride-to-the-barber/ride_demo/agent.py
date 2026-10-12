@@ -90,7 +90,7 @@ def build_router(state_dir, recorder, quote_wait, booking_wait):
     queue = ConciergeQueue(os.path.join(state_dir, "concierge-queue"))
     concierge = ConciergeBackend(
         queue, cards, os.path.join(state_dir, "service-levels.jsonl"),
-        notify=lambda line: recorder.say("    " + line), quote_wait_seconds=quote_wait,
+        notify=lambda line: recorder.say(line, who="backend"), quote_wait_seconds=quote_wait,
         booking_wait_seconds=booking_wait)
     partner = FixturePartnerBackend(os.path.join(FIXTURES, "partner-quotes.json"))
     return Router([concierge, partner]), cards, concierge
@@ -103,6 +103,24 @@ def option_line(option):
     return "  %d. %-6s %-14s %7s  pickup %s, arrive %s  flags: %s" % (
         option["rank"], option["provider"], option["product"], dollars(option["price"]),
         clock_time(pickup), clock_time(arrival), flags)
+
+
+def tell_who_saw(say, copy, entry):
+    """a trip that reached the concierge queue is never hidden: say who saw it, or that no one
+    took it. entries without seen_by never reached a person."""
+    if "seen_by" not in entry:
+        return
+    if entry["seen_by"]:
+        say("agent: " + copy["seen-by-concierge"].format(concierge=entry["seen_by"]))
+    else:
+        say("agent: " + copy["queued-unclaimed"])
+
+
+def say_service_levels(recorder, concierge):
+    """the run's narration, not the agent: the agent never learns a concierge was involved."""
+    lines = [service_levels.describe(entry) for entry in concierge.measurements]
+    for line in ["service levels:"] + (lines or ["none: no concierge was involved in this run"]):
+        recorder.say(line, who="backend")
 
 
 def choose(options):
@@ -197,6 +215,8 @@ def run(args, recorder):
         say(line)
     for missing in quotes["unavailable"]:
         say("  -  %-6s unavailable: %s" % (missing["provider"], missing["reason"]))
+    for missing in quotes["unavailable"]:
+        tell_who_saw(say, copy, missing)
     preferred_missing = [m for m in quotes["unavailable"] if m["provider"] in intent["preferred_providers"]]
     if preferred_missing and consented:
         say("agent: " + copy["waymo-unavailable"].format(reason=preferred_missing[0]["reason"]))
@@ -239,11 +259,14 @@ def run(args, recorder):
         cards.release(card["card_id"], error.code)
         recorder.event("booking_failed", code=error.code, message=str(error))
         say("agent: the booking did not go through (%s): %s" % (error.code, error))
+        if error.seen_by:
+            tell_who_saw(say, copy, {"seen_by": error.seen_by})
         say("agent: I released the card; nothing was charged. I have not booked anything else.")
         fallback = choose([option for option in quotes["options"] if option["quote_id"] != chosen["quote_id"]])
         if fallback:
             say("agent: if you want, I can book option %d (%s %s, %s) instead; I will ask first." % (
                 fallback["rank"], fallback["provider"], fallback["product"], dollars(fallback["price"])))
+        say_service_levels(recorder, concierge)
         return EXIT_BOOKING_FAILED
     cards.attach_booking(card["card_id"], booking["booking_id"])
     recorder.event("booked", booking=booking)
@@ -274,10 +297,7 @@ def run(args, recorder):
     say("agent: on your calendar: %s, %s to %s" % (event["title"], clock_time(pickup), clock_time(arrival)))
 
     say("")
-    say("done. service levels for the concierge leg:")
-    for entry in concierge.measurements:
-        say("  " + service_levels.describe(entry))
-    if not concierge.measurements:
-        say("  none: the concierge was not used in this run")
+    say("done.")
+    say_service_levels(recorder, concierge)
     say("state written to %s: calendar.json, ride.ics, charge-records.json, service-levels.jsonl, concierge-queue/" % state_dir)
     return EXIT_BOOKED

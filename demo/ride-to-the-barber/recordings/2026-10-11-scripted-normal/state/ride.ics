@@ -2,14 +2,14 @@ BEGIN:VCALENDAR
 VERSION:2.0
 PRODID:-//sirven//ride rehearsal//EN
 BEGIN:VEVENT
-UID:evt-ride-b_2dfc96082327@sirven.invalid
-DTSTAMP:20261012T002437Z
+UID:evt-ride-b_5b05f629d156@sirven.invalid
+DTSTAMP:20261012T003649Z
 DTSTART:20261013T215700Z
 DTEND:20261013T221300Z
 SUMMARY:Ride to Mission Street Barbers (Waymo)
 LOCATION:535 Mission St\, San Francisco\, CA 94105
 DESCRIPTION:Waymo Waymo One\, $21.40\, booked by the sirven agent\nbooking:
-  b_2dfc96082327\nconfirmation: REHEARSAL-WAYMO-0001 (concierge Jose (rehea
+  b_5b05f629d156\nconfirmation: REHEARSAL-WAYMO-0001 (concierge Jose (rehea
  rsal))\ntracking: https://example.invalid/waymo/trip/rehearsal-0001\nfree 
  cancellation until: 2026-10-13T14:55:00-07:00\npaid with: test card ending
   4242\, limit $21.40\nwhy: Waymo One at $21.40 is the best option under $2

@@ -17,7 +17,9 @@ Placeholders in braces are filled in by the agent at run time.
 
 Waymo rides are booked for you by a person on the sirven team (a concierge). To get a price
 and book, they will see your pickup ({origin}), where you are going ({destination}), and when
-({window}). They will not see your calendar, your card number, or anything else. Is that all right?
+({window}). They will not see your calendar or anything else about you. If you book, they pay
+with the one-time card for this ride, which they see only as its last four digits and its
+limit. Is that all right?
 
 ## declined-consent
 
@@ -35,6 +37,14 @@ A sirven concierge books this one in the Waymo app for you, and I will tell you 
 ## booked-by-concierge
 
 Booked by {concierge}, a sirven concierge. Confirmation {confirmation}.
+
+## seen-by-concierge
+
+{concierge}, a sirven concierge, saw this trip request.
+
+## queued-unclaimed
+
+This trip request reached the concierge queue, but no concierge took it.
 
 ## waymo-unavailable
 

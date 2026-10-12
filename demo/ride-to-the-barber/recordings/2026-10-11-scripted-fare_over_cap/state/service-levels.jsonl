@@ -1,2 +1,2 @@
-{"finished": "2026-10-11T17:25:17.383-07:00", "leg": "quote", "met": true, "request_id": "req_a2177e67", "seconds": 8.3, "started": "2026-10-11T17:25:09.096-07:00", "target_seconds": 30}
-{"finished": "2026-10-11T17:25:33.738-07:00", "leg": "booking", "met": true, "request_id": "req_a2177e67", "seconds": 16.2, "started": "2026-10-11T17:25:17.566-07:00", "target_seconds": 90}
+{"finished": "2026-10-11T17:37:27.855-07:00", "leg": "quote", "met": true, "request_id": "req_600acbb9", "seconds": 8.4, "started": "2026-10-11T17:37:19.504-07:00", "target_seconds": 30}
+{"finished": "2026-10-11T17:37:44.275-07:00", "leg": "booking", "met": true, "request_id": "req_600acbb9", "seconds": 16.4, "started": "2026-10-11T17:37:27.882-07:00", "target_seconds": 90}

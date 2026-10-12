@@ -57,18 +57,19 @@ class ConciergeBackend:
             # the concierge answered in the instant between the deadline and the withdrawal.
             return self.queue.read(request_id)
 
+    def _seen_by(self, request_id):
+        """the concierge who claimed the request, or None when no one claimed it. a request
+        that reached the queue is reported either way, so a failure never hides a person."""
+        return self.queue.read(request_id).get("concierge", {}).get("name")
+
     def quote(self, origin, destination, departure_window, user_preferences, budget_ceiling):
         consent = user_preferences.get("human_assisted_booking")
         if not consent or not consent.get("granted"):
             return {"unavailable": [{"provider": PROVIDER, "reason": "needs_consent_for_human_assisted_booking"}]}
-        trip = {
-            "origin": origin,
-            "destination": destination,
-            "departure_window": departure_window,
-            "arrive_by": user_preferences.get("arrive_by"),
-            "budget_ceiling": budget_ceiling,
-            "provider": PROVIDER,
-        }
+        # exactly what the disclosure says a concierge sees, and nothing else: no budget, and
+        # no arrival time, because that comes from the user's calendar.
+        trip = {"origin": origin, "destination": destination, "departure_window": departure_window,
+                "provider": PROVIDER}
         request = self.queue.create(trip, consent)
         request_id = request["request_id"]
         started = self.queue.entered(request, "waiting_quote")
@@ -81,10 +82,11 @@ class ConciergeBackend:
                                           service_levels.QUOTE_TARGET_SECONDS, self.quote_wait_seconds)
             self.measurements.append(entry)
             self.notify(service_levels.describe(entry))
-            return {"unavailable": [{"provider": PROVIDER, "reason": "quote_target_missed"}]}
+            return {"unavailable": [{"provider": PROVIDER, "reason": "quote_target_missed",
+                                     "seen_by": self._seen_by(request_id)}]}
         if answered["state"] == "declined":
             reason = "declined: " + answered.get("declined_because", "no reason given")
-            return {"unavailable": [{"provider": PROVIDER, "reason": reason}]}
+            return {"unavailable": [{"provider": PROVIDER, "reason": reason, "seen_by": self._seen_by(request_id)}]}
         entry = service_levels.measure(self.service_level_log, request_id, "quote", started,
                                        self.queue.entered(answered, "quoted"), service_levels.QUOTE_TARGET_SECONDS)
         self.measurements.append(entry)
@@ -116,9 +118,11 @@ class ConciergeBackend:
                                           service_levels.BOOKING_TARGET_SECONDS, self.booking_wait_seconds)
             self.measurements.append(entry)
             self.notify(service_levels.describe(entry))
-            raise ConnectorError("booking_target_missed", "the concierge did not confirm inside the booking target")
+            raise ConnectorError("booking_target_missed", "the concierge did not confirm inside the booking target",
+                                 seen_by=self._seen_by(request_id))
         if answered["state"] == "declined":
-            raise ConnectorError("provider_declined", answered.get("declined_because", "the concierge could not book"))
+            raise ConnectorError("provider_declined", answered.get("declined_because", "the concierge could not book"),
+                                 seen_by=self._seen_by(request_id))
         entry = service_levels.measure(self.service_level_log, request_id, "booking", started,
                                        self.queue.entered(answered, "booked"), service_levels.BOOKING_TARGET_SECONDS)
         self.measurements.append(entry)
@@ -130,7 +134,7 @@ class ConciergeBackend:
             self.queue.move(request_id, "booked", "withdrawn",
                             withdrawn_because="fare over the card's limit: cancel this ride in the Waymo app")
             raise ConnectorError("payment_declined", "the fare the concierge saw was declined: %s; "
-                                 "the concierge must cancel the ride" % declined.reason)
+                                 "the concierge must cancel the ride" % declined.reason, seen_by=self._seen_by(request_id))
         pickup = self._pickups[request_id]
         return {
             "backend_reference": request_id,
