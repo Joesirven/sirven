@@ -9,7 +9,9 @@ subcommands
   check --direction carried|sent --tier solo|neighborly|co-op --domain HOST --session S
         --peer P [--bytes N] [--cap-bytes N]
       the enforcement hook the policy engine calls before it carries or routes. prints one JSON
-      answer. exit 0 within the cap, 3 over it. a refusal is appended with its reason.
+      answer. exit 0 within the cap, 3 over it. a refusal is appended with its reason, and a sized
+      check that passes appends a reservation that holds its bytes until the session is recorded
+      or an hour passes, so two sessions cannot both pass against the same headroom.
 
   record --direction carried|sent --bytes N --domain HOST --session S --transfer T --peer P
       append what a finished transfer actually moved.
@@ -56,6 +58,8 @@ DIRECTIONS = ("carried", "sent")
 # the larger count, whichever is more: room for bytes in flight when a session is cut off.
 TOLERANCE_BYTES = 65536
 TOLERANCE_FRACTION = 0.01
+# a reservation holds headroom until its session is recorded, or for this long if it never is.
+RESERVATION_SECONDS = 3600
 # a peer with this many disagreements in the current month is one to stop pairing with.
 PEER_DISAGREEMENT_LIMIT = 3
 
@@ -100,7 +104,7 @@ def amount(count):
     for size, unit in ((GIGABYTE, "gigabytes"), (MEGABYTE, "megabytes"), (KILOBYTE, "kilobytes")):
         if count >= size:
             text = ("%.2f" % (count / size)).rstrip("0").rstrip(".")
-            return "%s %s" % (text, unit)
+            return "%s %s" % (text, unit[:-1] if text == "1" else unit)
     return "1 byte" if count == 1 else "%d bytes" % count
 
 
@@ -114,18 +118,23 @@ def session_summary(direction, total, domain):
     return "Sent %s to %s through a neighbor." % (amount(total), domain)
 
 
-def refusal_reason(tier, direction, requested, used, cap, resets_on):
+def refusal_reason(tier, direction, requested, used, held, cap, resets_on):
     if cap == 0:
         if tier == "solo":
             return ("Solo shares nothing: your device does not carry traffic for others or send "
                     "yours through them.")
         return "No monthly cap is set for %s, so nothing is carried or sent through others." % tier
     verb = "Carrying this" if direction == "carried" else "Sending this through a neighbor"
-    if requested == 0 or used >= cap:
-        return ("Your %s is used up: %s used this month. Usage resets %s."
-                % (cap_words(cap), amount(used), resets_on))
-    return ("%s would go past your %s: %s already used this month and %s more requested. "
-            "Usage resets %s." % (verb, cap_words(cap), amount(used), amount(requested), resets_on))
+    if held:
+        taken = "%s used this month and %s held for transfers in progress" % (amount(used), amount(held))
+    else:
+        taken = "%s used this month" % amount(used)
+    if used >= cap:
+        return "Your %s is used up: %s. Usage resets %s." % (cap_words(cap), taken, resets_on)
+    if requested == 0:
+        return ("Your %s has no room left: %s. Usage resets %s." % (cap_words(cap), taken, resets_on))
+    return ("%s would go past your %s: %s, and %s more requested. Usage resets %s."
+            % (verb, cap_words(cap), taken, amount(requested), resets_on))
 
 
 def usage_summary(tier, used, carried, sent, cap, resets_on):
@@ -176,6 +185,24 @@ def append(handle, entry):
     handle.write(json.dumps(entry, sort_keys=True) + "\n")
     handle.flush()
     os.fsync(handle.fileno())
+
+
+def reserved(entries, now):
+    """bytes held by sized checks that passed and whose session has not been recorded since."""
+    recorded_at = {}
+    for entry in entries:
+        if entry.get("kind") == "transfer":
+            recorded_at[entry["session"]] = max(recorded_at.get(entry["session"], 0), entry["at"])
+    held = 0
+    for entry in entries:
+        if entry.get("kind") != "reservation":
+            continue
+        if now - entry["at"] >= RESERVATION_SECONDS or entry["at"] > now:
+            continue
+        if recorded_at.get(entry["session"], -1) >= entry["at"]:
+            continue
+        held += entry["bytes"]
+    return held
 
 
 def in_period(entry, starts_at, resets_at):
@@ -235,22 +262,30 @@ def do_check(args, now):
     cap = cap_for(args.tier, args.cap_bytes)
     _, starts_at, resets_at, resets_on = period_for(now)
     with locked(args.ledger) as handle:
-        carried, sent = usage(read_entries(handle), starts_at, resets_at)
+        entries = read_entries(handle)
+        carried, sent = usage(entries, starts_at, resets_at)
         used = carried + sent
+        held = reserved(entries, now)
         if cap == 0:
             within = False
         elif requested == 0:
-            within = used < cap
+            within = used + held < cap
         else:
-            within = used + requested <= cap
+            within = used + held + requested <= cap
         reason = None
         if not within:
-            reason = refusal_reason(args.tier, args.direction, requested, used, cap, resets_on)
+            reason = refusal_reason(args.tier, args.direction, requested, used, held, cap, resets_on)
             append(handle, {
                 "kind": "refusal", "direction": args.direction, "tier": args.tier,
                 "bytes": requested, "domain": domain, "session": session, "peer": peer,
                 "at": now, "reason": reason,
             })
+        elif requested:
+            append(handle, {
+                "kind": "reservation", "direction": args.direction, "bytes": requested,
+                "domain": domain, "session": session, "peer": peer, "at": now,
+            })
+            held += requested
     answer = {
         "schema_version": SCHEMA_VERSION,
         "within_cap": within,
@@ -258,8 +293,9 @@ def do_check(args, now):
         "tier": args.tier,
         "requested_bytes": requested,
         "used_bytes": used,
+        "reserved_bytes": held,
         "cap_bytes": cap,
-        "remaining_bytes": max(cap - used, 0),
+        "remaining_bytes": max(cap - used - held, 0),
         "reason": reason,
     }
     print(json.dumps(answer, sort_keys=True))
@@ -318,6 +354,7 @@ def readout(entries, tier, cap, now):
         per_peer[item["peer"]] = per_peer.get(item["peer"], 0) + 1
     stop_pairing = sorted(peer for peer, count in per_peer.items() if count >= PEER_DISAGREEMENT_LIMIT)
 
+    held = reserved(entries, now)
     percent = 0 if cap == 0 else min(100, used * 100 // cap)
     return {
         "schema_version": SCHEMA_VERSION,
@@ -327,7 +364,8 @@ def readout(entries, tier, cap, now):
         "used_bytes": used,
         "carried_bytes": carried,
         "sent_bytes": sent,
-        "remaining_bytes": max(cap - used, 0),
+        "reserved_bytes": held,
+        "remaining_bytes": max(cap - used - held, 0),
         "percent_used": percent,
         "summary": usage_summary(tier, used, carried, sent, cap, resets_on),
         "sessions": session_list,

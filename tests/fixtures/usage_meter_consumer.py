@@ -11,8 +11,8 @@ import sys
 
 REQUIRED = {
     "schema_version": int, "tier": str, "period": dict, "cap_bytes": int, "used_bytes": int,
-    "carried_bytes": int, "sent_bytes": int, "remaining_bytes": int, "percent_used": int,
-    "summary": str, "sessions": list, "refusals": list, "disagreements": list,
+    "carried_bytes": int, "sent_bytes": int, "reserved_bytes": int, "remaining_bytes": int,
+    "percent_used": int, "summary": str, "sessions": list, "refusals": list, "disagreements": list,
     "stop_pairing_with": list,
 }
 PERIOD = {"label": str, "starts_at": int, "resets_at": int, "resets_on": str}

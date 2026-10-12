@@ -43,7 +43,9 @@ test_a_request_landing_exactly_on_the_cap_is_within_it() {
   record sent 4000000000
   assert_status 0 check carried 1000000000
   assert_eq true "$(printf '%s' "$CAPTURED_STDOUT" | field within_cap)"
-  assert_eq 1000000000 "$(printf '%s' "$CAPTURED_STDOUT" | field remaining_bytes)"
+  # the passing check holds its bytes, so nothing is left for anyone else.
+  assert_eq 1000000000 "$(printf '%s' "$CAPTURED_STDOUT" | field reserved_bytes)"
+  assert_eq 0 "$(printf '%s' "$CAPTURED_STDOUT" | field remaining_bytes)"
 }
 
 test_one_byte_under_the_cap_is_within_it() {
@@ -85,6 +87,46 @@ test_a_sizeless_check_asks_whether_any_room_is_left() {
   record carried 1
   assert_status 3 check carried ""
   assert_contains "$CAPTURED_STDOUT" "Your 5 gigabyte monthly cap is used up"
+}
+
+test_two_concurrent_sessions_cannot_both_pass_against_the_same_headroom() {
+  record sent 1000000000
+  local index accepted
+  for index in 1 2 3 4 5 6; do
+    ( ledger check --direction carried --tier neighborly --domain example.com --session "s$index" \
+        --peer peer-b --bytes 3000000000 --now "$MID_OCTOBER" > "$TEST_TMP/answer.$index" ) &
+  done
+  wait
+  accepted="$(cat "$TEST_TMP"/answer.* | grep -c '"within_cap": true')"
+  assert_eq 1 "$accepted" "exactly one 3 gigabyte check fits beside 1 gigabyte used"
+}
+
+test_recording_a_session_releases_its_reservation() {
+  ledger check --direction sent --tier neighborly --domain example.com --session s1 --peer p \
+    --bytes 4000000000 --now "$MID_OCTOBER" > /dev/null || fail "first check should pass"
+  assert_status 3 check sent 2000000000
+  ledger record --direction sent --bytes 500000000 --domain example.com --session s1 --transfer t1 \
+    --peer p --now "$((MID_OCTOBER + 10))" || fail "record failed"
+  assert_status 0 check sent 2000000000 "$((MID_OCTOBER + 20))"
+  assert_eq 500000000 "$(printf '%s' "$CAPTURED_STDOUT" | field used_bytes)"
+}
+
+test_a_reservation_that_is_never_recorded_expires_after_an_hour() {
+  ledger check --direction sent --tier neighborly --domain example.com --session crashed --peer p \
+    --bytes "$CAP" --now "$MID_OCTOBER" > /dev/null || fail "first check should pass"
+  assert_status 3 check sent 1 "$((MID_OCTOBER + 3599))"
+  assert_contains "$CAPTURED_STDOUT" "held for transfers in progress"
+  assert_status 0 check sent 1 "$((MID_OCTOBER + 3600))"
+}
+
+test_the_readout_shows_held_bytes_apart_from_used_bytes() {
+  record carried 1000000000
+  check sent 2000000000 > /dev/null
+  capture ledger read --now "$MID_OCTOBER"
+  assert_eq 1000000000 "$(printf '%s' "$CAPTURED_STDOUT" | field used_bytes)"
+  assert_eq 2000000000 "$(printf '%s' "$CAPTURED_STDOUT" | field reserved_bytes)"
+  assert_eq 2000000000 "$(printf '%s' "$CAPTURED_STDOUT" | field remaining_bytes)"
+  assert_eq 20 "$(printf '%s' "$CAPTURED_STDOUT" | field percent_used)"
 }
 
 test_solo_refuses_every_carry_and_send() {

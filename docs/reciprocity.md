@@ -46,7 +46,7 @@ The ledger is an append-only file of JSON lines at `$SIRVEN_STATE_DIR/reciprocit
 
 | field | meaning |
 | --- | --- |
-| `kind` | `transfer`, `refusal`, or `disagreement` (written by `reconcile`) |
+| `kind` | `transfer`, `reservation` (a passing sized check), `refusal`, or `disagreement` (written by `reconcile`) |
 | `direction` | `carried` (you carried it for someone) or `sent` (your agent sent it through someone) |
 | `bytes` | an integer count of bytes, as defined above |
 | `domain` | a bare host name at the granularity the published allowlist uses, such as `example.com` |
@@ -78,6 +78,11 @@ python3 lib/reciprocity.py check --direction carried|sent --tier solo|neighborly
     --domain example.com --session S --peer P [--bytes N]
 ```
 
+`--domain` is the allowlist entry the policy engine matched, not the host the agent asked for: if the
+registry publishes `example.com` and the agent reached `accounts.example.com`, pass `example.com`. That
+keeps the ledger at the granularity the allowlist already publishes. The ledger itself cannot check
+this without the registry (thread 05), so it is the caller's duty.
+
 `--bytes` is the size the caller expects, when it knows it. Without it, the hook asks "is there any room
 left at all", and the answer's `remaining_bytes` tells the caller where to cut the stream off.
 
@@ -91,9 +96,10 @@ The answer is one JSON object on standard output:
   "tier": "neighborly",
   "requested_bytes": 4000000000,
   "used_bytes": 1250000000,
+  "reserved_bytes": 0,
   "cap_bytes": 5000000000,
   "remaining_bytes": 3750000000,
-  "reason": "Sending this through a neighbor would go past your 5 gigabyte monthly cap: 1.25 gigabytes already used this month and 4 gigabytes more requested. Usage resets November 1."
+  "reason": "Sending this through a neighbor would go past your 5 gigabyte monthly cap: 1.25 gigabytes used this month, and 4 gigabytes more requested. Usage resets November 1."
 }
 ```
 
@@ -103,8 +109,14 @@ it; one byte past it is not. A check with no `--bytes` is within the cap while a
 left. Every refusal is
 appended to the ledger with its reason, so the meter can show it and the person can see why.
 
-The check and the refusal record happen under one file lock, and so does `record`, so two sessions
-cannot both pass against the same headroom.
+**Reservations.** A sized check that passes appends a `reservation` for its bytes, under the same file
+lock as the check itself, so two sessions cannot both pass against the same headroom. A reservation
+holds its bytes until a `record` for the same session is written, or for one hour if none ever is (a
+crashed session does not hold headroom forever). `reserved_bytes` in the answer is everything currently
+held, this check included, and `remaining_bytes` is what is left after it: `cap_bytes` minus
+`used_bytes` minus `reserved_bytes`. A check without `--bytes` cannot reserve a size it does not know,
+so two sizeless checks can both pass and together overshoot; the runtime should send a size whenever it
+has one, and cut a sizeless stream off at `remaining_bytes`.
 
 After a transfer, the runtime records what was actually moved:
 
@@ -136,6 +148,7 @@ sent 450, and then had a 4 gigabyte send refused:
   "used_bytes": 1250000000,
   "carried_bytes": 800000000,
   "sent_bytes": 450000000,
+  "reserved_bytes": 0,
   "remaining_bytes": 3750000000,
   "percent_used": 25,
   "summary": "You have used 1.25 gigabytes of your 5 gigabyte monthly cap: 800 megabytes carried for neighbors and 450 megabytes sent through neighbors. Resets November 1.",
@@ -150,7 +163,7 @@ sent 450, and then had a 4 gigabyte send refused:
   "refusals": [
     {"session": "s3", "direction": "sent", "domain": "example.org", "requested_bytes": 4000000000,
      "at": 1792090920,
-     "reason": "Sending this through a neighbor would go past your 5 gigabyte monthly cap: 1.25 gigabytes already used this month and 4 gigabytes more requested. Usage resets November 1."}
+     "reason": "Sending this through a neighbor would go past your 5 gigabyte monthly cap: 1.25 gigabytes used this month, and 4 gigabytes more requested. Usage resets November 1."}
   ],
   "disagreements": [],
   "stop_pairing_with": []
@@ -159,9 +172,12 @@ sent 450, and then had a 4 gigabyte send refused:
 
 Sessions are grouped by session, direction, and domain, and listed newest first. Refusals are newest
 first. `disagreements` lists transfers that reconciliation flagged this month, and `stop_pairing_with`
-lists peer references with three or more of them (see below). `percent_used` is rounded down so the meter never shows 100 before
+lists peer references with three or more of them (see below). `used_bytes` counts finished transfers only; `reserved_bytes` is headroom held by transfers in progress,
+shown apart so the meter can draw it differently or not at all. `percent_used` is of `used_bytes` and is
+rounded down so the meter never shows 100 before
 the cap is actually reached. In Solo the read-out still works: the cap is 0, there is nothing in it, and
-the summary says that Solo shares nothing.
+the summary says that Solo shares nothing. `read` defaults to `--tier neighborly`, so the meter must pass
+the person's actual tier; otherwise a Solo user would see a 5 gigabyte cap.
 
 ## Reconciliation between two devices
 
@@ -194,7 +210,12 @@ understate its own.
    current month is marked as one to stop pairing with, and the runtime stops choosing it. Repeated
    discrepancies are evidence for the attestation layer's revocation process, not grounds for any
    automatic penalty here.
-6. **Why not take the smaller of the two counts?** It would stop inflation but reward a side that
+6. **Known limit: late receipts.** `prune` drops ledger lines older than the previous month. A receipt
+   for a transfer that was already pruned comes back as `unknown_to_us` and would count against an
+   honest peer. Receipts carry no time of their own, so the runtime should drop receipts older than
+   the retention window before calling `reconcile`; once signed receipts land (thread 02) they should
+   carry the transfer time so `reconcile` can do this itself.
+7. **Why not take the smaller of the two counts?** It would stop inflation but reward a side that
    understates its own usage. Counting your own measurement and auditing it with signed receipts stops
    both.
 
@@ -203,9 +224,10 @@ understate its own.
 - **Receipt signing and verification** belongs to the attestation layer (thread 02). Until it lands,
   `reconcile` compares counts and trusts the receipt file's provenance; the signature check is the one
   missing step, and the receipt shape already carries a `signature` field for it.
-- **The policy engine** (thread 03) calls `check` before carrying or routing and treats `within_cap` as
-  one input among several.
-- **The usage meter** (thread 06) reads `read` and nothing else.
+- **The policy engine** (thread 03) calls `check` before carrying or routing, treats `within_cap` as
+  one input among several, and passes the matched allowlist entry as `--domain`.
+- **The site-allowlist registry** (thread 05) defines the domain granularity the ledger stores.
+- **The usage meter** (thread 06) reads `read` and nothing else, and passes the person's `--tier`.
 - **The runtime** (thread 01) calls `record` after each transfer and exchanges receipts with the peer.
 
 Receipt lines, one JSON object per line:
