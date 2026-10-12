@@ -377,6 +377,17 @@ class SeamTests(unittest.TestCase):
         with self.assertRaises(LiveCallsBlocked):
             SandboxTransport("https://api.uber.com", UberForBusiness.sandbox_hosts, "UNSET")
 
+    def test_lyft_sandbox_never_creates_or_cancels_a_trip(self):
+        os.environ["SIRVEN_LYFT_BUSINESS_SANDBOX_TOKEN"] = "placeholder-not-a-credential"
+        try:
+            lyft = LyftBusiness(transport_for(LyftBusiness, "sandbox"), None)
+            with self.assertRaises(PartnerApprovalRequired):
+                lyft.create_trip({"ride_type": "lyft", "cost_token": "x"}, CITY_HALL, CASTRO, RIDER, "memo")
+            with self.assertRaises(PartnerApprovalRequired):
+                lyft.cancel_trip({"ride_id": "x"}, NOW, NOW)
+        finally:
+            del os.environ["SIRVEN_LYFT_BUSINESS_SANDBOX_TOKEN"]
+
     def test_a_backend_with_no_reachable_carrier_says_provider_unavailable(self):
         backend = build_backend(FakePayments(), lambda user_ref: dict(RIDER), mode="sandbox", clock=Clock())
         with self.assertRaises(RideConnectorError) as caught:

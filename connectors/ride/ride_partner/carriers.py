@@ -24,7 +24,7 @@ recorded from a sandbox: re-record them once sandbox access exists (see README.m
 
 from decimal import Decimal, ROUND_HALF_UP
 
-from .transport import CarrierError
+from .transport import CarrierError, PartnerApprovalRequired, SandboxTransport
 
 
 class CorporateAccount:
@@ -125,7 +125,9 @@ class LyftBusiness:
     provider = "Lyft"
     sandbox_base_url = "https://api.lyft.com"
     # Lyft's sandbox is the production host with sandbox credentials, so the host check
-    # alone cannot tell them apart; the sandbox token variable is what keeps this sandbox.
+    # alone cannot tell a sandbox ride from a live one. until partner documentation confirms
+    # a separate sandbox host or a credential marker, sandbox mode quotes only: creating and
+    # cancelling trips is BLOCKED ON PARTNER APPROVAL (see _refuse_unconfirmed_sandbox).
     sandbox_hosts = ("api.lyft.com",)
     token_variable = "SIRVEN_LYFT_BUSINESS_SANDBOX_TOKEN"
     free_cancel_seconds = 120
@@ -177,7 +179,13 @@ class LyftBusiness:
             })
         return options
 
+    def _refuse_unconfirmed_sandbox(self):
+        if isinstance(self.transport, SandboxTransport):
+            raise PartnerApprovalRequired(
+                "Lyft's sandbox shares its production host; trips wait for partner documentation that tells them apart")
+
     def create_trip(self, carrier_ref, origin, destination, rider, memo):
+        self._refuse_unconfirmed_sandbox()
         response = self.transport.request("POST", "/v1/concierge/rides", body={
             "ride_type": carrier_ref["ride_type"],
             "cost_token": carrier_ref["cost_token"],
@@ -195,6 +203,7 @@ class LyftBusiness:
         return {"ride_id": response.body["ride_id"]}
 
     def cancel_trip(self, trip_ref, booked_at, now):
+        self._refuse_unconfirmed_sandbox()
         path = "/v1/concierge/rides/" + trip_ref["ride_id"] + "/cancel"
         response = self.transport.request("POST", path, body={})
         if response.status in (200, 204):

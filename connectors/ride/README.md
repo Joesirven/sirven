@@ -64,8 +64,10 @@ Each is explicit in code; search for the names given.
    confirms the flow.
 2. **Live calls, blocked on Jose's approval** of the partner accounts and the money layer.
    `transport_for(..., "live")` always raises `LiveCallsBlocked`, and `SandboxTransport` refuses
-   Uber's production host. Lyft's sandbox shares its production host, so for Lyft only the
-   sandbox credential keeps calls in the sandbox: treat that token's provenance with care.
+   Uber's production host. Lyft's sandbox shares its production host, so a credential alone
+   cannot prove a call is a sandbox call: in sandbox mode `LyftBusiness` quotes but refuses to
+   create or cancel trips (`_refuse_unconfirmed_sandbox`) until partner documentation names a
+   separate sandbox host or credential marker.
 3. **Fixtures are written, not recorded.** They follow the carriers' public references as read
    on 2026-10-11 (Uber Guest Rides: `/v1/guests/trips/estimates`, `/v1/guests/trips`; Lyft:
    `/cost`, `/eta`, `/rides`, `/rides/{id}/cancel`). Lyft's Concierge path prefix
@@ -80,5 +82,8 @@ Each is explicit in code; search for the names given.
    anything books a real ride.
 7. **Corporate account references** come from `SIRVEN_UBER_FOR_BUSINESS_ORGANIZATION` and
    `SIRVEN_LYFT_BUSINESS_ORGANIZATION` outside fixture mode; they exist once the accounts do.
-8. **Scheduled rides.** Only immediate pickups are quoted. A departure window that starts later
+8. **The tracking surface.** Bookings return `/rides/<booking_id>`, but nothing serves it yet.
+   It needs carrier trip status (Uber's status webhook, Lyft's ride details) behind it, which
+   waits on sandbox access.
+9. **Scheduled rides.** Only immediate pickups are quoted. A departure window that starts later
    flags every option `pickup_outside_window`; scheduled pickups need confirmed partner support.
