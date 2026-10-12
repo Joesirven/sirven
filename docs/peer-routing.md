@@ -45,7 +45,7 @@ is closed, and with the gate open it still needs a site reviewed for signed-in s
 one per component: a site never reviewed, Solo, a tampered registry, a registry signed by an
 untrusted key, an expired registry, an envelope for another peer, for other bytes, expired,
 replayed, forged, from a revoked user, and past the 5 gigabyte cap. A fresh machine is not ready,
-and a configured one is ready but still reports `peer_routing_available: false`.
+a fresh machine is not ready and reports `peer_routing_available: false`; a configured carrying machine, now that the transport is built, reports it `true`, though the user-side wiring and the ship gate still keep any real traffic from flowing.
 
 ## The peer transport, honestly
 
