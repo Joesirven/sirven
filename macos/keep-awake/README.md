@@ -99,6 +99,24 @@ first time, by `ServiceManagementHelper().register()` and
 `ServiceManagementHelper.openApprovalSettings()`. Show the credit line on the about surface:
 `KeepAwakeIdentity.credit`.
 
+## The bb watcher
+
+`bb-watcher/` holds the Mac awake while bb has agent work on it, with no change to bb itself.
+`bb-watcher/install.sh` installs it as a user LaunchAgent (`xyz.sirven.keep-awake-bb-watcher`,
+no administrator rights) that copies the watcher to `~/Library/Application Support/sirven/bb-watcher`
+and runs it from there. Every 30 seconds it runs `bb thread list --json` and counts the threads on
+this machine (`host_na8kye9eas`) that are active or starting, or that have a workflow, background
+agent, or background command running. (`bb workflows list` only answers inside a project thread,
+so workflows are read from each thread's activity counts.) While the count is above zero it holds
+the task `bb-agents`; after 5 minutes at zero it ends it.
+
+The watcher owns the work (`--owner` is its own process) with a 180 second lease renewed every 90
+seconds, so if it dies or hangs the holder lets go by itself. A failed bb query counts toward the 5
+idle minutes. After `sirven awake release` it does not take the hold back until bb has gone idle
+once. It calls the program inside `~/Applications/Sirven.app` directly, because only that copy can
+reach the lid-closed helper. Its decisions go to `events.jsonl` (with `"source": "bb-watcher"`) and
+to `watcher.log` next to it. Remove it with `bb-watcher/install.sh remove`.
+
 ## Building and testing
 
 ```
