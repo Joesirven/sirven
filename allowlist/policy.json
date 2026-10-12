@@ -1,0 +1,10 @@
+{
+  "created": "2026-10-11",
+  "reviewers": [
+    "Jose Sirven"
+  ],
+  "quorum": 1,
+  "notice_days": 7,
+  "max_additions_per_version": 3,
+  "about": "reviewers, quorum, and the two growth limits for the site allowlist. Jose Sirven is the only reviewer for the first six months (decision of 2026-10-11). notice_days and max_additions_per_version are proposals awaiting his confirmation. a council takes over by adding names and raising quorum; nothing else changes."
+}

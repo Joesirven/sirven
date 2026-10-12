@@ -1,0 +1,25 @@
+{
+  "format": "sirven-allowlist-registry/1",
+  "version": 1,
+  "updated": "2026-10-11",
+  "about": "sites a sirven node may carry for other sirven users. only the approved list is eligible; pending and declined are published so operators see what is coming and what was refused. the matching rules and the review rubric are in docs/allowlist-review.md.",
+  "matching": {
+    "domain": "lowercase punycode host name, no scheme, port, path, or trailing dot",
+    "includes_subdomains": "false: the exact host only. true: the host and every subdomain",
+    "scope": "public_pages: requests without the user's login. authenticated_sessions: requests carrying the user's session"
+  },
+  "reviewers": [
+    "Jose Sirven"
+  ],
+  "quorum": 1,
+  "approved": [],
+  "pending": [],
+  "declined": [],
+  "history": [
+    {
+      "version": 1,
+      "date": "2026-10-11",
+      "note": "registry created"
+    }
+  ]
+}
