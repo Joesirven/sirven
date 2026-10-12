@@ -100,3 +100,17 @@ Reviewed `git diff d7cdf01 6eaa62d` (lib/phone_bridge.py, docs/phone-interface.m
 **R5 (nice to have, behaviour note).** When the launcher fails for a reason unrelated to the tunnel (wrong bundle identifier, interface automation off), the tunnel is now also restarted every third failure. The backoffs keep growing to the 30 second cap, so this is bounded, but it churns Apple's tunnel. The printed last output (R1 aside) tells the owner why; no change required.
 
 ### Results at 6eaa62d
+
+| Command at 6eaa62d | Exit status | Notes |
+|---|---|---|
+| `python3 -B -m unittest tests.phone.test_phone_runner` | 0 | 24 tests, OK, 11 seconds, run in the foreground. |
+| `make test` | 2 | The same 3 failures as before the fixes, all in the installer tests (`test_install_started_by_sh_says_to_use_bash`, `test_enter_twice_accepts_the_shown_defaults`, `test_input_that_ends_takes_the_defaults`); the diff does not touch `install.sh`. `test_phone_runner_unit_tests_pass` is ok. |
+| `make lint` | 0 | `bash -n` clean; shellcheck not installed, skipped. |
+
+**R6 (nice to have). The runner tests hang when the test process starts with the interrupt signal ignored.** Several tests end a run by sending the process `SIGINT`. A shell job started with `&` has `SIGINT` ignored (`signal.getsignal(signal.SIGINT)` printed `1` in a background job here), so `os.kill(os.getpid(), SIGINT)` does nothing and `run()` never returns: my first background run of the module sat for over ten minutes with no output, while the same module in the foreground passed in 11 seconds. This did not happen in the first review, so it depends on how the test is launched. Fix: in `RunnerTest.setUp`, call `signal.signal(signal.SIGINT, signal.default_int_handler)` and restore it in `tearDown`. It also means a supervisor started under `nohup` or `&` ignores Ctrl-C; the terminate and hang-up handlers still work, so this is documentation, not a defect.
+
+### Verdict
+
+All must-fix and should-fix findings from the first review are resolved in the code. Two new should-fix items remain, both small and both reproduced: R1 (the device identifier is printed by the new last-output lines) and R2 (the documented checksum command uses a quoted tilde and always fails). Neither is a security hole or a hang, so there is no remaining must-fix item.
+
+**APPROVE**, on the condition that R1 and R2 are fixed before the real-phone run is documented as done (R1 is a one-line filter plus a test, R2 is a one-line document change).
