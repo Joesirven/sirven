@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# a fake tailscale for the adopt tests. it answers only the read-only calls sirven may make,
+# 'version' and 'status --json', and fails loudly on anything else. every call is appended to
+# FAKE_CALLS_LOG when it is set, so a test can prove nothing else was run.
+#
+#   FAKE_TAILSCALE_STATE  agent-node (default), agent-node-stopped, personal-node, logged-out,
+#                         or unanswered
+# another device in the tailnet carries tag:agent in every state, so reading the whole output
+# instead of this machine's own tags would get the wrong answer.
+
+[ -z "${FAKE_CALLS_LOG:-}" ] || printf 'tailscale %s\n' "$*" >> "$FAKE_CALLS_LOG"
+
+peer='"Peer": {"nodekey:peer": {"HostName": "example-server", "Tags": ["tag:agent"], "Online": true}}'
+
+status_json() {
+  case "${FAKE_TAILSCALE_STATE:-agent-node}" in
+    agent-node) printf '{"BackendState": "Running", "Self": {"HostName": "example-machine", "Tags": ["tag:agent"]}, %s}\n' "$peer" ;;
+    agent-node-stopped) printf '{"BackendState": "Stopped", "Self": {"HostName": "example-machine", "Tags": ["tag:agent"]}, %s}\n' "$peer" ;;
+    personal-node) printf '{"BackendState": "Running", "Self": {"HostName": "example-machine", "UserID": 1}, %s}\n' "$peer" ;;
+    logged-out) printf '{"BackendState": "NeedsLogin", "Self": {"HostName": "example-machine"}, %s}\n' "$peer"; return 1 ;;
+    unanswered) printf 'failed to connect to local tailscaled; it does not appear to be running\n' >&2; return 1 ;;
+    *) printf 'fake tailscale: unknown FAKE_TAILSCALE_STATE\n' >&2; return 2 ;;
+  esac
+}
+
+case "$*" in
+  version) printf '1.76.1\n  tailscale commit: example\n' ;;
+  "status --json") status_json ;;
+  *) printf 'fake tailscale: refusing %s: sirven may only read\n' "$*" >&2; exit 9 ;;
+esac

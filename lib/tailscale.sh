@@ -6,7 +6,7 @@
 # interactive once: you log in to the tailscale admin console in a browser and make one tagged
 # auth key. after that the machine joins with that key, and the agent client connects over
 # SSH with its own key.
-# reads: PREFIX, PACKAGE, CONFIG_DIR, SERVICE_USER
+# reads: PREFIX, PACKAGE, CONFIG_DIR, SERVICE_USER, ADOPT_TAILSCALE
 
 TAILSCALE_REASON="tailscale apply is plan output in the alpha cut; it is never run against a real tailnet yet"
 
@@ -44,14 +44,21 @@ plan_tailscale() {
     "tag:agent, reachable only from your login, only on port 22"
   plan_owner "paste the policy snippet into your tailnet policy" \
     "tailscale admin console, access controls: merge $CONFIG_DIR/tailscale-policy-snippet.hujson and put your login in place of you@example.com."
+  # a machine already logged in with tag:agent is adopted as it is: no key, no join, no
+  # tailscale up, which could re-key it or reset its settings. see lib/adopt.sh.
+  if [ "${ADOPT_TAILSCALE:-none}" = agent_node ]; then
+    plan_note "this machine is already the agent node, adopted above: no auth key and no join. sirven never runs tailscale up on it."
+    plan_note "the agent client connects with: ssh $SERVICE_USER@<this machine's tailnet name>. tailscale ssh stays off; the machine's own SSH server and keys are used."
+    return 0
+  fi
   plan_owner "make one tagged auth key, once, in the browser" \
     "tailscale admin console, settings, keys: generate an auth key with tag:agent, pre-approved, not reusable.
 save it as $(tailscale_auth_key_file), owned by root, mode 0600. this is the only interactive step." \
-    "[ -f $key_file ] || tailscale status --self --json 2>/dev/null | grep -q '\"tag:agent\"'"
+    "[ -f $key_file ]"
   plan_planonly "join the tailnet as a tagged device with that key" \
     "tailscale up --auth-key=file:$key_file --advertise-tags=tag:agent" \
     "$TAILSCALE_REASON" \
-    "tailscale status --self --json 2>/dev/null | grep -q '\"tag:agent\"'"
+    "adopt_tailscale_is_agent_node"
   plan_planonly "remove the used auth key from disk" \
     "rm -f $key_file" \
     "$TAILSCALE_REASON" \

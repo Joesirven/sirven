@@ -197,6 +197,11 @@ the kill switch reads it to know what to remove.
   1/2 access level [observer]: builder
   2/2 path to grant [/home/you/code/app]:
   ```
+- **re-run.** with a grant in force, `install.sh` adopts it: a level or path not given by a flag
+  or the environment comes from the grant record, nothing is asked for it, and the plan shows it
+  as `adopted:`. giving a different level or path is a grant change, shown as one. granting no
+  path over a grant in force, or reinstalling a level whose policy copy was edited, is refused
+  before any change. see `lib/adopt.sh`.
 - **install.** `install.sh` writes the grant record and the entries. when it applies for real,
   each step it actually runs appends its undo to the install record,
   `/var/lib/<package>/install-record.tsv`, and a changed grant record writes a `grant` entry to
