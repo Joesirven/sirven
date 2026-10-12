@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "period": {"start": "2026-10-01T00:00:00Z", "end": "2026-11-01T00:00:00Z"},
+  "cap_bytes": 5000000000,
+  "carried_bytes": 0,
+  "sent_bytes": 0,
+  "used_bytes": 0,
+  "state": "under",
+  "sessions": []
+}

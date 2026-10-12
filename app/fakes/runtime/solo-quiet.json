@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "tier": "solo",
+  "peer_routing_available": false,
+  "consent": {"prompted": false, "decision": null},
+  "last_block": null
+}
