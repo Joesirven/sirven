@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- the launch daemon definition for the keep-awake helper. it ships inside the app bundle at
+     Contents/Library/LaunchDaemons and is registered with SMAppService the first time the user
+     turns lid-closed operation on. launchd starts the helper only when sirven connects to it. -->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>xyz.sirven.keep-awake-helper</string>
+	<key>BundleProgram</key>
+	<string>Contents/MacOS/sirven-keep-awake-helper</string>
+	<key>MachServices</key>
+	<dict>
+		<key>xyz.sirven.keep-awake-helper</key>
+		<true/>
+	</dict>
+	<key>AssociatedBundleIdentifiers</key>
+	<array>
+		<string>xyz.sirven.app</string>
+	</array>
+</dict>
+</plist>

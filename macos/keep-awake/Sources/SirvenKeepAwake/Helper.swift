@@ -36,13 +36,21 @@ public final class ServiceManagementHelper: LidClosedHelper {
 
     public init() {}
 
+    /// true when this process runs from an app bundle that carries the helper's launchd plist.
+    public static var bundleCarriesHelper: Bool {
+        let plist = Bundle.main.bundleURL
+            .appendingPathComponent("Contents/Library/LaunchDaemons/\(KeepAwakeIdentity.helperPlistName)")
+        return FileManager.default.fileExists(atPath: plist.path)
+    }
+
     public var state: HelperState {
+        guard Self.bundleCarriesHelper else { return .notFound }
         switch service.status {
         case .enabled: return .enabled
         case .requiresApproval: return .requiresApproval
-        case .notRegistered: return .notRegistered
-        case .notFound: return .notFound
-        @unknown default: return .notFound
+        // before the first registration the framework reports a bundled daemon as not found.
+        case .notRegistered, .notFound: return .notRegistered
+        @unknown default: return .notRegistered
         }
     }
 
