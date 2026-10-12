@@ -1,0 +1,20 @@
+{
+  "request": "2026-10-11-waymo.com-1",
+  "domain": "waymo.com",
+  "received": "2026-10-11",
+  "requested_by": "sirven",
+  "case_for_personal_agent_use": "a personal agent checks Waymo service areas and availability for its user, and books a ride the user will be present for. filed by this review thread as a dry run.",
+  "risk_notes": "booking runs through the Waymo app and its account; the account is single-user and the terms bar applications that interact with the service without written consent.",
+  "public_positions": [
+    {
+      "kind": "terms",
+      "url": "https://support.google.com/waymo/answer/9184909",
+      "retrieved": "2026-10-11"
+    },
+    {
+      "kind": "terms",
+      "url": "https://waymo.com/terms/",
+      "retrieved": "2026-10-11"
+    }
+  ]
+}

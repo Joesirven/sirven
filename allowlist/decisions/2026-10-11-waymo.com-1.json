@@ -1,0 +1,39 @@
+{
+  "decision": "2026-10-11-waymo.com-1",
+  "request": "2026-10-11-waymo.com-1",
+  "domain": "waymo.com",
+  "includes_subdomains": false,
+  "supersedes": null,
+  "prepared_by": "sirven allowlist review thread (agent)",
+  "prepared": "2026-10-11",
+  "rubric": {
+    "legitimate_personal_agent_use": {
+      "rating": "pass",
+      "finding": "checking service areas, hours, and how to ride, and booking a ride the user takes in person, are things an individual does for themself. an agent doing them for one user at human pace is the use the terms describe, not resale or data gathering."
+    },
+    "peer_operator_risk": {
+      "rating": "concern",
+      "finding": "public pages carry little risk for a residential peer: no login, no payment, and robots.txt allows every user agent on every path. authenticated booking is different: the terms make the account single-user (section 2) and bar any application that interacts with the services without prior written consent (section 5a), so a peer carrying a signed-in session could be the address Waymo associates with a breach."
+    },
+    "site_position": {
+      "rating": "concern",
+      "finding": "Waymo One terms (last updated 2026-09-29, read at the primary source 2026-10-11): 'Develop or use any application that interacts with our Services without our prior written consent' is prohibited, as are robots beyond what robots.txt allows. no public statement for or against personal agents found. no enforcement against agents found. the clean route to booking is written consent through a partner program, which the partner applications thread is pursuing."
+    }
+  },
+  "recommendation": {
+    "decision": "approve",
+    "scope": [
+      "public_pages"
+    ],
+    "rationale": "approve public pages only: personal-agent reads of service information are legitimate and low risk for peers. do not approve authenticated sessions until Waymo gives written consent, which the terms require; booking goes through an official partner path instead."
+  },
+  "votes": [],
+  "additional_positions": [
+    {
+      "kind": "robots",
+      "url": "https://waymo.com/robots.txt",
+      "retrieved": "2026-10-11",
+      "note": "allows every user agent on every path"
+    }
+  ]
+}
