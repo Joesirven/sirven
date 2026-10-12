@@ -135,9 +135,9 @@ def expect(condition, what):
 
 # the scenarios ----------------------------------------------------------------------------
 
-OFFICE = {"label": "office", "address": "1 Ferry Building, San Francisco, CA",
+OFFICE = {"label": "office", "address": "1 Ferry Building, San Francisco",
           "coordinates": {"latitude": 37.7955, "longitude": -122.3937}}
-BARBER = {"label": "barber", "address": "Valencia Street and 18th Street, San Francisco, CA",
+BARBER = {"label": "barber", "address": "Valencia Street and 18th Street, San Francisco",
           "coordinates": {"latitude": 37.7617, "longitude": -122.4216}}
 
 # the 2pm meeting ends at 3pm on the fake clock's day; the person wants a pickup from 3:00 to 3:20.

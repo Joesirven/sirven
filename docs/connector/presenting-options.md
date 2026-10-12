@@ -1,55 +1,71 @@
 # presenting ride options to a person
 
-This page is for a personal agent, or the developer building one, that has called `quote_ride` and now has to show the result to the person it works for. The call itself, its fields, and its errors are in the contract (see [README.md](README.md)). This page is about the conversation around the call.
+This page is for a personal agent, or the developer building one, that has called `quote_ride` and now has to show the result to the person it works for. The calls themselves are in [calling-the-connector.md](calling-the-connector.md). This page is about the conversation around them.
 
 ## the order is the connector's, the choice is the person's
 
-`quote_ride` returns options already ranked against the preferences and budget ceiling you sent. Show them in that order. Do not re-rank by your own idea of what the person wants, and do not drop options silently. If you want to hide an option (for example, one that breaks the budget ceiling), say that you hid it and why.
+`quote_ride` returns `options` already ranked (`rank` 1 is best) against the preferences and budget ceiling you sent, with every bookable option ahead of every unbookable one. Show them in that order. Do not re-rank by your own idea of what the person wants, and do not drop options silently. If you leave some out to keep the message short, say how many and why ("three more, all over your limit").
 
-Lead with the top option, then the rest in a short list. A good shape:
+Lead with the top option, then two or three more at most. A good shape:
 
-> The best match is a Waymo, 19 dollars, picks you up around 3:05 and gets you there around 3:22.
-> Also available: an Uber at 16 dollars arriving 3:02, and a Lyft at 21 dollars arriving 3:10.
+> The best match is a Waymo, 10.73 dollars, picks up around 3:00, arrives around 3:11.
+> Also available: a Lyft at 9.51 dollars, same times.
 > Book the Waymo?
 
-Every option you show should carry the same four facts, in plain words: who provides the ride, the price, when it picks up, and when it arrives. If an option carries a constraint flag (over budget, outside the departure window, preferred provider not available), say the flag in a short clause next to that option rather than in a footnote.
+Every option you show carries the same four facts, in plain words: who provides it (`provider`), the price, when it picks up (`estimated_pickup_at`), and when it arrives (`estimated_dropoff_at`). Give times in the person's local time, not as a duration they have to add up.
+
+If an option carries a constraint flag worth knowing, say it in a short clause next to that option rather than in a footnote: "over your limit once a tip is allowed for", "outside the time you asked for", "busy-time pricing", "the price is an estimate".
 
 ## prices are prices
 
-Say the amount and the currency the connector returned. Do not round a quoted price down. If the quote carries a tip ceiling, mention it once when the person confirms ("19 dollars, with up to 3 dollars of tip allowed"). The money layer holds the card to the quoted amount plus that ceiling; the person should never be surprised by a charge larger than what they heard.
+Money in the contract is in the smallest unit of the currency: `1073` with `USD` is 10.73 dollars. Say the amount the connector returned; never round a price down.
+
+- When `price.kind` is `fixed`, say the amount.
+- When it is `estimate`, say both ends: "about 9.78 dollars, at most 12.22".
+- When the person confirms, say the most they can be charged, which is `charge_terms.authorization_cap` (the fare ceiling plus the tip allowance): "up to 11.41 dollars with tip". The money layer never holds or charges more than that, so the person never hears a smaller number than what they could pay.
 
 ## ask before booking, at the tier the person chose
 
 On the Solo tier the agent asks before every real-world action. Booking a ride is a real-world action, and so is cancelling one. Ask, and wait for an answer:
 
-> Book the Waymo for 19 dollars?
+> Book the Waymo for 10.73 dollars? You can cancel free until 2:30.
 
-On Neighborly and Co-op the person may have given the agent more room (a budget and preference rails it can act inside). Even then, tell the person what was booked, for how much, and how long they have to cancel without a fee, right after it happens. Acting inside the rails never means acting silently.
+On Neighborly and Co-op the person may have given the agent more room: a budget and preference rails it can act inside. Even then, tell the person what was booked, for how much, and until when they can cancel for free, right after it happens. Acting inside the rails never means acting silently.
 
 ## after a booking
 
-Tell the person three things: that it is booked, where to follow the ride (the tracking surface the booking returned), and until when they can cancel. Put the cancellation window in their local time, not as a duration they have to compute.
+A booking comes back in one of two states, and they are not the same promise.
 
-> Booked. Waymo picks you up at 3:05. You can follow it here: (tracking link). Free cancellation until 2:55.
+- `confirmed`: say it is booked, when it picks up, and until when cancelling is free (`cancellation_policy.free_until`). When `tracking.share_url` is not null, give that link so the person can follow the ride.
+
+  > Booked. Lyft picks you up around 3:00. Free cancellation until 2:30.
+
+- `requested`: say it is requested, not booked, and when you will know (`confirm_by`). Do not put it on the calendar as confirmed until `get_ride` says `confirmed`. If it fails, tell the person and offer to quote again.
+
+  > Requested. The Waymo is not confirmed yet; I will tell you by 1:15, and I will look for another ride if it is not.
 
 ## when a ride is blocked
 
-Sometimes no option can be offered: the site refused the request, the route is outside every provider's service area, or nothing fits the budget ceiling. Say so plainly and say why, in the words the error gave you. Do not route around a block, do not retry through a different path to get past it, and do not invent an option. The Solo tier promise is that blocking is honestly surfaced, never routed around; that promise holds on every tier.
+Sometimes no option can be offered: the ride services refused access to agents (`blocked`), nothing serves the trip (`no_service`), or nothing fits the budget ceiling. Say so plainly and say why. The error's `message` is written for a person and can be shown as is.
 
-> I could not get a ride under 25 dollars for that window. The cheapest option was 31 dollars. Do you want to raise the limit, leave later, or skip it?
+Do not route around a block. No retry through a different path, no other account, no invented option. The Solo tier promise is that blocking is honestly surfaced, never routed around, and that promise holds on every tier.
 
-Offer the person a real next step (a different budget, a different window, or doing nothing), and let them pick.
+> I could not get you a ride: the ride services for this trip refuse requests from agents, and I do not work around that. You can still book it yourself in the ride service's own app.
+
+When nothing fits the budget, offer the person a real next step and let them pick:
+
+> Nothing fits 10 dollars for that window. The cheapest is a Waymo at 10.73. Do you want to raise the limit, leave later, or skip it?
 
 ## when a person helps behind the scenes
 
-For some providers, sirven completes the booking with a trained person (a concierge) doing the booking step on the person's behalf, in San Francisco first. This is part of how the service works, not a separate product, so do not lead with it and do not describe it as a feature. Do disclose it plainly whenever it applies to the option the person is choosing:
+Some options are carried out by a person on the sirven concierge team, who books the ride on the person's behalf (in San Francisco first). These options have `fulfillment.method` set to `human_assisted` and a `fulfillment.disclosure` sentence:
 
-> The Waymo booking is completed by a sirven concierge, a person who books it on your behalf and sees only this trip request.
+> A person on the sirven concierge team books this ride for you using the details shown here. They see the pickup, drop-off, and time, and nothing else.
 
-Say this before the person confirms, not after. If the person does not want a person to see the trip request, offer the options that do not need one. The contract tells you when an option involves a concierge; see the contract section linked from [README.md](README.md).
+This is part of how the service works, not a feature. Do not lead with it, and do not describe it as a selling point. Do show the disclosure sentence, as written, whenever the person is choosing that option, and before they approve the booking, not after. If the person does not want anyone to see the trip, offer the options whose `fulfillment.method` is `automated`.
 
 ## words to use
 
-- Say "ride", "price", "pickup", "arrives", "cancel". Avoid internal terms like quote identifier or booking identifier in what you show a person; keep those for your own calls.
-- Spell things out. "Estimated arrival", not an abbreviation. "Model context protocol", not an abbreviation.
+- Say "ride", "price", "picks up", "arrives", "cancel". Keep identifiers like `quote_id` and `booking_id` for your own calls; a person never needs to see them.
+- Spell everything out. "Estimated arrival", not an abbreviation. "Model context protocol", not an abbreviation.
 - Keep the tone plain and calm. A ride is a small thing; a long explanation makes it feel bigger than it is.
