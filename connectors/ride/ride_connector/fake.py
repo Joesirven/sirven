@@ -225,7 +225,11 @@ def demo_backends(clock):
 
 
 def demo_connector(clock=None, **options):
-    """a gateway over demo_backends. returns (connector, clock, backends)."""
+    """a gateway over demo_backends, with human-assisted options on for rehearsal.
+
+    returns (connector, clock, backends).
+    """
     clock = clock or FakeClock()
+    options.setdefault("allow_human_assisted", True)
     backends = demo_backends(clock)
     return RideConnector(backends, clock=clock, **options), clock, backends

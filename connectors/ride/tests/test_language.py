@@ -1,6 +1,7 @@
 """house style for the contract and everything under connectors/ride: no em or en dashes, and
 terms spelled out. the same rule tests/unit/test_language.sh applies to the package, plus the
-short forms this contract would be most tempted to use."""
+short forms this contract would be most tempted to use. literal names like JSON-RPC are allowed
+where the text glosses them."""
 
 import os
 import re
@@ -12,7 +13,7 @@ RIDE_DIR = os.path.dirname(HERE)
 REPO_DIR = os.path.dirname(os.path.dirname(RIDE_DIR))
 ACRONYMS = re.compile(
     r"\b(ACLs?|OS|CLI|UID|GID|PID|TODO|FIXME|IP|DNS|UTC|ISO|PIN|OTP|VM|VPN|TCP|UDP|EOF|TTY|CPU|YAML|CI|UI|IDs?|OK"
-    r"|MCP|RPC|RFC|ETA|PA|PII|PCI|SLA|MoR|KB|PR|SDK)\b|\be\.g\.|\bi\.e\."
+    r"|MCP|(?<!JSON-)RPC|RFC|ETA|PA|PII|PCI|SLA|MoR|KB|PR|SDK)\b|\be\.g\.|\bi\.e\."
 )
 DASHES = re.compile("[–—]")
 

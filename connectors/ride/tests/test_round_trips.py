@@ -258,6 +258,13 @@ class ConciergeTests(ConnectorCase, unittest.TestCase):
         self.assertIsNone(later["confirm_by"])
         self.assertEqual("White electric vehicle, no driver", later["tracking"]["vehicle_description"])
 
+    def test_human_assisted_options_are_off_unless_enabled(self):
+        connector, clock, backends = demo_connector(FakeClock(), allow_human_assisted=False)
+        is_error, payload = connector.call("quote_ride", quote_arguments(clock, preferred_providers=["Waymo"]))
+        self.assertFalse(is_error)
+        self.assertNotIn("Waymo", {o["provider"] for o in payload["options"]})
+        self.assertTrue(all(o["fulfillment"]["method"] == "automated" for o in payload["options"]))
+
     def test_unconfirmed_booking_fails_at_the_deadline_and_charges_nothing(self):
         booking = self.book_waymo()
         self.clock.advance(minutes=16)

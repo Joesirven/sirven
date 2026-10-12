@@ -104,17 +104,21 @@ class RideConnector:
     token: mints identifiers; tests may pass a seeded one, production keeps random_token.
     require_payment_reference: production sets this so book_ride needs funds held first.
     share_url_base: a sirven-hosted relay for live tracking pages, or None.
+    allow_human_assisted: off by default. the human-concierge tier does not ship until its
+        service-level targets, trust and safety protocol, and user-facing disclosure are all in
+        place, so a production gateway drops human_assisted options until someone turns this on.
     """
 
     def __init__(self, backends, clock=system_clock, token=random_token,
                  require_payment_reference=False, share_url_base=None, poll_interval_seconds=30,
-                 validator=None):
+                 allow_human_assisted=False, validator=None):
         self.backends = dict(backends)
         self.clock = clock
         self.token = token
         self.require_payment_reference = require_payment_reference
         self.share_url_base = share_url_base
         self.poll_interval_seconds = poll_interval_seconds
+        self.allow_human_assisted = allow_human_assisted
         self.validator = validator or Validator()
         self.version = self.validator.schema["x-contract-version"]
         self.private_log = []  # backend detail for sirven's operators; never returned.
@@ -231,6 +235,8 @@ class RideConnector:
                 refusals.append(BackendError("down", repr(error)))
                 continue
             for option in result.options:
+                if option.human_assisted and not self.allow_human_assisted:
+                    continue
                 gathered.append((name, option))
 
         avoided = {provider.casefold() for provider in preferences.get("avoided_providers", [])}
