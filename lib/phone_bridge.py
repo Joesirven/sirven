@@ -528,7 +528,7 @@ class Phone:
         app = agent.active_app()
         result = {"app": app, "size": agent.window_size(), "elements": elements_from_source(agent.source())}
         if include_image:
-            # a PNG image, base64 encoded, in points scaled by the phone. kept in memory only
+            # the screenshot image, base64 encoded. kept in memory only, never written to disk
             result["screenshot_png_base64"] = agent.screenshot()
         log_action("screen", "read the screen in %s" % app, "done", session, app=app, reason=reason)
         return result
