@@ -384,13 +384,12 @@ def elements_from_source(xml_text):
     return found
 
 
-def element_at(elements, x, y):
-    """the smallest labeled element under a point, or None. the app itself does not count."""
-    under = [e for e in elements if e["type"] != "XCUIElementTypeApplication" and e["frame"][0] <= x <= e["frame"][0] + e["frame"][2]
-             and e["frame"][1] <= y <= e["frame"][1] + e["frame"][3] and e["label"]]
-    if not under:
-        return None
-    return min(under, key=lambda e: e["frame"][2] * e["frame"][3])
+def elements_at(elements, x, y):
+    """every labeled element under a point, smallest first. the app itself does not count."""
+    under = [e for e in elements if e["type"] != "XCUIElementTypeApplication" and e["label"]
+             and e["frame"][0] <= x <= e["frame"][0] + e["frame"][2]
+             and e["frame"][1] <= y <= e["frame"][1] + e["frame"][3]]
+    return sorted(under, key=lambda e: e["frame"][2] * e["frame"][3])
 
 
 def element_named(elements, label):
@@ -414,6 +413,9 @@ def current_session():
     if not session:
         return None
     if parse_stamp(session["expires"]) <= now():
+        return None
+    if session.get("test_only") and not test_mode():
+        # opened through the test seam, against a fake phone: never honoured for a real one
         return None
     return session
 
@@ -474,7 +476,7 @@ def create_hold(session, action, label, app, reason):
 def take_approval(hold, session, label):
     """an approval is good once, for the same label, in the same session, for five minutes."""
     record = read_json(hold_path(hold))
-    if not record or record.get("state") != "approved":
+    if not record or record.get("state") != "approved" or (record.get("test_only") and not test_mode()):
         raise Refusal("not_approved", "hold %s has not been approved by the owner" % hold, 403)
     if record["session"] != session["session"] or record["label"] != label:
         raise Refusal("not_approved", "hold %s was approved for a different action" % hold, 403)
@@ -539,6 +541,9 @@ class Phone:
         agent = self.webdriveragent()
         app = agent.active_app()
         elements = elements_from_source(agent.source())
+        if not elements:
+            # without the tree there is no telling what a tap would press, so it is not made
+            raise Refusal("screen_unreadable", "the screen's elements could not be read, so the tap was not made", 409)
         if "label" in body:
             element = element_named(elements, str(body["label"]))
             if element is None:
@@ -548,10 +553,13 @@ class Phone:
             x, y = centre(element)
         else:
             x, y = number(body, "x"), number(body, "y")
-            element = element_at(elements, x, y)
-        label = element["label"] if element else None
+        under = elements_at(elements, x, y)
+        # a price label inside a "Request ride" button still presses the button, so every
+        # element under the point counts, not just the smallest
+        money = [e["label"] for e in under if MONEY_WORDS.search(e["label"])]
+        label = money[0] if money else (under[0]["label"] if under else None)
         target = "\"%s\"" % label if label else "an unlabeled spot at %s, %s" % (x, y)
-        if body.get("money") or (label and MONEY_WORDS.search(label)):
+        if body.get("money") or money:
             if body.get("approval"):
                 take_approval(str(body["approval"]), session, label or target)
             else:
@@ -565,7 +573,7 @@ class Phone:
                     409,
                     {"hold": record["hold"]},
                 )
-        agent.tap(x, y)
+        attempt(agent.tap, (x, y), "tap", "tried to tap %s in %s" % (target, app), session, app, reason)
         return log_action("tap", "tapped %s in %s" % (target, app), "done", session, app=app, reason=reason,
                           hold=body.get("approval"))
 
@@ -589,8 +597,9 @@ class Phone:
             log_action("type", "was asked to type into a password field in %s and refused" % app, "refused",
                        session, app=app, reason=reason)
             raise Refusal("secure_field", "the focused field is a password field; the owner types passwords, never the agent", 403)
-        agent.keys(text + ("\n" if submit else ""))
         shown = text if len(text) <= 60 else text[:57] + "..."
+        attempt(agent.keys, (text + ("\n" if submit else ""),), "type", "tried to type \"%s\" in %s" % (shown, app),
+                session, app, reason)
         said = "typed \"%s\" in %s" % (shown, app) + (" and pressed return" if submit else "")
         return log_action("type", said, "done", session, app=app, reason=reason)
 
@@ -600,14 +609,14 @@ class Phone:
         points = [number(body, key) for key in ("from_x", "from_y", "to_x", "to_y")]
         agent = self.webdriveragent()
         app = agent.active_app()
-        agent.swipe(*points)
+        attempt(agent.swipe, points, "swipe", "tried to swipe in %s" % app, session, app, reason)
         return log_action("swipe", "swiped from %s, %s to %s, %s in %s" % tuple(points + [app]), "done", session,
                           app=app, reason=reason)
 
     def home(self, body):
         session = require_session()
         reason = need_reason(body)
-        self.webdriveragent().home()
+        attempt(self.webdriveragent().home, (), "home", "tried to go to the home screen", session, None, reason)
         return log_action("home", "went to the home screen", "done", session, reason=reason)
 
     def launch(self, body):
@@ -616,8 +625,18 @@ class Phone:
         bundle = body.get("bundle")
         if not isinstance(bundle, str) or not re.fullmatch(r"[A-Za-z0-9.-]+", bundle):
             raise Refusal("bad_request", "launch needs bundle, an app bundle name like com.apple.Maps", 400)
-        self.webdriveragent().launch(bundle)
+        attempt(self.webdriveragent().launch, (bundle,), "launch", "tried to open %s" % bundle, session, bundle, reason)
         return log_action("launch", "opened %s" % bundle, "done", session, app=bundle, reason=reason)
+
+
+def attempt(action, arguments, event, said, session, app, reason):
+    """run one phone action. if it fails after it may have reached the phone, the log still
+    says so, so a half-done action is never missing from the owner's record."""
+    try:
+        action(*arguments)
+    except Refusal as refusal:
+        log_action(event, "%s, and it failed: %s" % (said, refusal.said), "failed", session, app=app, reason=reason)
+        raise
 
 
 def need_reason(body):
@@ -742,6 +761,8 @@ def command_allow(minutes, allow_submit):
     opened = now()
     session = {"session": secrets.token_hex(4), "opened": stamp(opened),
                "expires": stamp(opened + datetime.timedelta(minutes=minutes)), "allow_submit": allow_submit}
+    if test_mode():
+        session["test_only"] = True
     write_private(state_file("session.json"), json.dumps(session, indent=2, sort_keys=True) + "\n")
     log_action("allow", "the owner opened a phone session for %d minutes%s" % (
         minutes, ", with return allowed" if allow_submit else ""), "done", session)
@@ -779,6 +800,8 @@ def command_decide(hold, approve):
     if approve and not confirm("approve the agent tapping \"%s\" in %s, once?" % (record["label"], record["app"])):
         fail("not approved", 1)
     record["state"] = "approved" if approve else "denied"
+    if test_mode():
+        record["test_only"] = True
     record["approved" if approve else "denied"] = stamp(now())
     write_private(path, json.dumps(record, indent=2, sort_keys=True) + "\n")
     session = {"session": record["session"]}

@@ -13,5 +13,6 @@ Secure access levels for your personal agent. Install it, own it, no hosted midd
   [iPhone-use](https://github.com/zhongerxin/iPhone-use) by ZHONG XIN (MIT license): an agent
   drives a real iPhone over USB through WebDriverAgent. sirven's integration layer is its own
   code.
-- [WebDriverAgent](https://github.com/appium/WebDriverAgent) is from the Appium project (BSD
-  license). You fetch and sign it yourself at setup; sirven does not bundle it.
+- [WebDriverAgent](https://github.com/appium/WebDriverAgent) is from the Appium project, under
+  the BSD license (Berkeley Software Distribution). You fetch and sign it yourself at setup;
+  sirven does not bundle it.

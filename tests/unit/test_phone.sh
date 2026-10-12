@@ -314,3 +314,48 @@ test_unknown_phone_commands_are_usage_errors() {
   assert_status 64 phone teleport
   assert_status 64 phone allow --minutes 9999
 }
+
+test_a_tap_on_a_price_inside_a_request_button_is_held() {
+  start_phone
+  start_bridge
+  phone allow > /dev/null
+  ask POST /tap '{"x": 40, "y": 720, "reason": "pick the comfort option"}'
+  assert_eq 409 "$HTTP_STATUS"
+  assert_contains "$RESPONSE" '"result": "held_for_approval"'
+  assert_contains "$RESPONSE" "Request ride"
+  assert_eq 0 "$(taps)"
+}
+
+test_an_unreadable_screen_means_no_tap() {
+  start_phone
+  start_bridge
+  phone allow > /dev/null
+  touch "$FAKE/unreadable"
+  ask POST /tap '{"x": 40, "y": 720, "reason": "anything"}'
+  assert_eq 409 "$HTTP_STATUS"
+  assert_contains "$RESPONSE" '"result": "screen_unreadable"'
+  assert_eq 0 "$(taps)"
+}
+
+test_a_failed_tap_is_still_in_the_log() {
+  start_phone
+  start_bridge
+  phone allow > /dev/null
+  touch "$FAKE/tap_fails"
+  ask POST /tap '{"label": "Choose pickup", "reason": "set the pickup"}'
+  assert_eq 502 "$HTTP_STATUS"
+  capture phone log
+  assert_contains "$CAPTURED_STDOUT" "tried to tap \"Choose pickup\" in com.example.rides, and it failed"
+  assert_contains "$CAPTURED_STDOUT" "[failed]"
+}
+
+# an agent running as the owner could point the socket at nothing to reach the test yes. what
+# it writes is stamped test only, and never honoured once the real USB multiplexer is in use.
+test_a_session_from_the_test_seam_is_never_honoured_for_a_real_phone() {
+  local found
+  export SIRVEN_PHONE_DIR="$TEST_TMP/state"
+  SIRVEN_USBMUX_SOCKET="$TEST_TMP/nothing-here" SIRVEN_PHONE_TEST_YES=yes "$REPO_DIR/bin/sirven" phone allow > /dev/null
+  assert_file_exists "$SIRVEN_PHONE_DIR/session.json"
+  found="$(env -u SIRVEN_USBMUX_SOCKET python3 -B -c 'import sys; sys.path.insert(0, sys.argv[1]); import phone_bridge; print(phone_bridge.current_session())' "$REPO_DIR/lib")"
+  assert_eq None "$found"
+}

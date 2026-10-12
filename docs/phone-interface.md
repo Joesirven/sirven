@@ -53,7 +53,7 @@ because it signs software with your Apple account.
 
 ## Consent: opt in per session, owner only
 
-The agent cannot turn phone control on. Only you can, at a terminal, by typing yes:
+Phone control is off until you turn it on, at a terminal, by typing yes:
 
 | Command | What it does |
 |---|---|
@@ -64,11 +64,20 @@ The agent cannot turn phone control on. Only you can, at a terminal, by typing y
 | `sirven phone approve HOLD` / `deny HOLD` | Decide one held action. An approval is good once, for that exact action, for five minutes. |
 | `sirven phone log` | Everything the agent did on the phone, in plain words. `--json` for the raw lines. |
 
+**Where this holds, and where it does not.** The session file and the hold approvals live in
+your own state folder (`~/.sirven/phone`, mode 0700). When your agent runs as the separate
+service user (`agent` by default), it cannot write there, so it cannot open its own session or
+approve its own holds: the checks below are load-bearing. When your agent runs as you, under
+your own account, it could write those files itself, and the checks become guardrails that keep
+an honest agent honest, not a wall. Run the agent as the service user if you want the wall.
+(The test seam, a typed yes skipped against a fake phone, writes records stamped test only that
+are never honoured once the real USB multiplexer is in use.)
+
 With no open session, every action is refused before anything reaches the phone. The phone
 stays visible and usable the whole time: sirven does not lock it, hide its screen, or take it
 over, and you can stop the agent by unplugging it.
 
-Things the agent never does, enforced in code, not just in instructions:
+Things the bridge refuses in code, not just in the agent's instructions:
 
 - **Type into a password field.** If the focused field is a secure text field, typing is
   refused and the text is not logged. Passwords, codes, and face recognition stay with you.
@@ -83,6 +92,10 @@ Checkout, Subscribe, Reserve, Tip, and similar) is **held**: nothing reaches the
 agent gets `held_for_approval` with a hold token. The agent can also mark any action as money
 bearing with `"money": true`. You approve with `sirven phone approve HOLD`, and the agent then
 repeats the same tap with `"approval": "HOLD"`.
+
+Every labeled element under the tap point counts, so a tap on a price inside a "Request ride"
+button is still held. When the screen's elements cannot be read at all, the tap is refused
+rather than made blind. Swipes are not gated, so a slide-to-pay control is not caught.
 
 The label match is a heuristic, which is why holds are one part of the approval story and not
 all of it: the agent's own instructions still require asking before any real-world action in
@@ -116,7 +129,7 @@ Every answer is JSON with `result` and `said` (a plain sentence). Results:
 | `no_consent` | 403 | no open phone session |
 | `secure_field`, `submit_not_allowed`, `not_approved` | 403 | refused, see above |
 | `held_for_approval` | 409 | waiting for the owner; carries `hold` |
-| `phone_locked`, `no_phone`, `not_trusted`, `several_phones` | 409 | the phone is not in a state to drive |
+| `phone_locked`, `no_phone`, `not_trusted`, `several_phones`, `screen_unreadable` | 409 | the phone is not in a state to drive |
 | `not_found` | 404 | no element with that label on screen |
 | `bad_request` | 400 | malformed body, or no `reason` |
 | `no_usb_service`, `webdriveragent_not_running` | 503 | the Mac or the phone side is not up |
@@ -129,7 +142,8 @@ its own, and never replays a tap that may have half happened: the agent reads th
 
 `~/.sirven/phone/actions.jsonl`, appended, mode 0600, one JSON object per line:
 `time`, `event` (allow, stop, screen, tap, type, swipe, home, launch, approve, deny), `session`,
-`said`, `outcome` (done, held, refused, not_found), and where they apply `app`, `reason`, `hold`.
+`said`, `outcome` (done, held, refused, not_found, failed: an action that errored after it may
+have reached the phone is still logged), and where they apply `app`, `reason`, `hold`.
 Screenshots are never written to disk. `sirven phone log` prints it like this:
 
 ```
@@ -192,8 +206,10 @@ leg for the Waymo booking, for a user whose phone is plugged in with the Waymo a
   multiplexer and honestly reports that no iPhone is plugged in.
 - Verified against a fake phone (`tests/unit/test_phone.sh`): detection of trusted, untrusted,
   missing, and several phones; consent; reading the screen; tapping by label and by point;
-  typing; swiping; launching; money holds with approve and deny; password field and return
-  refusals; locked phone; session expiry and stop; the plain-language log.
+  typing; swiping; launching; money holds with approve and deny, including a price nested
+  inside a request button; an unreadable screen; password field and return refusals; locked
+  phone; session expiry and stop; failed actions in the log; the test seam never honoured for
+  a real phone; the plain-language log.
 - **Not yet verified against a real iPhone.** To do it: plug in and trust a phone, run the setup
   plan, then `sirven phone status`, `sirven phone allow`, `sirven phone serve`, and from another
   terminal `GET /screen` and a `POST /tap` on something harmless, then `sirven phone log`.
@@ -203,4 +219,4 @@ leg for the Waymo booking, for a user whose phone is plugged in with the Waymo a
 The approach, and the WebDriverAgent routes this uses, come from
 [iPhone-use](https://github.com/zhongerxin/iPhone-use) by ZHONG XIN, under the MIT license.
 sirven's integration layer is its own code; no iPhone-use code is copied. WebDriverAgent is from
-the Appium project, under the BSD license, and is fetched by you at setup time, not bundled.
+the Appium project, under the BSD (Berkeley Software Distribution) license, and is fetched by you at setup time, not bundled.

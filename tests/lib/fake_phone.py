@@ -10,6 +10,8 @@ reads its mood from files in DIRECTORY on every request:
   untrusted  present: the phone has not trusted the Mac
   locked     present: the phone is locked
   focused    the type of the focused element (default XCUIElementTypeTextField)
+  unreadable present: the accessibility tree comes back empty
+  tap_fails  present: WebDriverAgent answers a tap with an error, after recording it
 DIRECTORY/ready appears once both are listening.
 """
 
@@ -30,7 +32,9 @@ SOURCE = """<?xml version="1.0" encoding="UTF-8"?>
   <XCUIElementTypeApplication type="XCUIElementTypeApplication" name="Rides" label="Rides" x="0" y="0" width="390" height="844">
     <XCUIElementTypeTextField type="XCUIElementTypeTextField" name="Where to?" label="Where to?" value="" x="20" y="100" width="350" height="44"/>
     <XCUIElementTypeStaticText type="XCUIElementTypeStaticText" name="Fare" label="Fare" value="$18.40" x="20" y="600" width="200" height="30"/>
-    <XCUIElementTypeButton type="XCUIElementTypeButton" name="Request ride" label="Request ride" x="20" y="700" width="350" height="50"/>
+    <XCUIElementTypeButton type="XCUIElementTypeButton" name="Request ride" label="Request ride" x="20" y="700" width="350" height="50">
+      <XCUIElementTypeStaticText type="XCUIElementTypeStaticText" name="Comfort $18.40" label="Comfort $18.40" x="30" y="710" width="150" height="30"/>
+    </XCUIElementTypeButton>
     <XCUIElementTypeButton type="XCUIElementTypeButton" name="Choose pickup" label="Choose pickup" x="20" y="200" width="350" height="50"/>
   </XCUIElementTypeApplication>
 </AppiumAUT>"""
@@ -74,7 +78,7 @@ class WebDriverAgent(http.server.BaseHTTPRequestHandler):
         if path == "/screenshot":
             return self.answer("iVBORw0KGgo=")
         if path.endswith("/source"):
-            return self.answer(SOURCE)
+            return self.answer("" if mood("unreadable") else SOURCE)
         if path.endswith("/window/size"):
             return self.answer({"width": 390, "height": 844})
         if path.endswith("/element/active"):
@@ -89,6 +93,8 @@ class WebDriverAgent(http.server.BaseHTTPRequestHandler):
         record("POST", self.path, body)
         if self.path == "/session":
             return self.answer({"sessionId": "fake-session"}, {"sessionId": "fake-session"})
+        if self.path.endswith("/wda/tap") and mood("tap_fails"):
+            return self.answer({"error": "unknown error", "message": "the tap timed out"})
         return self.answer(None)
 
 
