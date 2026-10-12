@@ -72,6 +72,15 @@ MONEY_WORDS = re.compile(
 
 SECURE_FIELD_TYPES = ("XCUIElementTypeSecureTextField",)
 
+# the phone's own approval for a payment: the Face ID or Apple Pay sheet. while it is on screen
+# the owner is deciding, on the phone, so the agent touches nothing. sirven never stands in for
+# this prompt, never presses its button, and never keeps or replays a scan.
+OWNER_APPROVAL_SHEET = re.compile(
+    r"\b(double[- ]click to pay|confirm with side button|pay with face id|pay with passcode|"
+    r"pay with touch id|confirm with face id|face id)\b",
+    re.IGNORECASE,
+)
+
 
 class Refusal(Exception):
     """an honest result the agent gets back instead of an action: the reason, in plain words."""
@@ -384,6 +393,20 @@ def elements_from_source(xml_text):
     return found
 
 
+def approval_sheet_showing(elements):
+    """true while the phone's own Face ID or Apple Pay prompt is on screen."""
+    return any(OWNER_APPROVAL_SHEET.search(e["label"]) for e in elements if e["label"])
+
+
+def refuse_during_approval_sheet(elements, session, app, event, reason):
+    if approval_sheet_showing(elements):
+        log_action(event, "waited: the phone is showing its own payment approval in %s, which only the owner answers"
+                   % app, "refused", session, app=app, reason=reason)
+        raise Refusal("owner_approving_on_phone",
+                      "the phone is showing its own Face ID or Apple Pay approval; only the owner answers it, "
+                      "on the phone. read the screen again once it is gone", 409)
+
+
 def elements_at(elements, x, y):
     """every labeled element under a point, smallest first. the app itself does not count."""
     under = [e for e in elements if e["type"] != "XCUIElementTypeApplication" and e["label"]
@@ -473,6 +496,17 @@ def create_hold(session, action, label, app, reason):
     return record
 
 
+def hold_state(hold):
+    """what the agent may know about its own hold: waiting, approved, denied, or used. read only."""
+    record = read_json(hold_path(hold))
+    if not record:
+        raise Refusal("not_found", "there is no hold %s" % hold, 404)
+    state = record["state"]
+    if record.get("test_only") and not test_mode():
+        state = "waiting"
+    return {"hold": hold, "state": state, "label": record["label"], "app": record["app"]}
+
+
 def take_approval(hold, session, label):
     """an approval is good once, for the same label, in the same session, for five minutes."""
     record = read_json(hold_path(hold))
@@ -528,7 +562,9 @@ class Phone:
         session = require_session()
         agent = self.webdriveragent()
         app = agent.active_app()
-        result = {"app": app, "size": agent.window_size(), "elements": elements_from_source(agent.source())}
+        elements = elements_from_source(agent.source())
+        result = {"app": app, "size": agent.window_size(), "elements": elements,
+                  "owner_approving_on_phone": approval_sheet_showing(elements)}
         if include_image:
             # the screenshot image, base64 encoded. kept in memory only, never written to disk
             result["screenshot_png_base64"] = agent.screenshot()
@@ -544,6 +580,7 @@ class Phone:
         if not elements:
             # without the tree there is no telling what a tap would press, so it is not made
             raise Refusal("screen_unreadable", "the screen's elements could not be read, so the tap was not made", 409)
+        refuse_during_approval_sheet(elements, session, app, "tap", reason)
         if "label" in body:
             element = element_named(elements, str(body["label"]))
             if element is None:
@@ -593,6 +630,7 @@ class Phone:
             )
         agent = self.webdriveragent()
         app = agent.active_app()
+        refuse_during_approval_sheet(elements_from_source(agent.source()), session, app, "type", reason)
         if agent.active_element_type() in SECURE_FIELD_TYPES:
             log_action("type", "was asked to type into a password field in %s and refused" % app, "refused",
                        session, app=app, reason=reason)
@@ -609,6 +647,7 @@ class Phone:
         points = [number(body, key) for key in ("from_x", "from_y", "to_x", "to_y")]
         agent = self.webdriveragent()
         app = agent.active_app()
+        refuse_during_approval_sheet(elements_from_source(agent.source()), session, app, "swipe", reason)
         attempt(agent.swipe, points, "swipe", "tried to swipe in %s" % app, session, app, reason)
         return log_action("swipe", "swiped from %s, %s to %s, %s in %s" % tuple(points + [app]), "done", session,
                           app=app, reason=reason)
@@ -691,6 +730,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             route = (method, path.path)
             if route == ("GET", "/v1/phone/status"):
                 return self.reply(200, dict(self.phone.status(), result="ok"))
+            if method == "GET" and path.path.startswith("/v1/phone/holds/"):
+                return self.reply(200, dict(hold_state(path.path.rsplit("/", 1)[1]), result="ok"))
             if route == ("GET", "/v1/phone/screen"):
                 reason = (query.get("reason") or ["reading the screen"])[0]
                 image = (query.get("image") or ["1"])[0] != "0"

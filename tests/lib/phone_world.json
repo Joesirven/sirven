@@ -1,0 +1,850 @@
+{
+ "apps": {
+  "com.apple.Maps": {
+   "first": "main",
+   "name": "Maps",
+   "screens": {
+    "main": {
+     "elements": [
+      {
+       "frame": [
+        20,
+        700,
+        350,
+        44
+       ],
+       "label": "Search Maps",
+       "type": "TextField"
+      }
+     ]
+    }
+   }
+  },
+  "com.apple.MobileSMS": {
+   "first": "list",
+   "name": "Messages",
+   "screens": {
+    "list": {
+     "elements": [
+      {
+       "frame": [
+        20,
+        120,
+        350,
+        64
+       ],
+       "label": "Mom, See you Sunday at 4?",
+       "type": "Cell"
+      },
+      {
+       "frame": [
+        20,
+        190,
+        350,
+        64
+       ],
+       "label": "Barber, Your 3pm is confirmed",
+       "type": "Cell"
+      },
+      {
+       "frame": [
+        330,
+        40,
+        50,
+        40
+       ],
+       "label": "Compose",
+       "type": "Button"
+      }
+     ]
+    }
+   }
+  },
+  "com.apple.Preferences": {
+   "first": "main",
+   "name": "Settings",
+   "screens": {
+    "main": {
+     "elements": [
+      {
+       "frame": [
+        20,
+        120,
+        350,
+        50
+       ],
+       "label": "General",
+       "type": "Button"
+      },
+      {
+       "frame": [
+        20,
+        190,
+        350,
+        50
+       ],
+       "label": "Privacy & Security",
+       "type": "Button"
+      }
+     ]
+    }
+   }
+  },
+  "com.apple.springboard": {
+   "first": "page1",
+   "name": "Home Screen",
+   "screens": {
+    "page1": {
+     "elements": [
+      {
+       "frame": [
+        24,
+        80,
+        64,
+        64
+       ],
+       "label": "Uber",
+       "launch": "com.ubercab.UberClient",
+       "type": "Icon"
+      },
+      {
+       "frame": [
+        114,
+        80,
+        64,
+        64
+       ],
+       "label": "Lyft",
+       "launch": "com.zimride.instant",
+       "type": "Icon"
+      },
+      {
+       "frame": [
+        204,
+        80,
+        64,
+        64
+       ],
+       "label": "Messages",
+       "launch": "com.apple.MobileSMS",
+       "type": "Icon"
+      },
+      {
+       "frame": [
+        294,
+        80,
+        64,
+        64
+       ],
+       "label": "Maps",
+       "launch": "com.apple.Maps",
+       "type": "Icon"
+      }
+     ],
+     "next_page": "page2"
+    },
+    "page2": {
+     "elements": [
+      {
+       "frame": [
+        24,
+        80,
+        64,
+        64
+       ],
+       "label": "First Neighborhood Bank",
+       "launch": "com.example.bank",
+       "type": "Icon"
+      },
+      {
+       "frame": [
+        114,
+        80,
+        64,
+        64
+       ],
+       "label": "Settings",
+       "launch": "com.apple.Preferences",
+       "type": "Icon"
+      }
+     ],
+     "previous_page": "page1"
+    }
+   }
+  },
+  "com.example.bank": {
+   "first": "login",
+   "name": "First Neighborhood Bank",
+   "screens": {
+    "login": {
+     "elements": [
+      {
+       "frame": [
+        20,
+        80,
+        350,
+        30
+       ],
+       "label": "Sign in",
+       "type": "StaticText"
+      },
+      {
+       "frame": [
+        20,
+        160,
+        350,
+        44
+       ],
+       "label": "Username",
+       "type": "TextField",
+       "value": "jose.sirven"
+      },
+      {
+       "frame": [
+        20,
+        220,
+        350,
+        44
+       ],
+       "label": "Password",
+       "type": "SecureTextField",
+       "value": "hunter2"
+      },
+      {
+       "frame": [
+        20,
+        300,
+        350,
+        50
+       ],
+       "label": "Log in",
+       "type": "Button"
+      }
+     ],
+     "focused": "XCUIElementTypeSecureTextField"
+    }
+   }
+  },
+  "com.ubercab.UberClient": {
+   "first": "home",
+   "name": "Uber",
+   "screens": {
+    "account": {
+     "elements": [
+      {
+       "frame": [
+        20,
+        80,
+        350,
+        30
+       ],
+       "label": "Jose S.",
+       "type": "StaticText"
+      },
+      {
+       "frame": [
+        20,
+        140,
+        350,
+        50
+       ],
+       "label": "Wallet",
+       "type": "Button"
+      },
+      {
+       "frame": [
+        20,
+        600,
+        350,
+        50
+       ],
+       "label": "Sign out",
+       "type": "Button"
+      },
+      {
+       "frame": [
+        0,
+        780,
+        130,
+        64
+       ],
+       "goto": "home",
+       "label": "Home",
+       "type": "Button"
+      },
+      {
+       "frame": [
+        130,
+        780,
+        130,
+        64
+       ],
+       "goto": "services",
+       "label": "Services",
+       "type": "Button"
+      },
+      {
+       "frame": [
+        260,
+        780,
+        130,
+        64
+       ],
+       "goto": "account",
+       "label": "Account",
+       "type": "Button"
+      }
+     ]
+    },
+    "cancel_confirm": {
+     "elements": [
+      {
+       "frame": [
+        20,
+        300,
+        350,
+        30
+       ],
+       "label": "Cancel this ride? No fee if you cancel now.",
+       "type": "StaticText"
+      },
+      {
+       "frame": [
+        20,
+        600,
+        350,
+        50
+       ],
+       "goto": "cancelled",
+       "label": "Yes, cancel",
+       "type": "Button"
+      },
+      {
+       "frame": [
+        20,
+        670,
+        350,
+        50
+       ],
+       "goto": "on_the_way",
+       "label": "Keep ride",
+       "type": "Button"
+      }
+     ]
+    },
+    "cancelled": {
+     "elements": [
+      {
+       "frame": [
+        20,
+        100,
+        350,
+        30
+       ],
+       "label": "Your ride was cancelled",
+       "type": "StaticText"
+      },
+      {
+       "frame": [
+        20,
+        160,
+        350,
+        44
+       ],
+       "goto": "search",
+       "label": "Where to?",
+       "type": "TextField"
+      }
+     ]
+    },
+    "home": {
+     "elements": [
+      {
+       "frame": [
+        20,
+        120,
+        350,
+        44
+       ],
+       "goto": "search",
+       "label": "Where to?",
+       "type": "TextField"
+      },
+      {
+       "frame": [
+        20,
+        60,
+        350,
+        30
+       ],
+       "label": "Good afternoon, Jose",
+       "type": "StaticText"
+      },
+      {
+       "frame": [
+        0,
+        780,
+        130,
+        64
+       ],
+       "goto": "home",
+       "label": "Home",
+       "type": "Button"
+      },
+      {
+       "frame": [
+        130,
+        780,
+        130,
+        64
+       ],
+       "goto": "services",
+       "label": "Services",
+       "type": "Button"
+      },
+      {
+       "frame": [
+        260,
+        780,
+        130,
+        64
+       ],
+       "goto": "account",
+       "label": "Account",
+       "type": "Button"
+      }
+     ]
+    },
+    "on_the_way": {
+     "elements": [
+      {
+       "frame": [
+        20,
+        100,
+        350,
+        30
+       ],
+       "label": "Your driver is on the way",
+       "type": "StaticText"
+      },
+      {
+       "frame": [
+        20,
+        140,
+        350,
+        30
+       ],
+       "label": "Pickup in 4 min",
+       "type": "StaticText"
+      },
+      {
+       "frame": [
+        20,
+        180,
+        350,
+        30
+       ],
+       "label": "Toyota Prius, white, 7ABC123",
+       "type": "StaticText"
+      },
+      {
+       "frame": [
+        20,
+        700,
+        350,
+        50
+       ],
+       "goto": "cancel_confirm",
+       "label": "Cancel ride",
+       "type": "Button"
+      }
+     ]
+    },
+    "options": {
+     "elements": [
+      {
+       "frame": [
+        10,
+        40,
+        60,
+        40
+       ],
+       "goto": "home",
+       "label": "Back",
+       "type": "Button"
+      },
+      {
+       "frame": [
+        20,
+        200,
+        350,
+        64
+       ],
+       "goto": "options_x",
+       "label": "UberX, 4 min away, 14 min trip, $18.40",
+       "type": "Cell"
+      },
+      {
+       "frame": [
+        20,
+        270,
+        350,
+        64
+       ],
+       "goto": "options_comfort",
+       "label": "Comfort, 6 min away, 13 min trip, $24.10",
+       "type": "Cell"
+      },
+      {
+       "frame": [
+        20,
+        340,
+        350,
+        64
+       ],
+       "goto": "options_xl",
+       "label": "UberXL, 9 min away, 14 min trip, $31.75",
+       "type": "Cell"
+      },
+      {
+       "frame": [
+        20,
+        700,
+        150,
+        30
+       ],
+       "label": "Apple Pay",
+       "type": "StaticText"
+      }
+     ]
+    },
+    "options_comfort": {
+     "elements": [
+      {
+       "frame": [
+        10,
+        40,
+        60,
+        40
+       ],
+       "goto": "home",
+       "label": "Back",
+       "type": "Button"
+      },
+      {
+       "frame": [
+        20,
+        200,
+        350,
+        64
+       ],
+       "goto": "options_x",
+       "label": "UberX, 4 min away, 14 min trip, $18.40",
+       "type": "Cell"
+      },
+      {
+       "frame": [
+        20,
+        270,
+        350,
+        64
+       ],
+       "goto": "options_comfort",
+       "label": "Comfort, 6 min away, 13 min trip, $24.10",
+       "type": "Cell"
+      },
+      {
+       "frame": [
+        20,
+        740,
+        350,
+        50
+       ],
+       "goto": "pay_sheet",
+       "label": "Request Comfort",
+       "type": "Button"
+      }
+     ]
+    },
+    "options_x": {
+     "elements": [
+      {
+       "frame": [
+        10,
+        40,
+        60,
+        40
+       ],
+       "goto": "home",
+       "label": "Back",
+       "type": "Button"
+      },
+      {
+       "frame": [
+        20,
+        200,
+        350,
+        64
+       ],
+       "goto": "options_x",
+       "label": "UberX, 4 min away, 14 min trip, $18.40",
+       "type": "Cell"
+      },
+      {
+       "frame": [
+        20,
+        270,
+        350,
+        64
+       ],
+       "goto": "options_comfort",
+       "label": "Comfort, 6 min away, 13 min trip, $24.10",
+       "type": "Cell"
+      },
+      {
+       "frame": [
+        20,
+        740,
+        350,
+        50
+       ],
+       "goto": "pay_sheet",
+       "label": "Request UberX",
+       "type": "Button"
+      }
+     ]
+    },
+    "options_xl": {
+     "elements": [
+      {
+       "frame": [
+        10,
+        40,
+        60,
+        40
+       ],
+       "goto": "home",
+       "label": "Back",
+       "type": "Button"
+      },
+      {
+       "frame": [
+        20,
+        740,
+        350,
+        50
+       ],
+       "goto": "pay_sheet",
+       "label": "Request UberXL",
+       "type": "Button"
+      }
+     ]
+    },
+    "pay_sheet": {
+     "awaits_owner": "on_the_way",
+     "declined": "options",
+     "elements": [
+      {
+       "frame": [
+        20,
+        500,
+        350,
+        30
+       ],
+       "label": "Uber, $18.40",
+       "type": "StaticText"
+      },
+      {
+       "frame": [
+        20,
+        600,
+        350,
+        30
+       ],
+       "label": "Pay with Face ID",
+       "type": "StaticText"
+      },
+      {
+       "frame": [
+        20,
+        700,
+        350,
+        50
+       ],
+       "goto": "options",
+       "label": "Cancel",
+       "type": "Button"
+      }
+     ]
+    },
+    "search": {
+     "elements": [
+      {
+       "frame": [
+        20,
+        120,
+        350,
+        44
+       ],
+       "label": "Search destination",
+       "type": "TextField",
+       "typing": true
+      },
+      {
+       "frame": [
+        10,
+        40,
+        60,
+        40
+       ],
+       "goto": "home",
+       "label": "Back",
+       "type": "Button"
+      }
+     ],
+     "on_type": "options"
+    },
+    "services": {
+     "elements": [
+      {
+       "frame": [
+        20,
+        120,
+        350,
+        50
+       ],
+       "goto": "home",
+       "label": "Ride",
+       "type": "Button"
+      },
+      {
+       "frame": [
+        20,
+        190,
+        350,
+        50
+       ],
+       "label": "Reserve",
+       "type": "Button"
+      },
+      {
+       "frame": [
+        20,
+        260,
+        350,
+        50
+       ],
+       "label": "Rent",
+       "type": "Button"
+      },
+      {
+       "frame": [
+        0,
+        780,
+        130,
+        64
+       ],
+       "goto": "home",
+       "label": "Home",
+       "type": "Button"
+      },
+      {
+       "frame": [
+        130,
+        780,
+        130,
+        64
+       ],
+       "goto": "services",
+       "label": "Services",
+       "type": "Button"
+      },
+      {
+       "frame": [
+        260,
+        780,
+        130,
+        64
+       ],
+       "goto": "account",
+       "label": "Account",
+       "type": "Button"
+      }
+     ]
+    }
+   }
+  },
+  "com.zimride.instant": {
+   "first": "home",
+   "name": "Lyft",
+   "screens": {
+    "home": {
+     "elements": [
+      {
+       "frame": [
+        20,
+        120,
+        350,
+        44
+       ],
+       "goto": "home",
+       "label": "Search destination",
+       "type": "TextField"
+      },
+      {
+       "frame": [
+        20,
+        780,
+        170,
+        64
+       ],
+       "goto": "home",
+       "label": "Rides",
+       "type": "Button"
+      },
+      {
+       "frame": [
+        200,
+        780,
+        170,
+        64
+       ],
+       "goto": "profile",
+       "label": "Profile",
+       "type": "Button"
+      }
+     ]
+    },
+    "profile": {
+     "elements": [
+      {
+       "frame": [
+        20,
+        80,
+        350,
+        30
+       ],
+       "label": "Jose",
+       "type": "StaticText"
+      },
+      {
+       "frame": [
+        20,
+        780,
+        170,
+        64
+       ],
+       "goto": "home",
+       "label": "Rides",
+       "type": "Button"
+      }
+     ]
+    }
+   }
+  }
+ },
+ "start": {
+  "app": "com.apple.springboard",
+  "screen": "page1"
+ }
+}
