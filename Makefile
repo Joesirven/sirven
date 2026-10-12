@@ -4,22 +4,33 @@
 #   make test       run tests/run.sh
 #   make lint       bash -n on every shell file, then shellcheck when it is installed
 #   make package    a tarball of the files git tracks, in dist/ (or DIST=path)
+#   make menu-bar       the macos menu bar app, macos/menu-bar/build/Sirven.app (needs swift)
+#   make test-menu-bar  the menu bar app's swift tests (needs swift)
 
 SHELL := /bin/sh
 PACKAGE := $(shell sed -n 's/^[[:space:]]*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' project.json | head -n 1 | tr '[:upper:]' '[:lower:]')
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo unversioned)
 DIST ?= dist
-SHELL_FILES := install.sh uninstall.sh bin/sirven $(wildcard lib/*.sh) tests/run.sh tests/golden/run.sh $(wildcard tests/lib/*.sh) $(wildcard tests/unit/*.sh)
+SHELL_FILES := install.sh uninstall.sh bin/sirven $(wildcard lib/*.sh) tests/run.sh tests/golden/run.sh $(wildcard tests/lib/*.sh) $(wildcard tests/unit/*.sh) macos/menu-bar/build-app.sh
 
-.PHONY: help test lint package
+.PHONY: help test lint package menu-bar test-menu-bar
 
 help:
 	@echo "make test      run every test: tests/run.sh"
 	@echo "make lint      bash -n on every shell file, then shellcheck if it is installed"
 	@echo "make package   $(DIST)/$(PACKAGE)-$(VERSION).tar.gz from the files git tracks"
+	@echo "make menu-bar  macos/menu-bar/build/Sirven.app, the menu bar app (macos, needs swift)"
+	@echo "make test-menu-bar  the menu bar app's swift tests (macos, needs swift)"
 
 test:
 	bash tests/run.sh
+
+# the menu bar app is macos only, so make test leaves it out and stays green on linux.
+menu-bar:
+	bash macos/menu-bar/build-app.sh
+
+test-menu-bar:
+	swift test --package-path macos/menu-bar
 
 lint:
 	@for file in $(SHELL_FILES); do bash -n "$$file" || exit 1; done
