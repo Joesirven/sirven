@@ -466,6 +466,13 @@ main() {
   if [ "${1:-}" = phone ]; then
     shift
     command -v python3 >/dev/null 2>&1 || die "python3 was not found on PATH; the phone bridge needs it"
+    if [ "${1:-}" = start ]; then
+      PREFLIGHT_PROBLEMS=0
+      preflight_phone yes
+      if [ "$PREFLIGHT_PROBLEMS" -gt 0 ]; then
+        die "preflight found $PREFLIGHT_PROBLEMS problem(s); the phone runner did not start"
+      fi
+    fi
     exec python3 "$ROOT_DIR/lib/phone_bridge.py" "$@"
   fi
   parse_arguments "$@"

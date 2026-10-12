@@ -15,6 +15,7 @@ PREFLIGHT_MINIMUM_BASH="3.2"
 PREFLIGHT_MINIMUM_PYTHON="3.6"
 PREFLIGHT_MINIMUM_TAILSCALE="1.60.0"
 PREFLIGHT_MINIMUM_CLOUDFLARED="2024.1.0"
+PREFLIGHT_PYMOBILEDEVICE3_VERSION="11.28.2"
 
 PREFLIGHT_PROBLEMS=0
 PREFLIGHT_SSH_COMMAND="${PREFLIGHT_SSH_COMMAND:-ssh}"
@@ -159,6 +160,17 @@ preflight_ssh_server() {
   else
     printf 'preflight: warning: no SSH server answered on this machine (%s). the agent client connects through it: turn on remote login (macos) or start sshd (linux). this installer never changes it.\n' "$result" >&2
   fi
+}
+
+# preflight_phone STRICT: sirven phone start runs pymobiledevice3 for the tunnel and the launcher,
+# so it must be on PATH. only that one command is checked here.
+preflight_phone() {
+  local strict="$1"
+  if ! command -v pymobiledevice3 >/dev/null 2>&1; then
+    _preflight_problem "$strict" "pymobiledevice3 was not found on PATH. install it once with the Python tool installer, uv (needs Python 3.12 or newer): uv tool install pymobiledevice3==$PREFLIGHT_PYMOBILEDEVICE3_VERSION"
+    return 0
+  fi
+  printf 'preflight: ok pymobiledevice3\n' >&2
 }
 
 # preflight_all OPERATING_SYSTEM TRANSPORT STRICT

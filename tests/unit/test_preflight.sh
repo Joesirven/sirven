@@ -67,6 +67,35 @@ test_missing_command_counts_when_strict() {
   assert_eq 0 "$PREFLIGHT_PROBLEMS"
 }
 
+test_phone_start_needs_pymobiledevice3_when_strict() {
+  local saved_path="$PATH"
+  mkdir -p "$TEST_TMP/empty"
+  PREFLIGHT_PROBLEMS=0
+  PATH="$TEST_TMP/empty"
+  preflight_phone yes 2>"$TEST_TMP/stderr"
+  PATH="$saved_path"
+  assert_eq 1 "$PREFLIGHT_PROBLEMS"
+  assert_contains "$(cat "$TEST_TMP/stderr")" "pymobiledevice3 was not found on PATH"
+  assert_contains "$(cat "$TEST_TMP/stderr")" "uv tool install pymobiledevice3==11.28.2"
+}
+
+test_phone_start_only_warns_when_not_strict() {
+  mkdir -p "$TEST_TMP/empty"
+  PATH="$TEST_TMP/empty"
+  PREFLIGHT_PROBLEMS=0
+  preflight_phone no 2>/dev/null
+  assert_eq 0 "$PREFLIGHT_PROBLEMS"
+}
+
+test_phone_start_passes_with_pymobiledevice3_on_path() {
+  make_tool pymobiledevice3 "11.28.2"
+  PATH="$TEST_TMP/bin:$PATH"
+  PREFLIGHT_PROBLEMS=0
+  capture preflight_phone yes
+  assert_eq 0 "$CAPTURED_STATUS"
+  assert_contains "$CAPTURED_STDERR" "preflight: ok pymobiledevice3"
+}
+
 test_preflight_bash_accepts_this_shell() {
   capture preflight_bash
   assert_eq 0 "$CAPTURED_STATUS"
