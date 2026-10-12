@@ -468,6 +468,7 @@ POLL_SECONDS = 0.5
 STOP_SECONDS = 5
 RECENT_LINES = 200
 OUTPUT_JOIN_SECONDS = 2
+LAUNCHER_FAILURES_BEFORE_TUNNEL_RESTART = 3
 
 
 def tunnel_endpoint(lines):
@@ -597,12 +598,14 @@ class RunnerSupervisor:
         self.poll_seconds = poll_seconds
         self.tunnel_wait_seconds = tunnel_wait_seconds
         self.stop_seconds = stop_seconds
+        self.stable_seconds = stable_seconds
         self.clock = clock
         self.sleep = sleep
         self.tunnel = None
         self.launcher = None
         self.endpoint = None
         self.started = None
+        self.quick_failures = 0
 
     def run(self):
         previous = signal.signal(signal.SIGTERM, interrupt)
@@ -627,9 +630,21 @@ class RunnerSupervisor:
         while True:
             self.sleep(self.poll_seconds)
             if self.tunnel is None or not self.tunnel.alive():
-                self._restart_tunnel()
+                self._restart_tunnel("the tunnel to the phone stopped; the launcher stops with it, and both start again")
             elif self.launcher is None or not self.launcher.alive():
-                self._restart_launcher()
+                self._launcher_stopped()
+
+    def _launcher_stopped(self):
+        if self.launcher is not None and self.launcher.uptime() >= self.stable_seconds:
+            self.quick_failures = 0
+        self.quick_failures += 1
+        if self.quick_failures >= LAUNCHER_FAILURES_BEFORE_TUNNEL_RESTART:
+            self.quick_failures = 0
+            self._restart_tunnel("the launcher failed %d times in a row without staying up; the tunnel may be "
+                                 "holding a stale address, so the tunnel and the launcher start again"
+                                 % LAUNCHER_FAILURES_BEFORE_TUNNEL_RESTART)
+        else:
+            self._restart_launcher()
 
     def stop(self):
         for child in (self.launcher, self.tunnel):
@@ -663,9 +678,9 @@ class RunnerSupervisor:
     def _start_launcher(self):
         return Child(self.build_launcher(self.bundle, *self.endpoint), self.clock)
 
-    def _restart_tunnel(self):
+    def _restart_tunnel(self, why):
         uptime = self.tunnel.uptime() if self.tunnel is not None else 0
-        print("the tunnel to the phone stopped; the launcher stops with it, and both start again", flush=True)
+        print(why, flush=True)
         if self.launcher is not None:
             self.launcher.stop(self.stop_seconds)
         if self.tunnel is not None:

@@ -51,6 +51,23 @@ print("--rsd 10.0.0.%d %d" % (starts, 5000 + starts), flush=True)
 time.sleep(lifetime)
 """
 
+# the fake tunnel prints an address on its first start only; later starts exit silently
+TUNNEL_ONCE = """
+import sys, time
+count_file = sys.argv[1]
+try:
+    starts = int(open(count_file).read())
+except OSError:
+    starts = 0
+starts += 1
+open(count_file, "w").write(str(starts))
+if starts > 1:
+    sys.exit(0)
+print("RSD Address: 10.0.0.1", flush=True)
+print("RSD Port: 5001", flush=True)
+time.sleep(0.3)
+"""
+
 # the fake launcher writes its arguments to a log, then lives for its lifetime
 LAUNCHER = """
 import sys, time
@@ -201,7 +218,7 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual(caught.exception.said, phone_bridge.MISSING_TOOL)
 
     def test_a_dead_launcher_is_restarted_alone(self):
-        supervisor = self.supervisor(tunnel_lifetime=300, launcher_lifetime=0.3)
+        supervisor = self.supervisor(tunnel_lifetime=300, launcher_lifetime=0.3, stable_seconds=0.2)
         printed = self.run_until_interrupt(supervisor, 1.5)
         self.assertEqual(self.read_text(self.tunnel_starts), "1", "the tunnel must not restart")
         launched = self.read_lines(self.launches)
@@ -220,6 +237,24 @@ class RunnerTest(unittest.TestCase):
         self.assertIn("10.0.0.2", addresses, "the launcher must start again with the new address")
         self.assertTrue(set(addresses) <= {"10.0.0.%d" % number for number in range(1, starts + 1)}, addresses)
         self.assertIn("the tunnel to the phone stopped; the launcher stops with it", printed)
+
+    def test_three_quick_launcher_failures_restart_the_tunnel_for_a_new_address(self):
+        supervisor = self.supervisor(tunnel_lifetime=300, launcher_lifetime=0)
+        printed = self.run_until_interrupt(supervisor, 1.5)
+        self.assertGreaterEqual(int(self.read_text(self.tunnel_starts)), 2)
+        addresses = [line.split()[1] for line in self.read_lines(self.launches)]
+        self.assertEqual(addresses[:3], ["10.0.0.1"] * 3, "three launches before the tunnel restarts")
+        self.assertEqual(addresses[3], "10.0.0.2", "the launcher must start with the new address")
+        self.assertIn("the launcher failed 3 times in a row", printed)
+
+    def test_a_tunnel_that_does_not_come_back_is_retried_and_no_launcher_starts_without_an_address(self):
+        supervisor = self.supervisor(tunnel_command=[sys.executable, "-c", TUNNEL_ONCE, self.tunnel_starts],
+                                     launcher_lifetime=300)
+        printed = self.run_until_interrupt(supervisor, 1.5)
+        self.assertGreaterEqual(int(self.read_text(self.tunnel_starts)), 3)
+        self.assertIn("the tunnel did not come back", printed)
+        launched = [line.split()[1] for line in self.read_lines(self.launches)]
+        self.assertEqual(launched, ["10.0.0.1"], "only the launcher from the first, good tunnel start")
 
     def test_a_clean_stop_terminates_both_children_and_removes_the_runner_file(self):
         supervisor = self.supervisor(tunnel_lifetime=300, launcher_lifetime=300)
