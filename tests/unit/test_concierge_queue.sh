@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 # concierge queue: consent, claiming, the service-level clock, alerts, and the weekly report.
-# also holds the concierge-ops documents to the same house style as the package.
+# the house style check for concierge-ops lives in test_language.sh, with the other style rules.
 
 queue() {
   python3 "$REPO_DIR/concierge-ops/tools/concierge_queue.py" "$@"
@@ -155,17 +155,4 @@ test_monitoring_sample_is_the_real_report() {
   sample_week "$TEST_TMP/log"
   documented="$(sed -n '/^## Concierge service levels/,/concierge-2: 1 worked/p' "$REPO_DIR/concierge-ops/monitoring.md")"
   assert_eq "$documented" "$(queue report --log "$TEST_TMP/log" --from 2026-10-12 --to 2026-10-18)" "monitoring.md sample drifted from the tool"
-}
-
-test_concierge_documents_keep_the_house_style() {
-  local em pattern hits
-  em="$(printf '\342\200\224')"
-  pattern='\b(ACLs?|OS|CLI|UID|GID|PID|TODO|FIXME|IP|DNS|UTC|ISO|PIN|OTP|VM|VPN|TCP|UDP|EOF|TTY|CPU|YAML|CI|UI|IDs?|OK|SLA|SLO|PA|MCP|KB|T&S|PTO|W-2|1099|FAQ|ETA|KPI|ASAP|FYI)\b|\be\.g\.|\bi\.e\.'
-  hits="$(cd "$REPO_DIR" && find concierge-ops -type f | sort | while IFS= read -r file; do grep -n -E "$pattern" "$file" | sed "s|^|$file:|"; done)"
-  assert_eq "" "$hits" "acronyms found in concierge-ops; spell the term out"
-  # em-dashes sparingly: never more than one in a paragraph.
-  hits="$(cd "$REPO_DIR" && find concierge-ops -name '*.md' | sort | while IFS= read -r file; do
-    awk -v em="$em" -v file="$file" 'BEGIN { RS = "" } { n = gsub(em, em); if (n > 1) print file ": paragraph " NR " has " n }' "$file"
-  done)"
-  assert_eq "" "$hits" "more than one em-dash in a paragraph"
 }
