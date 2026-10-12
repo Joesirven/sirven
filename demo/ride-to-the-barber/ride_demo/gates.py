@@ -32,23 +32,36 @@ def copy_status(copy_path):
     return match.group(1).strip() if match else "missing"
 
 
+def approved(paths, repo_dir):
+    """files under concierge-ops/ count only once Jose approves them: a line reading
+    'status: approved', the same rule as the disclosure copy. a draft on disk is not in place."""
+    return [path for path in paths if copy_status(os.path.join(repo_dir, path)) == "approved"]
+
+
 def concierge_gate(repo_dir, copy_path):
     operations = os.path.join(repo_dir, "concierge-ops")
     monitoring = _find(operations, ("service-level", "service_level", "monitor"))
     protocol = _find(operations, ("trust",))
     status = copy_status(copy_path)
+
+    def found(paths, missing):
+        if not paths:
+            return missing
+        if approved(paths, repo_dir):
+            return ", ".join(approved(paths, repo_dir)) + " (approved)"
+        return ", ".join(paths) + " (a draft: in place once it carries 'status: approved', which is Jose's call)"
     items = [
         {
             "item": "service-level targets",
-            "in_place": bool(monitoring),
+            "in_place": bool(approved(monitoring, repo_dir)),
             "detail": ("targets of %d seconds to quote and %d to book are enforced in this demo; thread 10's "
                        "monitoring: %s" % (service_levels.QUOTE_TARGET_SECONDS, service_levels.BOOKING_TARGET_SECONDS,
-                                           ", ".join(monitoring) if monitoring else "not committed yet (thread 10)")),
+                                           found(monitoring, "not committed yet (thread 10)"))),
         },
         {
             "item": "concierge trust and safety protocol",
-            "in_place": bool(protocol),
-            "detail": ", ".join(protocol) if protocol else "not committed yet (thread 10, under concierge-ops/)",
+            "in_place": bool(approved(protocol, repo_dir)),
+            "detail": found(protocol, "not committed yet (thread 10, under concierge-ops/)"),
         },
         {
             "item": "user-facing disclosure of concierge involvement",

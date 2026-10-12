@@ -14,6 +14,7 @@ import tempfile
 import unittest
 
 DEMO_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+REPO_DIR = os.path.dirname(os.path.dirname(DEMO_DIR))
 sys.path.insert(0, DEMO_DIR)
 
 import demo  # noqa: E402
@@ -132,11 +133,22 @@ class GateTest(Temporary):
         os.makedirs(os.path.join(self.tmp, "concierge-ops"))
         self.assertFalse(gates.concierge_gate(self.tmp, copy)["open"])
         for name in ("service-level-monitoring.md", "trust-and-safety-protocol.md"):
-            open(os.path.join(self.tmp, "concierge-ops", name), "w").close()
-        self.assertFalse(gates.concierge_gate(self.tmp, copy)["open"])
+            with open(os.path.join(self.tmp, "concierge-ops", name), "w") as handle:
+                handle.write("status: draft for Jose's review\n")
         with open(copy, "w") as handle:
             handle.write("status: approved\n")
+        gate = gates.concierge_gate(self.tmp, copy)
+        self.assertFalse(gate["open"], "a draft protocol on disk must not open the gate")
+        self.assertEqual([False, False, True], [item["in_place"] for item in gate["items"]])
+        for name in ("service-level-monitoring.md", "trust-and-safety-protocol.md"):
+            with open(os.path.join(self.tmp, "concierge-ops", name), "w") as handle:
+                handle.write("status: approved\n")
         self.assertTrue(gates.concierge_gate(self.tmp, copy)["open"])
+
+    def test_the_merged_concierge_drafts_do_not_count_as_in_place(self):
+        gate = gates.concierge_gate(REPO_DIR, os.path.join(DEMO_DIR, "copy", "concierge-disclosure.md"))
+        self.assertFalse(gate["open"])
+        self.assertEqual([False, False, False], [item["in_place"] for item in gate["items"]])
 
     def test_the_repo_gate_is_closed_today(self):
         status = gates.copy_status(os.path.join(DEMO_DIR, "copy", "concierge-disclosure.md"))
