@@ -11,10 +11,11 @@ from ride_connector.schema import Validator  # noqa: E402
 
 VALIDATOR = Validator()
 
-ORIGIN = {"address": "1 Market St, San Francisco, California", "label": "office"}
-BARBER = {"address": "500 Valencia St, San Francisco, California", "label": "barber"}
 OFFICE_POINT = {"coordinates": {"latitude": 37.7936, "longitude": -122.3958}}
 BARBER_POINT = {"coordinates": {"latitude": 37.7647, "longitude": -122.4216}}
+# coordinates fix the fake's distance, so prices do not hinge on how the address is spelled.
+ORIGIN = dict(OFFICE_POINT, address="1 Market St, San Francisco, California", label="office")
+BARBER = dict(BARBER_POINT, address="500 Valencia St, San Francisco, California", label="barber")
 
 
 def window(clock, start_minutes=0, length_minutes=30):

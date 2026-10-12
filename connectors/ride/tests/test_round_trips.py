@@ -54,7 +54,10 @@ class QuoteTests(ConnectorCase, unittest.TestCase):
             self.assertEqual(not over, option["bookable"])
 
     def test_unbookable_options_rank_last(self):
-        payload = self.quote(budget=1500)
+        caps = sorted(o["charge_terms"]["authorization_cap"]["amount_minor"] for o in self.quote()["options"])
+        payload = self.quote(budget=caps[len(caps) // 2])
+        self.assertTrue(any(o["bookable"] for o in payload["options"]))
+        self.assertFalse(all(o["bookable"] for o in payload["options"]))
         seen_unbookable = False
         for option in payload["options"]:
             seen_unbookable = seen_unbookable or not option["bookable"]
@@ -215,7 +218,8 @@ class BookTests(ConnectorCase, unittest.TestCase):
         self.assertEqual("quote_not_found", self.error_code("book_ride", {"quote_id": "qt_" + "a" * 26}))
 
     def test_over_budget_option_is_refused(self):
-        option = self.first(self.quote(budget=1500), bookable=False)
+        caps = sorted(o["charge_terms"]["authorization_cap"]["amount_minor"] for o in self.quote()["options"])
+        option = self.first(self.quote(budget=caps[-1] - 1), bookable=False)
         self.assertIn("over_budget", option["constraint_flags"])
         self.assertEqual("over_budget", self.error_code("book_ride", {"quote_id": option["quote_id"]}))
 
@@ -372,7 +376,8 @@ class CancelTests(ConnectorCase, unittest.TestCase):
 
     def test_a_started_trip_cannot_be_cancelled(self):
         booking = self.book()
-        self.clock.advance(minutes=15)
+        while self.clock().isoformat(timespec="seconds") < booking["estimated_pickup_at"]:
+            self.clock.advance(minutes=1)
         payload = self.call("cancel_ride", {"booking_id": booking["booking_id"]}, expect_error=True)
         self.assertEqual("not_cancellable", payload["error"]["code"])
         self.assertEqual("in_progress", payload["error"]["booking"]["status"])
