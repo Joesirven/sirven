@@ -19,6 +19,9 @@ subcommands (bin/sirven phone passes its arguments here)
                          the owner opens a phone session. asks for a typed yes on a terminal
   stop                   the owner ends the phone session now
   status                 the session, the device, and WebDriverAgent readiness
+  start                  run the phone runner: the tunnel and the launcher that keep WebDriverAgent
+                         running on the phone, restarted when they stop. Ctrl-C stops both.
+                         needs SIRVEN_PHONE_RUNNER_BUNDLE set to the runner's bundle identifier
   serve [--port N]       run the local interface on 127.0.0.1 for the agent
   log [--json]           every agent action on the phone, in plain language
   holds                  actions waiting for the owner's approval
@@ -37,11 +40,14 @@ state lives in SIRVEN_PHONE_DIR (default ~/.sirven/phone), owned by the owner, m
   holds/         one file per held action
   map.json       the semantic map from onboarding: apps, screens, and controls, never a
                  screenshot, a value, or anything from a sign in screen
+  runner.json    while sirven phone start runs: the process identifiers of its tunnel and
+                 launcher, and when it started
 
 the interface itself is described in docs/phone-interface.md.
 """
 
 import base64
+import collections
 import datetime
 import http.client
 import http.server
@@ -50,8 +56,10 @@ import os
 import plistlib
 import re
 import secrets
+import signal
 import socket
 import struct
+import subprocess
 import sys
 import threading
 import time
@@ -68,6 +76,7 @@ APPROVAL_MINUTES = 5
 # WebDriverAgent as iPhone-use pins it. fetched by the owner at setup time, never bundled.
 WEBDRIVERAGENT_REPOSITORY = "https://github.com/appium/WebDriverAgent.git"
 WEBDRIVERAGENT_COMMIT = "d17782422d55ff1e5e0ceb74eb1fd509cc0c35b6"
+WEBDRIVERAGENT_RELEASE = "v16.14.0"
 
 # a tap on something labeled like this could commit money or a booking. it waits for the
 # owner's approval. a heuristic, so the agent can also mark any action money-bearing itself.
@@ -435,6 +444,269 @@ def element_named(elements, label):
 def centre(element):
     x, y, width, height = element["frame"]
     return round(x + width / 2, 1), round(y + height / 2, 1)
+
+
+# the phone runner --------------------------------------------------------------------------
+# two long-running processes keep WebDriverAgent running on the phone, with no full Xcode at
+# run time. the tunnel (pymobiledevice3 remote start-tunnel --native) prints the remote service
+# discovery address, and the launcher (pymobiledevice3 developer dvt xcuitest) starts the
+# runner through it. a tunnel that restarts prints a new address, so the launcher restarts too.
+
+PYMOBILEDEVICE3_VERSION = "11.28.2"
+MISSING_TOOL = ("pymobiledevice3 was not found on PATH. install it once with the Python tool installer, uv "
+                "(needs Python 3.12 or newer): uv tool install pymobiledevice3==" + PYMOBILEDEVICE3_VERSION)
+RUNNER_BUNDLE_VARIABLE = "SIRVEN_PHONE_RUNNER_BUNDLE"
+RUNNER_FILE = "runner.json"
+TUNNEL_COMMAND = ["pymobiledevice3", "remote", "start-tunnel", "--native"]
+TUNNEL_ADDRESS = re.compile(r"RSD Address: (\S+)$")
+TUNNEL_PORT = re.compile(r"RSD Port: (\d+)$")
+TUNNEL_WAIT_SECONDS = 60
+BACKOFF_START_SECONDS = 1
+BACKOFF_CAP_SECONDS = 30
+STABLE_SECONDS = 60
+POLL_SECONDS = 0.5
+STOP_SECONDS = 5
+RECENT_LINES = 200
+OUTPUT_JOIN_SECONDS = 2
+
+
+def tunnel_endpoint(lines):
+    """the address and port the tunnel printed, or None until it has printed both."""
+    address = port = None
+    for line in lines:
+        found = TUNNEL_ADDRESS.match(line.strip())
+        if found:
+            address = found.group(1)
+        found = TUNNEL_PORT.match(line.strip())
+        if found:
+            port = found.group(1)
+    return (address, port) if address and port else None
+
+
+def launcher_argv(bundle, address, port):
+    return ["pymobiledevice3", "developer", "dvt", "xcuitest", bundle, "--rsd", address, port]
+
+
+def process_alive(process_id):
+    if not isinstance(process_id, int) or process_id <= 0:
+        return False
+    try:
+        os.kill(process_id, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def runner_status():
+    """the tunnel and the launcher, each running or not, read from the runner file.
+    a missing or stale file says not running."""
+    record = read_json(state_file(RUNNER_FILE))
+    if not isinstance(record, dict):
+        record = {}
+    return {name: "running" if process_alive(record.get(name)) else "not running" for name in ("tunnel", "launcher")}
+
+
+def interrupt(signum, frame):
+    raise KeyboardInterrupt()
+
+
+class Child:
+    """one long-running process. a thread reads its output, so its pipe never fills."""
+
+    def __init__(self, command, clock):
+        try:
+            self.process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                            text=True, errors="replace")
+        except FileNotFoundError:
+            raise Refusal("missing_tool", MISSING_TOOL, 1)
+        self.clock = clock
+        self.started = clock()
+        self.recent = collections.deque(maxlen=RECENT_LINES)
+        self.lock = threading.Lock()
+        self.reader = threading.Thread(target=self._drain, daemon=True)
+        self.reader.start()
+
+    def _drain(self):
+        for line in self.process.stdout:
+            with self.lock:
+                self.recent.append(line.rstrip("\n"))
+
+    def lines(self):
+        with self.lock:
+            return list(self.recent)
+
+    def alive(self):
+        return self.process.poll() is None
+
+    def exited(self):
+        """true once the process has ended, after its last output has been read."""
+        if self.process.poll() is None:
+            return False
+        self.reader.join(OUTPUT_JOIN_SECONDS)
+        return True
+
+    def uptime(self):
+        return self.clock() - self.started
+
+    def stop(self, seconds):
+        if self.process.poll() is None:
+            self.process.terminate()
+            try:
+                self.process.wait(timeout=seconds)
+            except subprocess.TimeoutExpired:
+                self.process.kill()
+                self.process.wait()
+        self.reader.join(OUTPUT_JOIN_SECONDS)
+        self.process.stdout.close()
+
+
+class Backoff:
+    """the wait before a restart: it starts at the first value, doubles, and is capped. a process
+    that stayed up for the stable time starts again from the first value."""
+
+    def __init__(self, start, cap, stable):
+        self.start = start
+        self.cap = cap
+        self.stable = stable
+        self.delay = start
+
+    def next_wait(self, uptime):
+        if uptime >= self.stable:
+            self.delay = self.start
+        wait = self.delay
+        self.delay = min(self.delay * 2, self.cap)
+        return wait
+
+
+class RunnerSupervisor:
+    """starts the tunnel and the launcher, watches both, and restarts whichever stopped. the
+    commands and the timing are arguments, so tests run small fake processes instead."""
+
+    def __init__(self, bundle, tunnel_command=TUNNEL_COMMAND, build_launcher=launcher_argv,
+                 backoff_start=BACKOFF_START_SECONDS, backoff_cap=BACKOFF_CAP_SECONDS,
+                 stable_seconds=STABLE_SECONDS, poll_seconds=POLL_SECONDS,
+                 tunnel_wait_seconds=TUNNEL_WAIT_SECONDS, stop_seconds=STOP_SECONDS,
+                 clock=time.monotonic, sleep=time.sleep):
+        self.bundle = bundle
+        self.tunnel_command = tunnel_command
+        self.build_launcher = build_launcher
+        self.tunnel_backoff = Backoff(backoff_start, backoff_cap, stable_seconds)
+        self.launcher_backoff = Backoff(backoff_start, backoff_cap, stable_seconds)
+        self.poll_seconds = poll_seconds
+        self.tunnel_wait_seconds = tunnel_wait_seconds
+        self.stop_seconds = stop_seconds
+        self.clock = clock
+        self.sleep = sleep
+        self.tunnel = None
+        self.launcher = None
+        self.endpoint = None
+        self.started = None
+
+    def run(self):
+        previous = signal.signal(signal.SIGTERM, interrupt)
+        try:
+            self.start()
+            self.supervise()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            signal.signal(signal.SIGTERM, previous)
+            self.stop()
+        print("the phone runner stopped", flush=True)
+
+    def start(self):
+        self.started = stamp(now())
+        self.tunnel, self.endpoint = self._start_tunnel()
+        self.launcher = self._start_launcher()
+        self._record()
+        print("the phone runner is up: the tunnel and the launcher are running. Ctrl-C stops both", flush=True)
+
+    def supervise(self):
+        while True:
+            self.sleep(self.poll_seconds)
+            if self.tunnel is None or not self.tunnel.alive():
+                self._restart_tunnel()
+            elif self.launcher is None or not self.launcher.alive():
+                self._restart_launcher()
+
+    def stop(self):
+        for child in (self.launcher, self.tunnel):
+            if child is not None:
+                child.stop(self.stop_seconds)
+        self.launcher = self.tunnel = None
+        if os.path.exists(state_file(RUNNER_FILE)):
+            os.remove(state_file(RUNNER_FILE))
+
+    def _start_tunnel(self):
+        tunnel = Child(self.tunnel_command, self.clock)
+        deadline = self.clock() + self.tunnel_wait_seconds
+        while True:
+            exited = tunnel.exited()
+            endpoint = tunnel_endpoint(tunnel.lines())
+            if endpoint:
+                return tunnel, endpoint
+            if exited or self.clock() >= deadline:
+                tunnel.stop(self.stop_seconds)
+                raise Refusal(
+                    "tunnel_no_address",
+                    "the tunnel %s its remote service discovery address; check that the phone is plugged in and "
+                    "unlocked, and that Developer Mode is on" % ("stopped before it printed"
+                                                              if exited else "did not print"),
+                    503,
+                )
+            self.sleep(self.poll_seconds)
+
+    def _start_launcher(self):
+        return Child(self.build_launcher(self.bundle, *self.endpoint), self.clock)
+
+    def _restart_tunnel(self):
+        uptime = self.tunnel.uptime() if self.tunnel is not None else 0
+        print("the tunnel to the phone stopped; the launcher stops with it, and both start again", flush=True)
+        if self.launcher is not None:
+            self.launcher.stop(self.stop_seconds)
+        if self.tunnel is not None:
+            self.tunnel.stop(self.stop_seconds)
+        self.tunnel = self.launcher = None
+        self.sleep(self.tunnel_backoff.next_wait(uptime))
+        try:
+            self.tunnel, self.endpoint = self._start_tunnel()
+            self.launcher = self._start_launcher()
+        except Refusal as refusal:
+            print("the tunnel did not come back: %s. trying again" % refusal.said, flush=True)
+            return
+        self._record()
+        print("the tunnel and the launcher are running again", flush=True)
+
+    def _restart_launcher(self):
+        uptime = self.launcher.uptime() if self.launcher is not None else 0
+        print("the launcher stopped; starting it again", flush=True)
+        if self.launcher is not None:
+            self.launcher.stop(self.stop_seconds)
+        self.launcher = None
+        self.sleep(self.launcher_backoff.next_wait(uptime))
+        try:
+            self.launcher = self._start_launcher()
+        except Refusal as refusal:
+            print("the launcher did not start: %s. trying again" % refusal.said, flush=True)
+            return
+        self._record()
+        print("the launcher is running again", flush=True)
+
+    def _record(self):
+        record = {"supervisor": os.getpid(), "tunnel": self.tunnel.process.pid,
+                  "launcher": self.launcher.process.pid, "started": self.started}
+        write_private(state_file(RUNNER_FILE), json.dumps(record, indent=2, sort_keys=True) + "\n")
+
+
+def command_start():
+    bundle = os.environ.get(RUNNER_BUNDLE_VARIABLE, "")
+    if not re.fullmatch(r"[A-Za-z0-9.-]+", bundle):
+        fail("set %s to the runner's bundle identifier: the bundle name you gave sirven phone setup with --bundle, "
+             "with .xctrunner added, for example com.yourname.WebDriverAgentRunner.xctrunner" % RUNNER_BUNDLE_VARIABLE,
+             64)
+    RunnerSupervisor(bundle).run()
 
 
 # consent -----------------------------------------------------------------------------------
@@ -1167,6 +1439,9 @@ def main(arguments):
             return 0
         if command == "stop":
             command_stop()
+            return 0
+        if command == "start":
+            command_start()
             return 0
         if command == "serve":
             serve(int(options.get("--port", DEFAULT_PORT)))
