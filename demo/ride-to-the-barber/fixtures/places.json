@@ -1,0 +1,13 @@
+{
+  "substitution": "Fixture saved places. A live fire reads the user's own saved places.",
+  "places": {
+    "barber": {
+      "name": "Mission Street Barbers",
+      "address": "2400 Mission St, San Francisco, CA 94110"
+    },
+    "home": {
+      "name": "Home",
+      "address": "1 Dolores St, San Francisco, CA 94103"
+    }
+  }
+}
