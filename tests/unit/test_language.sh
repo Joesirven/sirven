@@ -5,8 +5,8 @@
 package_files() {
   (
     cd "$REPO_DIR" || exit 1
-    for path in install.sh uninstall.sh Makefile bin README.md docs/PERMISSIONS.md docs/runtime-interface.md docs/allowlist-review.md allowlist lib levels tests docs/app-interfaces.md app copy docs/connector docs/MENU-BAR.md macos; do
-      [ -e "$path" ] && find "$path" -type f -not -path '*/.build/*' -not -path '*/build/*'
+    for path in install.sh uninstall.sh Makefile bin README.md docs/PERMISSIONS.md docs/runtime-interface.md docs/allowlist-review.md allowlist lib levels tests docs/app-interfaces.md app copy docs/connector docs/MENU-BAR.md macos docs/DOWNLOAD-AND-ONBOARDING.md site; do
+      [ -e "$path" ] && find "$path" -type f -not -path '*/.build/*' -not -path '*/build/*' -not -path '*/.swiftpm/*'
     done
   ) | grep -v '^tests/unit/test_language.sh$' | sort
 }
