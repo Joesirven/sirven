@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- hardened runtime with no exceptions: no unsigned code, no library injection, no
+     debugger attachment. add an entitlement here only with a comment saying which feature
+     needs it and why. -->
+<plist version="1.0">
+<dict/>
+</plist>

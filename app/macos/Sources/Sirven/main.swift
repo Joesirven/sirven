@@ -11,6 +11,7 @@ import SwiftUI
 //                              endpoint, nothing saved to your real settings
 //   Sirven --snapshot <dir>    render each wizard step to a PNG in <dir>, then quit
 //   Sirven --reset-onboarding  forget the saved result, so the wizard shows again
+//   Sirven --render-icon <dir> write AppIcon.iconset into <dir> (build.sh uses it), then quit
 
 let arguments = CommandLine.arguments
 
@@ -157,6 +158,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     image.isTemplate = true
     return image
   }
+}
+
+// the app icon: the sirven mark in white on the accent, on the rounded square macOS expects,
+// drawn from the same SirvenMark the wizard uses so the two can never drift.
+struct AppIcon: View {
+  var body: some View {
+    ZStack {
+      RoundedRectangle(cornerRadius: 230, style: .continuous)
+        .fill(Theme.accent)
+        .frame(width: 824, height: 824)
+        .shadow(color: .black.opacity(0.18), radius: 20, y: 10)
+      SirvenMark(lineWidth: 44).foregroundColor(.white).frame(width: 440, height: 440)
+    }
+    .frame(width: 1024, height: 1024)
+  }
+}
+
+@MainActor
+func renderIcon(into directory: URL) {
+  let iconset = directory.appendingPathComponent("AppIcon.iconset", isDirectory: true)
+  try? FileManager.default.createDirectory(at: iconset, withIntermediateDirectories: true)
+  for points in [16, 32, 128, 256, 512] {
+    for scale in [1, 2] {
+      let renderer = ImageRenderer(content: AppIcon())
+      renderer.scale = CGFloat(points * scale) / 1024
+      let name = scale == 1 ? "icon_\(points)x\(points).png" : "icon_\(points)x\(points)@2x.png"
+      guard let image = renderer.cgImage else { exit(1) }
+      let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])
+      try? png?.write(to: iconset.appendingPathComponent(name))
+    }
+  }
+  print(iconset.path)
+}
+
+if let directory = argument(after: "--render-icon") {
+  MainActor.assumeIsolated { renderIcon(into: URL(fileURLWithPath: directory)) }
+  exit(0)
 }
 
 if let directory = argument(after: "--snapshot") {

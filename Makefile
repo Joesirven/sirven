@@ -4,22 +4,32 @@
 #   make test       run tests/run.sh
 #   make lint       bash -n on every shell file, then shellcheck when it is installed
 #   make package    a tarball of the files git tracks, in dist/ (or DIST=path)
+#   make app        the macOS app and its disk image, ad-hoc signed, in dist/macos (macOS only)
+#   make app-test   the onboarding wizard's Swift tests (macOS only)
 
 SHELL := /bin/sh
 PACKAGE := $(shell sed -n 's/^[[:space:]]*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' project.json | head -n 1 | tr '[:upper:]' '[:lower:]')
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo unversioned)
 DIST ?= dist
-SHELL_FILES := install.sh uninstall.sh bin/sirven $(wildcard lib/*.sh) tests/run.sh tests/golden/run.sh $(wildcard tests/lib/*.sh) $(wildcard tests/unit/*.sh)
+SHELL_FILES := install.sh uninstall.sh bin/sirven app/macos/build.sh $(wildcard lib/*.sh) tests/run.sh tests/golden/run.sh $(wildcard tests/lib/*.sh) $(wildcard tests/unit/*.sh)
 
-.PHONY: help test lint package
+.PHONY: help test lint package app app-test
 
 help:
 	@echo "make test      run every test: tests/run.sh"
 	@echo "make lint      bash -n on every shell file, then shellcheck if it is installed"
 	@echo "make package   $(DIST)/$(PACKAGE)-$(VERSION).tar.gz from the files git tracks"
+	@echo "make app       dist/macos/Sirven.app and its disk image, ad-hoc signed (release: app/macos/build.sh --release)"
+	@echo "make app-test  the onboarding wizard's Swift tests"
 
 test:
 	bash tests/run.sh
+
+app:
+	bash app/macos/build.sh
+
+app-test:
+	swift test --package-path app/macos
 
 lint:
 	@for file in $(SHELL_FILES); do bash -n "$$file" || exit 1; done
