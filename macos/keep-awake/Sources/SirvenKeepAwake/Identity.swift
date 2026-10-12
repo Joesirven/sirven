@@ -16,7 +16,7 @@ public enum KeepAwakeIdentity {
     public static let helperPlistName = "xyz.sirven.keep-awake-helper.plist"
 
     /// the code signing requirement the helper places on anyone who connects to it. the release
-    /// build adds the team identifier from the Developer ID certificate.
+    /// build adds the team identifier from the Apple signing certificate for apps sold outside the App Store.
     public static let clientRequirement = "identifier \"\(appBundleIdentifier)\" and anchor apple generic"
 
     /// what the user runs (or clicks) to release the hold at once.

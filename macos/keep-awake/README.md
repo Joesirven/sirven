@@ -107,9 +107,9 @@ make test-keep-awake     swift test: the lifecycle against fakes, plus one real 
 make test                includes tests/unit/test_keep_awake.sh, which runs against the real
                          system when the program is built, and skips otherwise
 scripts/build-app.sh     a development Sirven.app with the helper inside, signed ad hoc unless
-                         SIRVEN_SIGNING_IDENTITY names a Developer ID certificate
+                         SIRVEN_SIGNING_IDENTITY names an Apple signing certificate for apps sold outside the App Store
 ```
 
 The helper is never registered by the build or the tests. Registering it needs the app signed with
-a Developer ID certificate, and the release build must add that certificate's team identifier to
+an Apple signing certificate for apps sold outside the App Store, and the release build must add that certificate's team identifier to
 `KeepAwakeIdentity.clientRequirement`.

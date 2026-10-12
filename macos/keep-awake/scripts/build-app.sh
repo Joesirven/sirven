@@ -4,7 +4,7 @@
 #
 #   macos/keep-awake/scripts/build-app.sh [output folder]     (default: macos/keep-awake/.build/app)
 #
-# SIRVEN_SIGNING_IDENTITY names a Developer ID Application certificate in the keychain. without it
+# SIRVEN_SIGNING_IDENTITY names an Apple signing certificate for apps sold outside the App Store, in the keychain. without it
 # the bundle is signed ad hoc, which is enough to inspect the layout but not to register the helper:
 # the system only runs a registered daemon from a properly signed app.
 set -euo pipefail
