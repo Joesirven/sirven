@@ -18,9 +18,9 @@ from . import service_levels
 from .concierge_queue import ConciergeQueue, QueueError, now
 
 RULES = (
-    "you may see: the pickup, the destination, the time window, and the user's consent; at booking, the card's last four digits and limit",
-    "never: contact the user yourself, keep or share the trip, or use the card for anything but this ride",
-    "never: book another service, another time, or above the card's limit; decline and say why instead",
+    "you may see: the pickup, the destination, the time window, and the user's consent; at booking, the price cap the user approved",
+    "never: contact the user yourself, or keep or share the trip",
+    "never: book another service, another time, or above the cap; decline and say why instead",
     "anything unsafe or unclear: decline with the reason; sirven tells the user, honestly",
 )
 
@@ -52,8 +52,7 @@ def describe_request(request):
     ]
     if "payment" in request:
         payment = request["payment"]
-        lines.append("  pay with:    %s card ending %s, limit %s, ride services only" % (
-            payment["mode"], payment["last4"], dollars_from_minor(payment["spending_limit_minor"])))
+        lines.append("  cap:         %s; %s" % (dollars_from_minor(payment["cap_minor"]), payment["note"]))
     return lines
 
 
@@ -81,7 +80,7 @@ def decline(queue, request_id, reason):
 class ScriptedOperator:
     """a timed stand-in for the person at the console, for the recorded run and the tests.
     scenario normal answers inside both targets; late_quote claims and then never quotes;
-    fare_over_cap reports a fare above the card's limit."""
+    fare_over_cap reports a fare above the cap the user approved."""
 
     def __init__(self, queue, name, say, scenario="normal", delays=(2, 6, 2, 14), poll_seconds=0.2):
         self.queue = queue

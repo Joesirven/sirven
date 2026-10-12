@@ -13,7 +13,7 @@ of a state it is waiting on, so a late answer can never overwrite a timeout.
   waiting_quote      agent       the trip, the user's consent, and the time it was asked
   quote_claimed      concierge   a named concierge took it; the name is shown to the user
   quoted             concierge   the price, pickup, and trip time the concierge saw
-  waiting_booking    agent       the user approved; the capped test card is attached
+  waiting_booking    agent       the user approved; the cap and a note that there is no payment method
   booking_claimed    concierge   the concierge is booking
   booked             concierge   the confirmation code and the fare actually charged
   declined           concierge   the concierge could not do it, with a reason

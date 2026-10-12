@@ -40,7 +40,7 @@ RIDE_APPS = {"Uber": "com.ubercab.UberClient", "Lyft": "com.zimride.instant"}
 
 # product words to the contract's vehicle classes. anything unknown is standard.
 VEHICLE_CLASSES = (
-    (re.compile(r"\b(xl|xxl|suv|large)\b", re.IGNORECASE), "large"),
+    (re.compile(r"(xl|xxl|\bsuv|\blarge)\b", re.IGNORECASE), "large"),
     (re.compile(r"\b(comfort|preferred|extra comfort)\b", re.IGNORECASE), "comfort"),
     (re.compile(r"\b(black|lux|premier|premium|select)\b", re.IGNORECASE), "premium"),
     (re.compile(r"\b(wav|assist|access)\b", re.IGNORECASE), "accessible"),

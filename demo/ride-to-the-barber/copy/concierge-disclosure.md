@@ -17,9 +17,8 @@ Placeholders in braces are filled in by the agent at run time.
 
 Waymo rides are booked for you by a person on the sirven team (a concierge). To get a price
 and book, they will see your pickup ({origin}), where you are going ({destination}), and when
-({window}). They will not see your calendar or anything else about you. If you book, they pay
-with the one-time card for this ride, which they see only as its last four digits and its
-limit. Is that all right?
+({window}). They will not see your calendar or anything else about you. If you book, they also
+see the most you agreed to pay, and they book nothing above it. Is that all right?
 
 ## declined-consent
 
@@ -28,7 +27,7 @@ Understood. No one will see this trip. I will only show options I can book witho
 ## consent-before-booking
 
 Book {product} for {price}? Pickup about {pickup} at {origin}, arriving about {arrival}.
-A one-time card limited to {cap}, for ride services only, pays for it. {booked_by_line}
+Nothing above {cap} is booked. {booked_by_line}
 
 ## booked-by-concierge-line
 

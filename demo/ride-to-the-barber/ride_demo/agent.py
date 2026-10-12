@@ -5,7 +5,9 @@
   3. ask before a person sees the trip (the concierge disclosure)
   4. quote through the connector; pick the preferred service under the budget
   5. ask before booking: Solo asks before every real-world action
-  6. hold a capped test card, book through the connector, authorize the fare
+  6. write a charge record (the quote, the cap, and why), then book through the connector. on
+     the phone path the owner approves that one purchase live, twice: the bridge's hold, then
+     the phone's own face recognition or Apple Pay prompt. no card is held anywhere.
   7. write the booking to the calendar with tracking and the cancellation window
 
 the agent never decides which backend to use and never learns which one answered.
@@ -19,11 +21,15 @@ from datetime import datetime, timedelta
 
 from . import gates, request, service_levels
 from .calendar_source import FixtureCalendar, after_window, clock_time
+from .charges import ChargeRecords
 from .concierge_backend import ConciergeBackend
 from .concierge_queue import ConciergeQueue
 from .connector import ConnectorError, Router, dollars, money
-from .partner_backend import FixturePartnerBackend
-from .payment import TestModeCards
+from .phone_backend import PhoneBackend
+from .rehearsal_phone import RehearsalPhone
+
+import phone_crawler  # noqa: E402  (lib/, put on the path by rehearsal_phone)
+import phone_map  # noqa: E402
 
 DEMO_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REPO_DIR = os.path.dirname(os.path.dirname(DEMO_DIR))
@@ -34,9 +40,9 @@ ARRIVE_EARLY_MINUTES = 5
 
 SUBSTITUTIONS = (
     ("thread 08, ride connector contract", "ride_demo/connector.py: the three-call shape from the thread instructions; no published schemas yet"),
-    ("thread 09, official-partner backend", "ride_demo/partner_backend.py: Uber and Lyft from a recorded fixture with invented prices"),
+    ("the owner's iPhone and the phone bridge", "ride_demo/rehearsal_phone.py: an in-memory phone with Uber and Lyft (fixtures/rehearsal-phone.json, invented prices) that keeps the bridge's hold and payment sheet rules; the real ride backend drives it"),
+    ("the owner approving on the phone", "the demo's questions: sirven phone approve for the held tap, then the phone's own Apple Pay prompt; with --yes, both are answered yes on screen"),
     ("thread 10, concierge queue and protocol", "ride_demo/concierge_queue.py and console.py: a file queue and the floor of the trust and safety rules"),
-    ("thread 11, per-booking virtual cards", "ride_demo/payment.py: an in-memory test card; no Stripe call of any kind"),
     ("the user's calendar", "fixtures/calendar.json, written back to a copy and a .ics file in the run's state directory"),
     ("the language model reading the request", "ride_demo/request.py: fixed patterns for the demo sentence"),
     ("the Waymo app", "a person at the concierge console types what the app would show; in a recorded run, a scripted operator does"),
@@ -47,6 +53,10 @@ EXIT_REFUSED = 2
 EXIT_USER_DECLINED = 3
 EXIT_BOOKING_FAILED = 4
 EXIT_NOTHING_BOOKABLE = 5
+
+PHONE_APPS = ("Uber", "Lyft")
+PHONE_BOOKING_LINE = ("Then sirven holds the request until you approve it (sirven phone approve), and your phone "
+                      "asks you itself, with face recognition or Apple Pay, for this one ride.")
 
 
 def load_copy(path=COPY_PATH):
@@ -71,13 +81,16 @@ class Asker:
     def __call__(self, question, kind):
         self.recorder.say("")
         self.recorder.say("  ? " + question)
+        # the phone's own prompt is answered on the phone, never by sirven; in the rehearsal the
+        # person at the terminal (or --yes) plays the owner holding it
+        on_phone = " on the phone" if kind == "phone_payment" else ""
         if kind == "concierge" and self.refuse_concierge:
             answer, how = False, "no (answered by --no-concierge)"
         elif self.yes:
-            answer, how = True, "yes (answered by --yes, for the recording)"
+            answer, how = True, "yes%s (answered by --yes, for the recording)" % on_phone
         elif self.interactive:
-            answer = input("    yes or no: ").strip().lower().startswith("y")
-            how = "yes" if answer else "no"
+            answer = input("    yes or no%s: " % on_phone).strip().lower().startswith("y")
+            how = ("yes" if answer else "no") + on_phone
         else:
             answer, how = False, "no (no terminal to ask and no --yes)"
         self.recorder.say("    " + how)
@@ -85,15 +98,36 @@ class Asker:
         return answer
 
 
-def build_router(state_dir, recorder, quote_wait, booking_wait):
-    cards = TestModeCards(os.path.join(state_dir, "charge-records.json"))
+def onboard(phone, recorder):
+    """the owner's onboarding, run on the rehearsal phone with the real crawler, into a map kept
+    in memory. the ride backend then finds each app's destination field through that map."""
+    the_map = phone_map.empty_map()
+    try:
+        summaries = phone_crawler.onboard(phone.driver(), the_map, PHONE_APPS,
+                                          datetime.now().astimezone().isoformat(timespec="seconds"))
+    except phone_crawler.CrawlStopped as stopped:
+        # an unfinished map is not used: the phone backend then reports itself unavailable
+        recorder.say("onboarding the rehearsal phone stopped: %s" % stopped.said, who="phone")
+        return None
+    phone.the_map = the_map
+    mapped = ", ".join("%s %d screens" % (s["name"], s["screens"]) if "screens" in s else "%s %s" % (s["name"], s["result"])
+                       for s in summaries)
+    fields = [name for name in PHONE_APPS if phone_map.find(the_map, name, "destination_field")]
+    recorder.say("onboarded the rehearsal phone with the real crawler, map kept in memory: %s; destination field "
+                 "found through the map in %s" % (mapped, ", ".join(fields) or "no app"), who="phone")
+    recorder.event("phone_onboarded", summaries=summaries)
+    return the_map
+
+
+def build_router(state_dir, recorder, quote_wait, booking_wait, ask):
     queue = ConciergeQueue(os.path.join(state_dir, "concierge-queue"))
     concierge = ConciergeBackend(
-        queue, cards, os.path.join(state_dir, "service-levels.jsonl"),
+        queue, os.path.join(state_dir, "service-levels.jsonl"),
         notify=lambda line: recorder.say(line, who="backend"), quote_wait_seconds=quote_wait,
         booking_wait_seconds=booking_wait)
-    partner = FixturePartnerBackend(os.path.join(FIXTURES, "partner-quotes.json"))
-    return Router([concierge, partner]), cards, concierge
+    phone = RehearsalPhone(ask)
+    onboard(phone, recorder)
+    return Router([concierge, PhoneBackend(phone)]), concierge
 
 
 def option_line(option):
@@ -138,7 +172,7 @@ def run(args, recorder):
     os.makedirs(state_dir, exist_ok=True)
 
     say("sirven rehearsal: one request, end to end. tier: Solo.")
-    say("no real booking, no real money, no real Waymo account. the first live fire is Jose's.")
+    say("no real booking, no real money, no real phone, no real Waymo account. the first live fire is Jose's.")
     say("")
     say("stand-ins in this run (each is marked SUBSTITUTION in its file):")
     for what, how in SUBSTITUTIONS:
@@ -153,7 +187,8 @@ def run(args, recorder):
 
     if args.live:
         say("")
-        say("refusing a live fire: this build has no live backend, no live card, and no real Waymo account,")
+        say("refusing a live fire: this build drives no real phone, has no payment method for the concierge path,")
+        say("and has no real Waymo account,")
         say("and the human-concierge gate is %s. see the README's list of what remains." % (
             "open" if concierge_gate["open"] else "closed"))
         return EXIT_REFUSED
@@ -204,7 +239,8 @@ def run(args, recorder):
     budget = money(intent["budget_ceiling_minor"])
 
     # 4. quote
-    router, cards, concierge = build_router(state_dir, recorder, args.quote_wait, args.booking_wait)
+    router, concierge = build_router(state_dir, recorder, args.quote_wait, args.booking_wait, ask)
+    charges = ChargeRecords(os.path.join(state_dir, "charge-records.json"))
     say("")
     say("agent: quote_ride(%s -> %s, leave %s, prefer %s, under %s)" % (
         meeting["location"], destination, window_text, ", ".join(intent["preferred_providers"]) or "nothing", dollars(budget)))
@@ -240,41 +276,45 @@ def run(args, recorder):
     arrival = pickup + timedelta(minutes=chosen["estimated_trip_minutes"])
     concierge_backed = chosen["provider"] == "Waymo"
     question = copy["consent-before-booking"].format(
-        product=chosen["product"], price=dollars(chosen["price"]), pickup=clock_time(pickup),
+        product=name, price=dollars(chosen["price"]), pickup=clock_time(pickup),
         origin=meeting["location"], arrival=clock_time(arrival), cap=dollars(money(cap)),
-        booked_by_line=copy["booked-by-concierge-line"] if concierge_backed else "").strip()
+        booked_by_line=copy["booked-by-concierge-line"] if concierge_backed else PHONE_BOOKING_LINE).strip()
     if not ask(question, "booking"):
-        say("agent: not booked. nothing was held or charged.")
+        say("agent: not booked. nothing was paid.")
         return EXIT_USER_DECLINED
 
-    # 6. hold, book, authorize
-    card = cards.hold(chosen, reason)
-    say("agent: held test card %s ending %s, limit %s, ride services only" % (
-        card["card_id"], card["last4"], dollars(money(card["spending_limit_minor"]))))
-    recorder.event("card_held", card_id=card["card_id"], limit_minor=card["spending_limit_minor"])
+    # 6. the charge record, then the booking
+    record = charges.write(chosen, cap, reason)
+    say("agent: charge record %s: %s at %s, cap %s, and why. no card is held for it." % (
+        record["record_id"], name, dollars(chosen["price"]), dollars(money(cap))))
+    recorder.event("charge_record_written", record_id=record["record_id"], cap_minor=cap)
     say("agent: book_ride(%s)" % chosen["quote_id"])
     try:
         booking = router.book_ride(chosen["quote_id"], idempotency_key=str(uuid.uuid4()))
     except ConnectorError as error:
-        cards.release(card["card_id"], error.code)
+        charges.not_booked(record["record_id"], error.code)
         recorder.event("booking_failed", code=error.code, message=str(error))
         say("agent: the booking did not go through (%s): %s" % (error.code, error))
         if error.seen_by:
             tell_who_saw(say, copy, {"seen_by": error.seen_by})
-        say("agent: I released the card; nothing was charged. I have not booked anything else.")
+        say("agent: nothing was paid, and the charge record says so. I have not booked anything else.")
         fallback = choose([option for option in quotes["options"] if option["quote_id"] != chosen["quote_id"]])
         if fallback:
             say("agent: if you want, I can book option %d (%s %s, %s) instead; I will ask first." % (
                 fallback["rank"], fallback["provider"], fallback["product"], dollars(fallback["price"])))
         say_service_levels(recorder, concierge)
         return EXIT_BOOKING_FAILED
-    cards.attach_booking(card["card_id"], booking["booking_id"])
+    record = charges.booked(record["record_id"], booking)
     recorder.event("booked", booking=booking)
     say("agent: booked %s, status %s" % (booking["booking_id"], booking["status"]))
     if booking["confirmation"]["booked_by"].startswith("concierge "):
         say("agent: " + copy["booked-by-concierge"].format(
             concierge=booking["confirmation"]["booked_by"][len("concierge "):],
             confirmation=booking["confirmation"]["provider_confirmation"]))
+    else:
+        say("  booked by: %s; confirmation: %s" % (booking["confirmation"]["booked_by"],
+                                                  booking["confirmation"]["provider_confirmation"]))
+    say("  paid: %s" % record["paid_how"])
     say("  tracking: %s" % booking["tracking_url"])
     say("  free cancellation until %s%s" % (
         clock_time(datetime.fromisoformat(booking["cancellation_window"]["free_until"])),
@@ -287,7 +327,7 @@ def run(args, recorder):
         "confirmation: %s (%s)" % (booking["confirmation"]["provider_confirmation"], booking["confirmation"]["booked_by"]),
         "tracking: %s" % booking["tracking_url"],
         "free cancellation until: %s" % booking["cancellation_window"]["free_until"],
-        "paid with: test card ending %s, limit %s" % (card["last4"], dollars(money(card["spending_limit_minor"]))),
+        "paid: %s; cap %s" % (record["paid_how"], dollars(money(cap))),
         "why: %s" % reason,
     ])
     event, ics_path = calendar.write_back(
