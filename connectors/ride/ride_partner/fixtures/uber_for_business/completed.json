@@ -1,0 +1,172 @@
+{
+  "note": "written from the Uber Guest Rides public reference on 2026-10-11, not recorded from a sandbox. re-record once sandbox access exists.",
+  "interactions": [
+    {
+      "method": "POST",
+      "path": "/v1/guests/trips/estimates",
+      "responses": [
+        {
+          "status": 200,
+          "body": {
+            "product_estimates": [
+              {
+                "product": {
+                  "product_id": "fixture-product-uberx",
+                  "display_name": "UberX",
+                  "capacity": 4
+                },
+                "estimate_info": {
+                  "fare": {
+                    "fare_id": "fixture-uber-fare-uberx",
+                    "value": 23.5,
+                    "currency_code": "USD",
+                    "display": "$23.50",
+                    "expires_at": 1791000300,
+                    "surge_multiplier": 1.0
+                  },
+                  "pickup_estimate": 4,
+                  "trip": {
+                    "distance_estimate": 4.1,
+                    "distance_unit": "mile",
+                    "duration_estimate": 1080
+                  }
+                }
+              },
+              {
+                "product": {
+                  "product_id": "fixture-product-uberxl",
+                  "display_name": "UberXL",
+                  "capacity": 6
+                },
+                "estimate_info": {
+                  "fare": {
+                    "fare_id": "fixture-uber-fare-uberxl",
+                    "value": 34.1,
+                    "currency_code": "USD",
+                    "display": "$34.10",
+                    "expires_at": 1791000300,
+                    "surge_multiplier": 1.0
+                  },
+                  "pickup_estimate": 6,
+                  "trip": {
+                    "distance_estimate": 4.1,
+                    "distance_unit": "mile",
+                    "duration_estimate": 1080
+                  }
+                }
+              },
+              {
+                "product": {
+                  "product_id": "fixture-product-black",
+                  "display_name": "Black",
+                  "capacity": 4
+                },
+                "estimate_info": {
+                  "fare": {
+                    "fare_id": "fixture-uber-fare-black",
+                    "value": 52.0,
+                    "currency_code": "USD",
+                    "display": "$52.00",
+                    "expires_at": 1791000300,
+                    "surge_multiplier": 1.4
+                  },
+                  "pickup_estimate": 3,
+                  "trip": {
+                    "distance_estimate": 4.1,
+                    "distance_unit": "mile",
+                    "duration_estimate": 1020
+                  }
+                }
+              },
+              {
+                "product": {
+                  "product_id": "fixture-product-pet",
+                  "display_name": "Uber Pet",
+                  "capacity": 4
+                },
+                "estimate_info": {
+                  "fare": {
+                    "fare_id": "fixture-uber-fare-pet",
+                    "value": 29.0,
+                    "currency_code": "USD",
+                    "display": "$29.00",
+                    "expires_at": 1791000300,
+                    "surge_multiplier": 1.0
+                  },
+                  "pickup_estimate": 5,
+                  "trip": {
+                    "distance_estimate": 4.1,
+                    "distance_unit": "mile",
+                    "duration_estimate": 1080
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/guests/trips",
+      "responses": [
+        {
+          "status": 201,
+          "body": {
+            "request_id": "fixture-uber-request-1",
+            "status": "processing"
+          }
+        }
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/guests/trips/fixture-uber-request-1",
+      "responses": [
+        {
+          "status": 204,
+          "body": null
+        }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/guests/trips/fixture-uber-request-1",
+      "responses": [
+        {
+          "status": 200,
+          "body": {
+            "request_id": "fixture-uber-request-1",
+            "status": "completed",
+            "vehicle": {
+              "make": "Toyota",
+              "model": "Prius",
+              "color": "Silver",
+              "license_plate": "8FIX123"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/guests/trips/fixture-uber-request-1/receipt",
+      "responses": [
+        {
+          "status": 404,
+          "body": {
+            "code": "not_found"
+          }
+        },
+        {
+          "status": 200,
+          "body": {
+            "total_fare": 22.8,
+            "tip": 3.0,
+            "currency_code": "USD"
+          }
+        }
+      ]
+    }
+  ]
+}

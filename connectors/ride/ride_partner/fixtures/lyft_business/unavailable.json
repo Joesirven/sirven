@@ -1,0 +1,17 @@
+{
+  "note": "written from the Lyft public reference on 2026-10-11 with the Concierge path prefix assumed, not recorded from a sandbox. re-record once sandbox access exists.",
+  "interactions": [
+    {
+      "method": "GET",
+      "path": "/v1/concierge/cost",
+      "responses": [
+        {
+          "status": 500,
+          "body": {
+            "error": "fixture-lyft-internal-error-text"
+          }
+        }
+      ]
+    }
+  ]
+}
