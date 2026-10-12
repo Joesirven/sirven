@@ -1,0 +1,12 @@
+{
+  "BackendState": "Stopped",
+  "Self": {
+    "HostName": "laptop",
+    "DNSName": "laptop.example-tailnet.ts.net.",
+    "UserID": 1001,
+    "TailscaleIPs": ["100.64.0.1"]
+  },
+  "Peer": null,
+  "CurrentTailnet": {"Name": "person@example.com"},
+  "User": {"1001": {"LoginName": "person@example.com"}}
+}

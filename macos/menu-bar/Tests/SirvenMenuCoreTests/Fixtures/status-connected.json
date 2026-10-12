@@ -1,0 +1,47 @@
+{
+  "Version": "1.102.4-example",
+  "BackendState": "Running",
+  "TailscaleIPs": ["100.64.0.1", "fd7a:115c:a1e0::1"],
+  "Self": {
+    "HostName": "laptop",
+    "DNSName": "laptop.example-tailnet.ts.net.",
+    "UserID": 1001,
+    "TailscaleIPs": ["100.64.0.1", "fd7a:115c:a1e0::1"],
+    "Online": true,
+    "ExitNode": false,
+    "ExitNodeOption": false
+  },
+  "Peer": {
+    "nodekey:aaaa": {
+      "HostName": "home-server",
+      "DNSName": "home-server.example-tailnet.ts.net.",
+      "UserID": 1001,
+      "TailscaleIPs": ["100.64.0.2", "fd7a:115c:a1e0::2"],
+      "Online": true,
+      "ExitNode": true,
+      "ExitNodeOption": true
+    },
+    "nodekey:bbbb": {
+      "HostName": "Cabin Router",
+      "DNSName": "cabin-router.example-tailnet.ts.net.",
+      "UserID": 1001,
+      "TailscaleIPs": ["100.64.0.3"],
+      "Online": false,
+      "ExitNode": false,
+      "ExitNodeOption": true
+    },
+    "nodekey:cccc": {
+      "HostName": "phone",
+      "DNSName": "phone.example-tailnet.ts.net.",
+      "UserID": 1001,
+      "TailscaleIPs": ["100.64.0.4"],
+      "Online": true,
+      "ExitNode": false,
+      "ExitNodeOption": false
+    }
+  },
+  "CurrentTailnet": {"Name": "person@example.com", "MagicDNSSuffix": "example-tailnet.ts.net"},
+  "User": {
+    "1001": {"LoginName": "person@example.com", "DisplayName": "Example Person"}
+  }
+}
