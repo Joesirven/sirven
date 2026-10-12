@@ -34,14 +34,16 @@ lint:
 	fi
 
 # only files git tracks go in, so nothing ignored (video/node_modules, .env files, local
-# settings) or left untracked can ship by accident. .git itself is never listed.
+# settings) or left untracked can ship by accident. .git itself is never listed. the demo's
+# recorded runs (demo/*/recordings) stay in git as evidence but are not shipped: they are
+# transcripts of one rehearsal, not part of the product.
 package:
 	@set -e; \
 	name="$(PACKAGE)-$(VERSION)"; \
 	stage="$$(mktemp -d "$${TMPDIR:-/tmp}/$(PACKAGE)-package.XXXXXX")"; \
 	trap 'rm -rf "$$stage"' EXIT; \
 	mkdir -p "$$stage/$$name" "$(DIST)"; \
-	git ls-files --cached | grep -v -e '^\.git/' -e '^video/node_modules/' \
+	git ls-files --cached | grep -v -e '^\.git/' -e '^video/node_modules/' -e '^demo/[^/]*/recordings/' \
 	  | while IFS= read -r file; do if [ -f "$$file" ]; then printf '%s\n' "$$file"; fi; done > "$$stage/files"; \
 	tar -cf - -T "$$stage/files" | (cd "$$stage/$$name" && tar -xf -); \
 	tar -czf "$(DIST)/$$name.tar.gz" -C "$$stage" "$$name"; \

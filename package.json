@@ -8,6 +8,9 @@
   "files": [
     "bin",
     "lib",
+    "app",
+    "copy",
+    "connectors",
     "levels",
     "docs",
     "install.sh",

@@ -34,5 +34,15 @@ test_make_package_ships_tracked_files_only() {
   assert_not_contains "$listing" "/.git/"
   assert_not_contains "$listing" "node_modules"
   assert_not_contains "$listing" ".claude"
+  assert_not_contains "$listing" "/recordings/"
   assert_eq 1 "$(printf '%s\n' "$listing" | cut -d/ -f1 | sort -u | grep -c .)" "one top folder"
+}
+
+# one package (Jose's ruling): the npm files list carries every product folder the wired
+# product runs from, so an npm install is not missing the tier dial or the ride connector.
+test_the_npm_package_carries_every_product_folder() {
+  local folder
+  for folder in bin lib app copy connectors levels; do
+    assert_contains "$(cat "$REPO_DIR/package.json")" "\"$folder\"" "package.json files is missing $folder"
+  done
 }
