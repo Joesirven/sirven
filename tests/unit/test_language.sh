@@ -5,8 +5,7 @@
 package_files() {
   (
     cd "$REPO_DIR" || exit 1
-    for path in install.sh uninstall.sh Makefile bin README.md docs/PERMISSIONS.md docs/runtime-interface.md docs/allowlist-review.md allowlist lib levels tests docs/app-interfaces.md app copy docs/connector; do
-      [ -e "$path" ] && find "$path" -type f
+    for path in install.sh uninstall.sh Makefile bin README.md docs/PERMISSIONS.md docs/runtime-interface.md docs/allowlist-review.md allowlist lib levels tests docs/app-interfaces.md app copy docs/connector docs/MENU-BAR.md macos; do
     done
   ) | grep -v '^tests/unit/test_language.sh$' | sort
 }

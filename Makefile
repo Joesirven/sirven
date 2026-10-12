@@ -8,14 +8,16 @@
 #                   Apple Silicon and Intel. needs the Xcode command line tools
 #   make keep-awake        macos only: build the keep-awake program behind sirven awake
 #   make test-keep-awake   macos only: its unit tests, and a short real power assertion
+#   make menu-bar       the macos menu bar app, macos/menu-bar/build/Sirven.app (needs swift)
+#   make test-menu-bar  the menu bar app's swift tests (needs swift)
 
 SHELL := /bin/sh
 PACKAGE := $(shell sed -n 's/^[[:space:]]*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' project.json | head -n 1 | tr '[:upper:]' '[:lower:]')
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo unversioned)
 DIST ?= dist
-SHELL_FILES := install.sh uninstall.sh bin/sirven $(wildcard lib/*.sh) $(wildcard lib/attestation/*.sh) tests/run.sh tests/golden/run.sh $(wildcard tests/lib/*.sh) $(wildcard tests/unit/*.sh)
+SHELL_FILES := install.sh uninstall.sh bin/sirven $(wildcard lib/*.sh) $(wildcard lib/attestation/*.sh) tests/run.sh tests/golden/run.sh $(wildcard tests/lib/*.sh) $(wildcard tests/unit/*.sh) macos/menu-bar/build-app.sh
 
-.PHONY: help test lint package runtime keep-awake test-keep-awake
+.PHONY: help test lint package runtime keep-awake test-keep-awake menu-bar test-menu-bar
 
 help:
 	@echo "make test      run every test: tests/run.sh"
@@ -24,9 +26,18 @@ help:
 	@echo "make runtime   macos: build dist/runtime/sirven-fetch, the runtime's fetch helper"
 	@echo "make keep-awake        build the keep-awake program behind sirven awake (macos)"
 	@echo "make test-keep-awake   run its tests (macos)"
+	@echo "make menu-bar  macos/menu-bar/build/Sirven.app, the menu bar app (macos, needs swift)"
+	@echo "make test-menu-bar  the menu bar app's swift tests (macos, needs swift)"
 
 test:
 	bash tests/run.sh
+
+# the menu bar app is macos only, so make test leaves it out and stays green on linux.
+menu-bar:
+	bash macos/menu-bar/build-app.sh
+
+test-menu-bar:
+	swift test --package-path macos/menu-bar
 
 lint:
 	@for file in $(SHELL_FILES); do bash -n "$$file" || exit 1; done
