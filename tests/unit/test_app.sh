@@ -164,3 +164,11 @@ if ledger["used_bytes"] != ledger["carried_bytes"] + ledger["sent_bytes"]:
     print("carried and sent no longer add up"); sys.exit(1)
 PYTHON
 }
+
+# the live adapters in app/serve.py answer in the shapes of app/fakes: tests/app.
+test_live_adapters_match_the_fake_shapes() {
+  command -v python3 >/dev/null 2>&1 || return 0
+  capture python3 -m unittest discover -s "$REPO_DIR/tests/app"
+  assert_eq 0 "$CAPTURED_STATUS" "live adapter shape tests failed:
+$CAPTURED_STDERR"
+}

@@ -190,8 +190,9 @@ The public location is Jose's call. The proposal is a static site, such as GitHu
 repository, so operators can fetch `registry.json` and check it against its checksum. Until the attestation layer exists, the
 checksum proves integrity in transit only. Two signatures are dependencies on the attestation
 work: each reviewer's vote, so a vote proves who cast it, and each registry version, so a node can
-prove the copy it fetched came from sirven. The policy engine should verify the version signature
-once it exists.
+prove the copy it fetched came from sirven. Registry version signatures now exist: the identity issuer signs each
+published version (`lib/attestation/cli.mjs registry sign`) and each machine verifies it before
+installing (`lib/peer_routing.py refresh`). Vote signatures do not exist yet.
 
 The `allowlist/` folder is not in the npm package's files list on purpose: nodes fetch the
 published registry rather than trusting whatever copy shipped with the installer.

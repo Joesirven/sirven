@@ -2,13 +2,17 @@
 """Serve the tier dial, consent moment, site list, and usage meter on this Mac only.
 
 Reads the runtime state (thread 01), the reciprocity ledger (thread 04), and the site
-registry (thread 05) from the fakes in app/fakes until those interfaces land. The shapes
-are documented in docs/app-interfaces.md. Listens on the loopback address only.
+registry (thread 05). By default they come from the fakes in app/fakes; with --live they come
+from the running runtime, the ledger, and the published registry, mapped onto the same shapes.
+The shapes are documented in docs/app-interfaces.md. Listens on the loopback address only.
 """
 import argparse
 import copy
 import json
+import os
 import posixpath
+import subprocess
+import sys
 import threading
 import time
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -97,6 +101,84 @@ class Fake:
             return 200, copy.deepcopy(self.runtime)
 
 
+class Live:
+    """The real interfaces, mapped onto the shapes the page reads. The runtime is read through
+    its control interface; the ledger and the registry are read from their files. The consent
+    moment's outcome is the one thing this keeps, in app-consent.json in the runtime folder."""
+
+    def __init__(self, state_dir, registry_path):
+        sys.path.insert(0, str(REPO_DIR / "lib"))
+        from sirven_runtime.client import Client
+        self.client = Client(state_dir)
+        self.state_dir = Path(self.client.state_dir)
+        self.registry_path = Path(registry_path)
+        self.lock = threading.Lock()
+
+    def consent(self):
+        try:
+            return json.loads((self.state_dir / "app-consent.json").read_text())
+        except (OSError, ValueError):
+            return {"prompted": False, "decision": None}
+
+    def state(self):
+        status = self.client.status()
+        return {"version": 1, "tier": status["tier"], "consent": self.consent(),
+                "peer_routing_available": status.get("peer_routing_available") is True,
+                "last_block": status.get("last_block")}
+
+    def usage(self):
+        ledger = self.state_dir / "peer-routing" / "reciprocity.jsonl"
+        answer = subprocess.run([sys.executable, str(REPO_DIR / "lib" / "reciprocity.py"), "read",
+                                 "--ledger", str(ledger)], capture_output=True, check=True)
+        data = json.loads(answer.stdout)
+        stamp = lambda seconds: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(seconds))  # noqa: E731
+        return {"version": 1,
+                "period": {"start": stamp(data["period"]["starts_at"]), "end": stamp(data["period"]["resets_at"])},
+                "cap_bytes": data["cap_bytes"], "carried_bytes": data["carried_bytes"],
+                "sent_bytes": data["sent_bytes"], "used_bytes": data["used_bytes"],
+                "state": "over" if data["used_bytes"] >= data["cap_bytes"] else "under",
+                "sessions": [{"id": item["session"], "direction": item["direction"], "domain": item["domain"],
+                              "bytes": item["bytes"], "started_at": stamp(item["first_at"]),
+                              "ended_at": stamp(item["last_at"])} for item in data["sessions"]]}
+
+    @property
+    def registry(self):
+        try:
+            data = json.loads(self.registry_path.read_text())
+        except (OSError, ValueError):
+            return {"version": 1, "registry_version": None, "published_at": None, "test_data": False, "entries": []}
+        entries = [{"domain": item["domain"], "status": "approved",
+                    "scope": "authenticated" if "authenticated_sessions" in item.get("scope", []) else "read",
+                    "approved_at": item.get("reviewed"), "last_reviewed_at": item.get("reviewed"),
+                    "next_review_by": None, "rationale": item.get("rationale", ""), "public_positions": []}
+                   for item in data.get("approved", [])]
+        return {"version": 1, "registry_version": str(data.get("version")), "published_at": data.get("updated"),
+                "test_data": False, "entries": entries}
+
+    def set_tier(self, tier):
+        if tier not in TIERS:
+            return 400, {"error": "unknown_tier"}
+        if tier not in OPEN_TIERS:
+            return 409, {"error": "tier_not_open"}
+        if tier != "solo" and not self.state()["peer_routing_available"]:
+            return 409, {"error": "peer_routing_unavailable"}
+        code, _ = self.client.call("PUT", "/v1/tier", {"tier": tier})
+        if code != 200:
+            return 409, {"error": "peer_routing_unavailable"}
+        return 200, self.state()
+
+    def record_consent(self, decision):
+        if decision not in DECISIONS:
+            return 400, {"error": "unknown_decision"}
+        with self.lock:
+            target = self.state_dir / "app-consent.json"
+            temporary = target.with_suffix(".tmp")
+            temporary.write_text(json.dumps({"prompted": True, "decision": decision}))
+            os.chmod(temporary, 0o600)
+            temporary.replace(target)
+        return 200, self.state()
+
+
 class Handler(SimpleHTTPRequestHandler):
     fake = None
 
@@ -152,8 +234,13 @@ def main():
                         help="pretend signing and site review are live, so the consent moment can finish (fakes only)")
     parser.add_argument("--growth", type=int, default=400000,
                         help="bytes per second an open fake session grows by; 0 holds the meter still")
+    parser.add_argument("--live", action="store_true",
+                        help="read the running runtime, the reciprocity ledger, and the registry instead of the fakes")
+    parser.add_argument("--state-dir", default=None, help="the runtime state folder (--live)")
+    parser.add_argument("--registry", default=str(REPO_DIR / "allowlist" / "registry.json"),
+                        help="the published registry to list (--live)")
     args = parser.parse_args()
-    Handler.fake = Fake(args.scenario, args.peer_preview, args.growth)
+    Handler.fake = Live(args.state_dir, args.registry) if args.live else Fake(args.scenario, args.peer_preview, args.growth)
     server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     print(f"sirven app: http://127.0.0.1:{args.port}/  scenario {args.scenario}", flush=True)
     try:

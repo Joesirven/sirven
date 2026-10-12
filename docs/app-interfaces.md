@@ -11,12 +11,24 @@ step, served on this Mac only by `app/serve.py`. Every word on screen comes from
 Then open `http://127.0.0.1:7420/`. Add `?view=meter` or `?view=list` to open on another
 surface.
 
-## Where the data comes from today
+## Where the data comes from
 
-Threads 01, 04, and 05 had not published their interfaces when this was built, so
-`app/serve.py` serves fakes from `app/fakes/` in the shapes below. Each shape is the
-smallest thing the surfaces need. When the real interfaces land, the change is one adapter
-in `app/serve.py` per endpoint; the page does not change.
+By default `app/serve.py` serves fakes from `app/fakes/` in the shapes below, so every
+surface can be shown in every state. With `--live` it reads the real interfaces instead and
+maps them onto the same shapes; the page does not change:
+
+    sirven runtime serve &                       # the runtime, on 127.0.0.1:47290
+    python3 app/serve.py --live                  # reads it, the ledger, and the registry
+
+| Endpoint | Live source |
+| --- | --- |
+| `GET /api/state` | the runtime's `GET /v1/status`: `tier`, `peer_routing_available`, `last_block`. `consent` is kept by `app/serve.py` in `app-consent.json` in the runtime folder |
+| `POST /api/tier` | refused here while `peer_routing_available` is false, then the runtime's `PUT /v1/tier` |
+| `GET /api/ledger` | `lib/reciprocity.py read` on `peer-routing/reciprocity.jsonl` in the runtime folder |
+| `GET /api/registry` | the approved list of `allowlist/registry.json`, or `--registry FILE` |
+
+`tests/app/test_live_shapes.py` starts a real runtime and checks that every live answer has
+exactly the keys of its fake.
 
 | Endpoint | Owner | Fake files |
 | --- | --- | --- |
@@ -68,8 +80,9 @@ was closed). Any of these sets `prompted`, and the page never asks again on late
     }
 
 The page polls every two seconds. A session with `ended_at` of `null` is shown as live.
-`period.end` is shown as the reset day. Assumption for thread 04 to confirm: 5 gigabytes
-means 5,000,000,000 bytes, the way macOS counts sizes. Domains appear at the granularity the
+`period.end` is shown as the reset day. 5 gigabytes means 5,000,000,000 bytes, the way
+macOS counts sizes: confirmed by `lib/reciprocity.py` (thread 04) and `DEFAULT_CAP_BYTES` in
+`lib/attestation/attestation.mjs` (thread 02). Domains appear at the granularity the
 registry publishes, never as page addresses.
 
 ## Site registry (thread 05)

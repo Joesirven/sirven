@@ -84,9 +84,23 @@ tools that only know proxies.
   "started_at": "2026-10-11T23:59:00Z",
   "decision_log": "/Users/name/Library/Application Support/sirven/runtime/decisions.jsonl",
   "outcomes": {"ok": 12, "blocked_by_site": 1, "refused_by_policy": 2},
-  "platform": "Darwin arm64"
+  "platform": "Darwin arm64",
+  "peer_routing_available": false,
+  "last_block": {"version": 1, "outcome": "blocked_by_site", "block_kind": "challenge", "status": 403,
+                 "route": "local", "reason": "own_connection", "host": "tickets.example",
+                 "at": "2026-10-11T16:42:00Z"}
 }
 ```
+
+`peer_routing_available` is `lib/peer_routing.py readiness` for the `peer-routing` folder inside
+the state folder. it is true only when the attestation layer is configured with a current
+revocation list, a signed site-allowlist registry version is installed and current with at
+least one approved site, and the peer transport is built. the transport is not built, so it
+is false today on every machine. the tier dial reads it to decide whether Neighborly can be
+offered.
+
+`last_block` is the latest read a site refused (`blocked_by_site`) since the runtime started,
+or `null`: host and time only, never a path. the consent moment opens on it.
 
 `outcomes` counts results since this runtime started.
 

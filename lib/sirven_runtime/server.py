@@ -108,7 +108,18 @@ class Runtime:
             "decision_log": self.log.path,
             "outcomes": self.log.counts(),
             "platform": "%s %s" % (platform.system(), platform.machine()),
+            "peer_routing_available": self.peer_routing()["peer_routing_available"],
+            "last_block": self.log.last_block(),
         }
+
+    def peer_routing(self):
+        """lib/peer_routing.py's readiness for this node's peer routing state folder. any
+        failure to read it reports peer routing as unavailable."""
+        try:
+            import peer_routing
+            return peer_routing.readiness(os.path.join(self.state_dir, "peer-routing"), int(time.time()))
+        except Exception:  # noqa: BLE001, unreadable means unavailable
+            return {"version": 1, "peer_routing_available": False, "components_ready": False}
 
 
 def json_body(data):

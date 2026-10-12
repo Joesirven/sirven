@@ -218,6 +218,18 @@ the issuer revokes the user, the first peer refuses a fresh envelope from that u
 
 Requires node 18 or newer. `SIRVEN_ATTESTATION_NOW` fixes the clock for tests.
 
+## Request digest and registry versions (added at integration)
+
+- `signRequest` takes an optional `requestDigest`, the SHA-256 of the exact request bytes in
+  lowercase hexadecimal, and signs it in as `request_digest`. A peer that passes
+  `context.requestDigest` to `verifyRequest` refuses any envelope without the same digest
+  (`wrong-request`). The command line takes `--request-digest` on `sign` and `peer verify`.
+- `signRegistry` and `openRegistry`, and `registry sign` and `registry verify` on the command
+  line, sign one published site-allowlist registry version with the identity issuer key: the
+  registry's exact bytes, their SHA-256, and a validity window of at most 30 days.
+- `peer verify --allowlist FILE` takes the domains of the verified registry instead of the
+  list written at `peer init`. See `docs/peer-routing.md`.
+
 ## Not built yet
 
 - **Serving the revocation list.** Peers install a list from a file. Fetching it on a schedule

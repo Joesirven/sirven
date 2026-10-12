@@ -1,7 +1,9 @@
 # Allowlist policy engine
 
-Status: built and tested on 2026-10-11, waiting on the runtime (thread 01), attestation (thread
-02), and the site-allowlist review workflow (thread 05) for end-to-end wiring.
+Status: built and tested on 2026-10-11, and wired end to end with the attestation layer, the
+site-allowlist review workflow, and the reciprocity ledger through `lib/peer_routing.py` the
+same night. See `docs/peer-routing.md`; the envelope and reviewer sections below now describe
+the committed formats.
 Code: `lib/policy_engine.py`. Tests: `tests/policy/test_policy_engine.py` and
 `tests/unit/test_policy_engine.sh`, both run by `make test`.
 
@@ -84,9 +86,9 @@ decision = classify_and_log(
 - Dispatch only on `allow_local` or `allow_peer_carrier`. If `classify_and_log` raises (the log
   could not be written), refuse. From another language, the command line does the same: exit
   status 1 means refuse.
-- The runtime draft's own `classify` in `runtime/server.py` (uncommitted when this was written)
-  refuses `signed_envelope` and `allowlisted` fields from callers. That stays right: the
-  allowlist comes from the registry state file, never from a request.
+- The committed runtime's seam (`lib/sirven_runtime/seam.py`) refuses any request that carries
+  a `signed_envelope` (`peer_traffic_refused`). That stays right until the peer transport
+  ships: the allowlist comes from the registry state file, never from a request.
 
 Command line, for a runtime not written in Python:
 
@@ -129,16 +131,17 @@ request_digest, key_id, nonce, maximum_bytes)`, with every field taken from the 
 The engine re-checks posture, domain, digest, and a positive `maximum_bytes` against the request,
 and treats an exception or any other return value as `verifier_unavailable`.
 
-Before calling the verifier, the engine checks the envelope shape of thread 02's draft
-(`payload.posture`, `issuedAt`, `expiresAt`, `domain`, `requestDigest`). Those checks never
-replace the verifier's signature, revocation, replay, and cap checks.
+Before calling the verifier, the engine decodes the envelope's base64url payload in the
+`lib/attestation` format and checks `posture`, `issued_at`, `expires_at`, `domain`, and
+`request_digest`. Those checks never replace the verifier's signature, revocation, replay, and
+cap checks.
 
-`ATTESTATION_ERROR_STATES` maps the error codes of thread 02's draft verifier
-(`FileAuthority.verifyAndReserve`, uncommitted when this was written) to envelope states. A
+`ATTESTATION_ERROR_STATES` maps the refusal reasons of `lib/attestation/attestation.mjs`
+(`REFUSAL`) to envelope states. A
 verifier command for the command line prints either the `Attestation` fields as JSON or
 `{"error": CODE}`.
 
-Postures: `identity-attested` is accepted. `pseudonymous` is recognized and refused with
+Postures: `identity` is accepted. `pseudonymous` is recognized and refused with
 `attestation_unsupported_posture`; enabling it later is adding it to `ACCEPTED_POSTURES`.
 
 ## Decision log (for threads 04 and 06)
@@ -173,4 +176,5 @@ makes both load-bearing in code:
 
 Opening the gate is a one-line change to the constant, made only in the release whose end-to-end
 test runs thread 05's real published registry and thread 02's real verifier through this engine.
-That end-to-end test cannot be written until both exist.
+That end-to-end test now exists: `tests/peer_routing/test_end_to_end.py`. The gate stays closed
+until the peer transport ships.

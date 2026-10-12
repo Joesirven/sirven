@@ -334,6 +334,15 @@ class ControlInterfaceTests(RuntimeCase):
         self.assertEqual(("solo", ["solo"], "not_built", "own_connection"),
                          (status["tier"], status["tiers_available"], status["peer_routing"], status["egress"]))
 
+    def test_status_tells_the_tier_dial_about_peer_routing_and_the_latest_block(self):
+        status = self.client.status()
+        self.assertIs(False, status["peer_routing_available"])
+        self.assertIsNone(status["last_block"])
+        self.client.fetch(self.origin_url("/challenge"))
+        block = self.client.status()["last_block"]
+        self.assertEqual(("blocked_by_site", "challenge", "127.0.0.1"), (block["outcome"], block["block_kind"], block["host"]))
+        self.assertNotIn("/challenge", json.dumps(block))
+
     def test_the_tier_cannot_leave_solo(self):
         status, _ = self.client.call("PUT", "/v1/tier", {"tier": "neighborly"})
         self.assertEqual(409, status)

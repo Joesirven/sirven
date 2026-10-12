@@ -20,6 +20,7 @@ class DecisionLog:
         self.sequence = 0
         self.recent = []
         self.totals = {}
+        self.last_block_entry = None
         if path:
             directory = os.path.dirname(path)
             if directory:
@@ -50,6 +51,8 @@ class DecisionLog:
                 "bytes_received": bytes_received,
             }
             self.totals[outcome] = self.totals.get(outcome, 0) + 1
+            if outcome == "blocked_by_site":
+                self.last_block_entry = entry
             self.recent.append(entry)
             del self.recent[:-KEEP_IN_MEMORY]
             if self.path:
@@ -62,6 +65,17 @@ class DecisionLog:
         with self.lock:
             entries = [entry for entry in self.recent if entry["sequence"] > sequence]
         return entries[:limit]
+
+    def last_block(self):
+        """The latest read a site refused since the runtime started, for the consent moment.
+        Host and time only, never a path or any content."""
+        with self.lock:
+            entry = self.last_block_entry
+        if entry is None:
+            return None
+        return {"version": 1, "outcome": entry["outcome"], "block_kind": entry["block_kind"],
+                "status": entry["status"], "route": entry["route"], "reason": entry["reason"],
+                "host": entry["host"], "at": entry["time"]}
 
     def counts(self):
         """Outcomes since the runtime started."""
