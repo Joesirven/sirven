@@ -95,11 +95,12 @@ class Runtime:
         self.started_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
     def status(self):
+        readiness = self.peer_routing()
         return {
             "version": VERSION,
             "tier": self.tier,
             "tiers_available": ["solo"],
-            "peer_routing": "not_built",
+            "peer_routing": readiness.get("transport", "not_built"),
             "egress": "own_connection",
             "fingerprint": self.fetcher.fingerprint,
             "policy": self.policy.name,
@@ -108,7 +109,7 @@ class Runtime:
             "decision_log": self.log.path,
             "outcomes": self.log.counts(),
             "platform": "%s %s" % (platform.system(), platform.machine()),
-            "peer_routing_available": self.peer_routing()["peer_routing_available"],
+            "peer_routing_available": readiness["peer_routing_available"],
             "last_block": self.log.last_block(),
         }
 

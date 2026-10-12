@@ -11,8 +11,12 @@ interface version: `1`. every response carries `"version": 1`.
 ## what works today
 
 - Solo, and only Solo. Neighborly and Co-op are refused at the seam and at `PUT /v1/tier`.
-  peer routing is not built: no request is ever carried for another person, and no request of
-  the user's is ever sent through anyone else.
+  the carrier side of peer routing is now built (`lib/peer_transport.py`, proven in
+  `tests/peer_routing/test_transport.py`), but the runtime's user-side peer egress is not
+  wired: the seam still refuses any `peer` route with `peer_routing_not_built`, so no request
+  of the user's is sent through anyone else, and no request is carried for another person
+  through this runtime. the carrier endpoint runs separately when a carrying node is
+  configured for it.
 - macOS, Apple Silicon and Intel: `make runtime` builds one helper binary for both.
 - every egress decision is made on the machine, without a network call.
 - a block is a result. the runtime never retries a refused or blocked request, and never
@@ -76,7 +80,7 @@ tools that only know proxies.
   "version": 1,
   "tier": "solo",
   "tiers_available": ["solo"],
-  "peer_routing": "not_built",
+  "peer_routing": "built",
   "egress": "own_connection",
   "fingerprint": "apple-urlsession",
   "policy": "solo",
@@ -95,9 +99,11 @@ tools that only know proxies.
 `peer_routing_available` is `lib/peer_routing.py readiness` for the `peer-routing` folder inside
 the state folder. it is true only when the attestation layer is configured with a current
 revocation list, a signed site-allowlist registry version is installed and current with at
-least one approved site, and the peer transport is built. the transport is not built, so it
-is false today on every machine. the tier dial reads it to decide whether Neighborly can be
-offered.
+least one approved site, and the peer transport module is built. the transport module is
+built (`lib/peer_transport.py`); so this is true on a machine configured as a carrier and
+false on every other machine. the tier dial reads it to decide whether Neighborly can be
+offered. the runtime seam still refuses any user-side peer egress with `peer_routing_not_built`
+until that wiring ships on its own.
 
 `last_block` is the latest read a site refused (`blocked_by_site`) since the runtime started,
 or `null`: host and time only, never a path. the consent moment opens on it.
