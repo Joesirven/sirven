@@ -48,23 +48,37 @@ because it signs software with your Apple account.
 2. On the phone: Settings > Privacy & Security > Developer Mode, on, then restart.
 3. On the Mac: install the pymobiledevice3 tool once with the Python tool installer, uv (needs
    Python 3.12 or newer, and no administrator password): `uv tool install pymobiledevice3==11.28.2`.
-4. On the Mac: download the pinned runner, `WebDriverAgentRunner-Runner.zip` from the v16.14.0
-   release, into `~/.sirven/WebDriverAgent`, and unzip it there.
-5. Sign and install the runner on the phone once. Route A is the xtool route, which is
-   EXPERIMENTAL and UNPROVEN on a real phone. Route B is the fallback: full Xcode, signed into
-   your Apple account, used only for this step and never at run time. For route B, clone
-   WebDriverAgent at the commit iPhone-use pins into `~/.sirven/WebDriverAgent-source`, then run
-   `xcodebuild ... test` there with your own development team and a bundle name you own, and
-   press Ctrl-C once the test starts on the phone.
-6. On the phone, the first time: trust your developer certificate (Settings > General, the device
+4. On the Mac: sign and install the runner once, with ONE of the two routes below, not both.
+   - **Route A, EXPERIMENTAL and not yet proven on a real phone.** xtool, a command-line tool,
+     signs the runner with your Apple account and installs it. Install it with
+     `brew install xtool-org/tap/xtool` (its app may ask to move into your Applications folder;
+     allow it). Download the pinned runner, `WebDriverAgentRunner-Runner.zip` from the v16.14.0
+     release, and check it:
+
+     ```
+     mkdir -p ~/.sirven/WebDriverAgent && curl -fL -o ~/.sirven/WebDriverAgent/runner.zip https://github.com/appium/WebDriverAgent/releases/download/v16.14.0/WebDriverAgentRunner-Runner.zip && echo '6f7758f72d348d2c35c3fd134fa76a941bba0c447de04b2e9d065682f31fc47f  ~/.sirven/WebDriverAgent/runner.zip' | shasum -a 256 -c - && unzip -o ~/.sirven/WebDriverAgent/runner.zip -d ~/.sirven/WebDriverAgent
+     ```
+
+     The checksum line must say OK. If it does not, stop: the download is not the release.
+     Then `xtool auth login` (xtool asks for your Apple ID; sirven never sees it), and
+     `xtool install ~/.sirven/WebDriverAgent/WebDriverAgentRunner-Runner.app`. Known limits: a
+     free Apple account signs for 7 days at a time, xtool uses Apple interfaces that are not
+     public, and whether the test bundle inside the runner signs correctly is not verified yet.
+     The evidence is in `docs/research/xtool-lighter-phone-path.md`.
+   - **Route B, the fallback: full Xcode.** Used only for this step, never at run time. It builds
+     WebDriverAgent from source at the commit iPhone-use pins, and does not use the download above.
+     Clone it into `~/.sirven/WebDriverAgent-source`, then run `xcodebuild ... test` there with
+     your own development team and a bundle name you own, and press Ctrl-C once the test starts on
+     the phone.
+5. On the phone, the first time: trust your developer certificate (Settings > General, the device
    management page), and turn on the user interface automation switch under Settings > Developer.
-7. Run `SIRVEN_PHONE_RUNNER_BUNDLE=BUNDLE.xctrunner sirven phone start` and leave it running.
+6. Run `SIRVEN_PHONE_RUNNER_BUNDLE=BUNDLE.xctrunner sirven phone start` and leave it running.
    The runner identifier is the bundle name you gave setup, with `.xctrunner` added.
-8. From another terminal, `sirven phone status`.
+7. From another terminal, `sirven phone status`.
 
 | Command | What it does |
 |---|---|
-| `SIRVEN_PHONE_RUNNER_BUNDLE=BUNDLE.xctrunner sirven phone start` | Starts the tunnel and the launcher and keeps both running. When one stops it is started again after 1 second, then 2, 4, and so on up to 30 seconds; a process that stays up for a minute starts over from 1 second. A new tunnel address restarts the launcher too. Ctrl-C stops both. |
+| `SIRVEN_PHONE_RUNNER_BUNDLE=BUNDLE.xctrunner sirven phone start` | Starts the tunnel and the launcher and keeps both running. When one stops it is started again after 1 second, then 2, 4, and so on up to 30 seconds; a process that stays up for a minute starts over from 1 second. When the tunnel stops, or the launcher fails three times in a row without staying up, both start again with the tunnel's new address. A stopped process's last lines are printed. Ctrl-C or closing the terminal stops both. A second start is refused while one is running, and leftover processes from an earlier run block a new start until you stop them. |
 | `sirven phone status` | Also says whether the tunnel and the launcher are running, or not running. |
 
 ## Consent: opt in per session, owner only

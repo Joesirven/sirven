@@ -375,6 +375,17 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual(report["tunnel"], "not running")
         self.assertEqual(report["launcher"], "not running")
 
+    def test_setup_offers_two_signing_routes_and_checks_the_download_before_use(self):
+        with contextlib.redirect_stdout(io.StringIO()) as printed:
+            phone_bridge.command_setup("ABCDE12345", "com.example.wda")
+        text = printed.getvalue()
+        self.assertIn("ONE of these two routes", text)
+        self.assertLess(text.index("route A"), text.index("curl -fL"))
+        self.assertLess(text.index("curl -fL"), text.index("route B"), "the download belongs to route A only")
+        self.assertIn("echo '%s  " % phone_bridge.WEBDRIVERAGENT_RUNNER_SHA256, text)
+        self.assertIn("shasum -a 256 -c -", text)
+        self.assertNotIn("Xcode > Settings", text)
+
     def test_start_is_listed_in_the_help(self):
         with contextlib.redirect_stdout(io.StringIO()) as printed:
             self.assertEqual(phone_bridge.main(["--help"]), 0)

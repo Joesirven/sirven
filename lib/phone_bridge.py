@@ -78,6 +78,7 @@ APPROVAL_MINUTES = 5
 WEBDRIVERAGENT_REPOSITORY = "https://github.com/appium/WebDriverAgent.git"
 WEBDRIVERAGENT_COMMIT = "d17782422d55ff1e5e0ceb74eb1fd509cc0c35b6"
 WEBDRIVERAGENT_RELEASE = "v16.14.0"
+WEBDRIVERAGENT_RUNNER_SHA256 = "6f7758f72d348d2c35c3fd134fa76a941bba0c447de04b2e9d065682f31fc47f"
 
 # a tap on something labeled like this could commit money or a booking. it waits for the
 # owner's approval. a heuristic, so the agent can also mark any action money-bearing itself.
@@ -1441,7 +1442,8 @@ def command_log(as_json):
 
 def command_setup(team, bundle):
     if not team or not re.fullmatch(r"[A-Z0-9]{10}", team):
-        fail("--team needs your ten character Apple development team, from Xcode > Settings > Accounts", 64)
+        fail("--team needs your ten character Apple team identifier, shown on the membership page of your Apple "
+             "developer account", 64)
     if not bundle or not re.fullmatch(r"[A-Za-z0-9.-]+", bundle):
         fail("--bundle needs a bundle name you own, like com.yourname.WebDriverAgentRunner", 64)
     home = os.path.join(os.path.expanduser("~"), ".sirven")
@@ -1455,18 +1457,23 @@ def command_setup(team, bundle):
         ("on the phone", "Settings > Privacy & Security > Developer Mode: on, then restart the phone"),
         ("on this Mac", "uv tool install pymobiledevice3==%s, with the Python tool installer, uv "
                         "(needs Python 3.12 or newer; no administrator password)" % PYMOBILEDEVICE3_VERSION),
-        ("on this Mac", "mkdir -p %s && curl -L -o %s/runner.zip %s && unzip -o %s/runner.zip -d %s"
-                        % (runner_folder, runner_folder, archive, runner_folder, runner_folder)),
-        ("on this Mac", "sign and install the runner once, by route A: the xtool route in docs/phone-interface.md "
-                        "(EXPERIMENTAL and UNPROVEN on a real phone)"),
-        ("on this Mac", "or route B, the fallback: full Xcode, used only to sign and install once, never at run time"),
-        ("on this Mac", "route B, step 1: git clone %s %s && git -C %s checkout %s"
-                        % (WEBDRIVERAGENT_REPOSITORY, source_folder, source_folder, WEBDRIVERAGENT_COMMIT)),
-        ("on this Mac", "route B, step 2: xcodebuild -project %s/WebDriverAgent.xcodeproj "
-                        "-scheme WebDriverAgentRunner -destination 'platform=iOS,name=<your phone>' "
-                        "-allowProvisioningUpdates DEVELOPMENT_TEAM=%s CODE_SIGN_STYLE=Automatic "
-                        "PRODUCT_BUNDLE_IDENTIFIER=%s test, then press Ctrl-C once the test starts on the phone"
-                        % (source_folder, team, bundle)),
+        ("on this Mac", "sign and install the runner once, with ONE of these two routes, not both:"),
+        (None, "route A, EXPERIMENTAL and not yet proven on a real phone: xtool signs the runner with your Apple "
+               "account. first download the pinned runner:"),
+        (None, "mkdir -p %s && curl -fL -o %s/runner.zip %s && echo '%s  %s/runner.zip' | shasum -a 256 -c - "
+               "&& unzip -o %s/runner.zip -d %s"
+               % (runner_folder, runner_folder, archive, WEBDRIVERAGENT_RUNNER_SHA256, runner_folder,
+                  runner_folder, runner_folder)),
+        (None, "the checksum line must say OK. if it does not, stop: the download is not the release. then follow "
+               "route A in docs/phone-interface.md (xtool install, and what it can and cannot do yet)"),
+        (None, "route B, the fallback: full Xcode, used only for this step and never at run time. it builds "
+               "from source and does not use the download above:"),
+        (None, "git clone %s %s && git -C %s checkout %s" % (WEBDRIVERAGENT_REPOSITORY, source_folder,
+                                                            source_folder, WEBDRIVERAGENT_COMMIT)),
+        (None, "xcodebuild -project %s/WebDriverAgent.xcodeproj -scheme WebDriverAgentRunner "
+               "-destination 'platform=iOS,name=<your phone>' -allowProvisioningUpdates DEVELOPMENT_TEAM=%s "
+               "CODE_SIGN_STYLE=Automatic PRODUCT_BUNDLE_IDENTIFIER=%s test, then press Ctrl-C once the test "
+               "starts on the phone" % (source_folder, team, bundle)),
         ("on the phone", "the first time: Settings > General, the device management page, "
                          "trust your developer certificate"),
         ("on the phone", "Settings > Developer: turn on the user interface automation switch"),
@@ -1475,7 +1482,12 @@ def command_setup(team, bundle):
     ]
     print("WebDriverAgent setup plan. sirven only prints this; you run each step yourself.")
     print("it signs WebDriverAgent with your own Apple account, on your own phone. nothing is sent anywhere else.")
-    for number_, (where, what) in enumerate(steps, 1):
+    number_ = 0
+    for where, what in steps:
+        if where is None:
+            print("       %s" % what)
+            continue
+        number_ += 1
         print("  %d. %s: %s" % (number_, where, what))
 
 
