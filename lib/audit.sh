@@ -26,7 +26,7 @@ audit_format_json() {
   "encoding": "JSON lines: one JSON object per line, appended, never rewritten",
   "fields": {
     "time": "universal time with seconds, like 2026-10-10T12:00:00Z",
-    "event": "install, step, grant, uninstall, session_start, command, session_end, revoke_started, revoke_finished",
+    "event": "install, step, grant, uninstall, component, session_start, command, session_end, revoke_started, revoke_finished",
     "user": "the service user, $SERVICE_USER by default",
     "principal": "who acted: owner for the package's own commands, owner-agent, or invite:<name> for a friend's agent",
     "level": "observer, builder, or operator; null when a grant change leaves no grant",
@@ -34,11 +34,13 @@ audit_format_json() {
     "command": "for command events: the command exactly as received",
     "exit_status": "for command events: the exit status",
     "source": "for session events: the transport and the remote address SSH reported",
-    "operation": "for install, step, grant, and uninstall events: install, uninstall, or grant rollback",
+    "operation": "for install, step, grant, uninstall, and component events: install, uninstall, grant rollback, add NAME, or remove NAME",
     "step": "for step events: the step number in the printed plan",
     "title": "for step events: the step title in the printed plan",
     "kind": "for step events: run, system, owner, or planonly",
-    "outcome": "for step events: applied, recorded (under --prefix), skipped, owner, or failed. for install and uninstall events: finished, failed, or refused",
+    "outcome": "for step events: applied, recorded (under --prefix), skipped, owner, or failed. for install, uninstall, and component events: finished, failed, or refused",
+    "component": "for component events: the name of the optional component",
+    "directory": "for component events: the folder the component was copied into",
     "paths": "for grant events: the granted paths after the change",
     "previous_level": "for grant events: the level before the change, or null",
     "previous_paths": "for grant events: the paths before the change",
@@ -47,7 +49,7 @@ audit_format_json() {
   "rules": [
     "the directory belongs to the owner, mode 0750; the agent cannot read, edit, or remove entries",
     "entries are appended by a forced-command wrapper on the SSH key; it sees what you send, not every system call",
-    "install, uninstall, and grant rollback write step and grant entries when they apply for real, never in a dry run",
+    "install, uninstall, grant rollback, sirven add, and sirven remove write entries when they apply for real, never in a dry run",
     "the kill switch writes revoke_started first and revoke_finished last"
   ],
   "example": {"time": "2026-10-10T12:00:00Z", "event": "command", "user": "$SERVICE_USER", "principal": "owner-agent", "level": "builder", "session": "k3v9q", "command": "npm test", "exit_status": 0}

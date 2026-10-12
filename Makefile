@@ -17,7 +17,7 @@ SHELL := /bin/sh
 PACKAGE := $(shell sed -n 's/^[[:space:]]*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' project.json | head -n 1 | tr '[:upper:]' '[:lower:]')
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo unversioned)
 DIST ?= dist
-SHELL_FILES := install.sh uninstall.sh bin/sirven app/macos/build.sh $(wildcard lib/*.sh) $(wildcard lib/attestation/*.sh) tests/run.sh tests/golden/run.sh $(wildcard tests/lib/*.sh) $(wildcard tests/unit/*.sh) macos/menu-bar/build-app.sh
+SHELL_FILES := install.sh uninstall.sh bin/sirven app/macos/build.sh $(wildcard lib/*.sh) $(wildcard lib/attestation/*.sh) $(wildcard components/*.sh) tests/run.sh tests/golden/run.sh $(wildcard tests/lib/*.sh) $(wildcard tests/unit/*.sh) macos/menu-bar/build-app.sh
 
 .PHONY: help test lint package runtime keep-awake test-keep-awake menu-bar test-menu-bar app app-test
 
