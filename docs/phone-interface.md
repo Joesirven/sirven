@@ -30,8 +30,11 @@ agent  --HTTP, bearer token-->  sirven phone serve (127.0.0.1 only)
   you tapped Trust on the phone. sirven checks that the record exists and never reads it out,
   stores it, or logs it. The phone's serial number never appears in any output either.
 - **Driving.** WebDriverAgent (an open source test runner from the Appium project) runs on the
-  phone and accepts commands over HTTP. sirven reaches it through the USB multiplexer directly,
-  so no separate port forwarder is needed. `SIRVEN_WEBDRIVERAGENT_URL` points sirven at a
+  phone and accepts commands over HTTP. At run time no full Xcode is open. Two light processes
+  start it: `pymobiledevice3 remote start-tunnel --native` makes the tunnel to the phone, and
+  `pymobiledevice3 developer dvt xcuitest` launches the runner through that tunnel. `sirven phone
+  start` runs both and restarts whichever one stops. sirven reaches the runner through the USB
+  multiplexer directly, so no separate port forwarder is needed. `SIRVEN_WEBDRIVERAGENT_URL` points sirven at a
   forwarder you already run instead, and is refused unless it is loopback HTTP.
 - **No analytics.** sirven sends nothing anywhere. (iPhone-use itself ships anonymous
   analytics that are on by default; none of that code is here.)
@@ -43,13 +46,26 @@ because it signs software with your Apple account.
 
 1. On the phone: plug it in, unlock it, tap Trust.
 2. On the phone: Settings > Privacy & Security > Developer Mode, on, then restart.
-3. On the Mac: full Xcode, signed into your Apple account.
-4. Clone WebDriverAgent at the commit iPhone-use pins, and build its runner for your phone
-   with `xcodebuild ... test`, using your own development team and a bundle name you own.
-5. On the phone, the first time: trust your developer certificate (Settings > General, the
-   device management page), and turn on the user interface automation switch under
-   Settings > Developer.
-6. Keep that `xcodebuild` running, then `sirven phone status`.
+3. On the Mac: install the pymobiledevice3 tool once with the Python tool installer, uv (needs
+   Python 3.12 or newer, and no administrator password): `uv tool install pymobiledevice3==11.28.2`.
+4. On the Mac: download the pinned runner, `WebDriverAgentRunner-Runner.zip` from the v16.14.0
+   release, into `~/.sirven/WebDriverAgent`, and unzip it there.
+5. Sign and install the runner on the phone once. Route A is the xtool route, which is
+   EXPERIMENTAL and UNPROVEN on a real phone. Route B is the fallback: full Xcode, signed into
+   your Apple account, used only for this step and never at run time. For route B, clone
+   WebDriverAgent at the commit iPhone-use pins into `~/.sirven/WebDriverAgent-source`, then run
+   `xcodebuild ... test` there with your own development team and a bundle name you own, and
+   press Ctrl-C once the test starts on the phone.
+6. On the phone, the first time: trust your developer certificate (Settings > General > VPN &
+   Device Management), and turn on the user interface automation switch under Settings > Developer.
+7. Run `SIRVEN_PHONE_RUNNER_BUNDLE=BUNDLE.xctrunner sirven phone start` and leave it running.
+   The runner identifier is the bundle name you gave setup, with `.xctrunner` added.
+8. From another terminal, `sirven phone status`.
+
+| Command | What it does |
+|---|---|
+| `SIRVEN_PHONE_RUNNER_BUNDLE=BUNDLE.xctrunner sirven phone start` | Starts the tunnel and the launcher and keeps both running. When one stops it is started again after 1 second, then 2, 4, and so on up to 30 seconds; a process that stays up for a minute starts over from 1 second. A new tunnel address restarts the launcher too. Ctrl-C stops both. |
+| `sirven phone status` | Also says whether the tunnel and the launcher are running, or not running. |
 
 ## Consent: opt in per session, owner only
 
@@ -235,9 +251,15 @@ case is his decision.
   route; and (`tests/unit/test_phone_ride.sh`) quoting and booking a ride with both live
   approvals, a refused hold, a decline on the phone, a price that rose, cancelling, and the
   payment prompt never touched.
-- **Not yet verified against a real iPhone.** To do it: plug in and trust a phone, run the setup
-  plan, then `sirven phone status`, `sirven phone allow`, `sirven phone serve`, and from another
-  terminal `GET /screen` and a `POST /tap` on something harmless, then `sirven phone log`.
+- Verified with fake processes only (`tests/unit/test_phone_runner.sh`, `tests/phone/`): the
+  supervisor starts the tunnel and the launcher, reads the tunnel's address from its output,
+  restarts the launcher with a new address after the tunnel restarts, waits longer after each
+  failure up to the cap, and stops both cleanly; `sirven phone status` reads the runner file.
+- **Not yet verified against a real iPhone.** The real tunnel, the real runner, and the xtool route
+  have not run on hardware. To do it: plug in and trust a phone, run the setup plan, then
+  `sirven phone start` in one terminal, `sirven phone status`, `sirven phone allow`,
+  `sirven phone serve`, and from another terminal `GET /screen` and a `POST /tap` on something
+  harmless, then `sirven phone log`.
 
 ## Credit
 
