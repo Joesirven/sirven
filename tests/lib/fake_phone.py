@@ -13,6 +13,13 @@ reads its mood from files in DIRECTORY on every request:
   unreadable present: the accessibility tree comes back empty
   tap_fails  present: WebDriverAgent answers a tap with an error, after recording it
 DIRECTORY/ready appears once both are listening.
+
+world mode: when DIRECTORY/world.json exists (copy tests/lib/phone_world.json there), the
+fake is a small phone with a home screen and several apps instead of one fixed screen. taps
+move between screens, typing fills fields, launch and home switch apps, and the position lives
+in DIRECTORY/world-state.json. a screen with "awaits_owner" is the phone's own face recognition payment
+sheet: it stays until the test plays the owner by creating DIRECTORY/owner_approves (go to the
+"awaits_owner" screen) or DIRECTORY/owner_declines (go to the "declined" screen).
 """
 
 import http.server
@@ -38,6 +45,132 @@ SOURCE = """<?xml version="1.0" encoding="UTF-8"?>
     <XCUIElementTypeButton type="XCUIElementTypeButton" name="Choose pickup" label="Choose pickup" x="20" y="200" width="350" height="50"/>
   </XCUIElementTypeApplication>
 </AppiumAUT>"""
+
+
+WORLD_PATH = os.path.join(DIRECTORY, "world.json")
+STATE_PATH = os.path.join(DIRECTORY, "world-state.json")
+WORLD_LOCK = threading.Lock()
+
+
+def world():
+    if not os.path.exists(WORLD_PATH):
+        return None
+    with open(WORLD_PATH) as handle:
+        return json.load(handle)
+
+
+def world_state(the_world):
+    if os.path.exists(STATE_PATH):
+        with open(STATE_PATH) as handle:
+            return json.load(handle)
+    return dict(the_world["start"], typed="")
+
+
+def save_state(state):
+    with open(STATE_PATH, "w") as handle:
+        json.dump(state, handle)
+
+
+def current_screen(the_world, state):
+    return the_world["apps"][state["app"]]["screens"][state["screen"]]
+
+
+def owner_decides(the_world, state):
+    """the owner answering the phone's own payment sheet, played by the test."""
+    screen = current_screen(the_world, state)
+    if "awaits_owner" not in screen:
+        return state
+    for name, target in (("owner_approves", screen["awaits_owner"]), ("owner_declines", screen.get("declined"))):
+        path = os.path.join(DIRECTORY, name)
+        if os.path.exists(path) and target:
+            os.remove(path)
+            state = dict(state, screen=target)
+            save_state(state)
+    return state
+
+
+def world_source(the_world, state):
+    screen = current_screen(the_world, state)
+    escape = lambda text: (str(text).replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;"))
+    lines = ['<?xml version="1.0" encoding="UTF-8"?>', "<AppiumAUT>",
+             '  <XCUIElementTypeApplication type="XCUIElementTypeApplication" name="%s" label="%s" '
+             'x="0" y="0" width="390" height="844">' % (escape(the_world["apps"][state["app"]]["name"]),
+                                                       escape(the_world["apps"][state["app"]]["name"]))]
+    for element in screen["elements"]:
+        kind = "XCUIElementType" + element["type"]
+        value = state["typed"] if element.get("typing") else element.get("value", "")
+        x, y, width, height = element["frame"]
+        lines.append('    <%s type="%s" name="%s" label="%s" value="%s" x="%s" y="%s" width="%s" height="%s"/>'
+                     % (kind, kind, escape(element["label"]), escape(element["label"]), escape(value),
+                        x, y, width, height))
+    lines += ["  </XCUIElementTypeApplication>", "</AppiumAUT>"]
+    return "\n".join(lines)
+
+
+def world_tap(the_world, state, x, y):
+    screen = current_screen(the_world, state)
+    under = [e for e in screen["elements"] if e["frame"][0] <= x <= e["frame"][0] + e["frame"][2]
+             and e["frame"][1] <= y <= e["frame"][1] + e["frame"][3]]
+    if not under:
+        return state
+    element = min(under, key=lambda e: e["frame"][2] * e["frame"][3])
+    if "launch" in element:
+        app = the_world["apps"][element["launch"]]
+        return dict(state, app=element["launch"], screen=app["first"], typed="")
+    if "goto" in element:
+        return dict(state, screen=element["goto"], typed="" if not element.get("keep_typed") else state["typed"])
+    return state
+
+
+def world_action(method, path, body):
+    """the world's answer to one WebDriverAgent call, or None to fall through."""
+    the_world = world()
+    if the_world is None:
+        return None
+    with WORLD_LOCK:
+        state = owner_decides(the_world, world_state(the_world))
+        bare = path.split("?")[0]
+        if method == "GET":
+            if bare == "/wda/activeAppInfo":
+                return {"bundleId": state["app"]}
+            if bare.endswith("/source"):
+                return world_source(the_world, state)
+            if bare.endswith("/attribute/type"):
+                return current_screen(the_world, state).get("focused", "XCUIElementTypeTextField")
+            return None
+        if bare.endswith("/wda/tap"):
+            if "awaits_owner" in current_screen(the_world, state):
+                # only the owner answers the phone's own payment sheet; a tap here is a failure
+                open(os.path.join(DIRECTORY, "sheet_touched"), "w").close()
+            state = world_tap(the_world, state, body["x"], body["y"])
+        elif bare.endswith("/wda/keys"):
+            text = body["value"][0]
+            state = dict(state, typed=state["typed"] + text.rstrip("\n"))
+            then = current_screen(the_world, state).get("on_type")
+            if then:
+                state = dict(state, screen=then, typed=state["typed"])
+        elif bare == "/wda/homescreen":
+            state = dict(state, app=the_world["start"]["app"], screen=the_world["start"]["screen"], typed="")
+        elif bare.endswith("/wda/apps/terminate"):
+            if body["bundleId"] == state["app"]:
+                state = dict(state, app=the_world["start"]["app"], screen=the_world["start"]["screen"], typed="")
+        elif bare.endswith("/wda/apps/activate"):
+            app = the_world["apps"].get(body["bundleId"])
+            if app is None:
+                return {"error": "unknown error", "message": "no app %s is installed" % body["bundleId"]}
+            if body["bundleId"] != state["app"]:
+                # like iOS: an app that is already in front resumes where it was
+                state = dict(state, app=body["bundleId"], screen=app["first"], typed="")
+        elif bare.endswith("/wda/dragfromtoforduration"):
+            screen = current_screen(the_world, state)
+            if body["fromX"] > body["toX"] and screen.get("next_page"):
+                state = dict(state, screen=screen["next_page"])
+            elif body["fromX"] < body["toX"] and screen.get("previous_page"):
+                state = dict(state, screen=screen["previous_page"])
+        else:
+            return None
+        save_state(state)
+        return {"world": "ok"}
 
 
 def mood(name, default=None):
@@ -69,6 +202,9 @@ class WebDriverAgent(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         record("GET", self.path, None)
         path = self.path.split("?")[0]
+        answered = world_action("GET", self.path, None)
+        if answered is not None:
+            return self.answer(answered)
         if path == "/status":
             return self.answer({"ready": True})
         if path == "/wda/locked":
@@ -95,6 +231,9 @@ class WebDriverAgent(http.server.BaseHTTPRequestHandler):
             return self.answer({"sessionId": "fake-session"}, {"sessionId": "fake-session"})
         if self.path.endswith("/wda/tap") and mood("tap_fails"):
             return self.answer({"error": "unknown error", "message": "the tap timed out"})
+        answered = world_action("POST", self.path, body)
+        if answered is not None:
+            return self.answer(None if answered == {"world": "ok"} else answered)
         return self.answer(None)
 
 

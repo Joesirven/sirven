@@ -102,6 +102,44 @@ all of it: the agent's own instructions still require asking before any real-wor
 the Solo tier. When the consent moment from the tier dial thread lands, `approve` should become
 one of its surfaces rather than a separate command.
 
+## The phone's own payment approval
+
+When a purchase reaches checkout, the phone shows its own face recognition or Apple Pay prompt
+for that one purchase. Only you answer it, on the phone. While it is on screen the bridge
+refuses every tap, keystroke, and swipe with `owner_approving_on_phone`, and `GET /screen`
+reports `"owner_approving_on_phone": true`, so the agent waits and reads the screen again.
+sirven never presses that prompt, never stores or replays a scan, and never lets one approval
+cover a later purchase. Together with the money hold, every payment is two live approvals for
+that one purchase: `sirven phone approve`, then the prompt on the phone.
+
+## Onboarding: the semantic map
+
+The first time you connect the phone each day, `sirven phone allow` offers onboarding, and
+`sirven phone onboard` runs it after your typed yes. It lists the apps on your home screens by
+name, then walks the screens of the apps you choose (`--app NAME`, repeatable; Uber and Lyft by
+default) and writes a semantic map to `~/.sirven/phone/map.json`: which app, which screen,
+where each key control is, what it does (its role, such as `destination_field` or
+`request_button`), and which screen it leads to. The agent reads it with `GET /map`, so it knows
+where to look instead of rediscovering each screen.
+
+What the crawl never does, in code: type, tap by point, or tap anything that could spend money,
+commit, send, delete, or sign out. It stops at once if the phone shows its own payment approval.
+To reach a deeper screen it relaunches the app fresh (`"fresh": true` on `POST /launch` closes
+the app first) and replays the taps.
+
+What the map never stores: a screenshot, any field's value, static text (where personal content
+lives), list rows without a price, or anything from a login screen (only a count of login
+screens skipped). A priced row is kept only as its shape, digits replaced by `#`
+("UberX, # min away, # min trip, $#.#"). Labels over 40 characters, or with an `@`, are dropped.
+
+| Command | What it does |
+|---|---|
+| `sirven phone onboard [--app NAME]... [--refresh]` | Build the map, or rebuild those apps with `--refresh`. Opens a short session for the crawl when none is open, and closes only that one. |
+| `sirven phone map [--json]` | See the map in plain lines, or the raw JSON. |
+| `sirven phone map prune APP [SCREEN]` | Remove an app, or one screen, from the map. |
+
+The owner's words for this moment are in `copy/phone-onboarding.md`.
+
 ## The local interface
 
 Base URL: `http://127.0.0.1:47817/v1/phone` (`sirven phone serve --port N` to change it).
@@ -118,7 +156,9 @@ for the separate service user, hand it over the way you hand over any other key.
 | `POST /type` | `{"text": "...", "submit": false, "reason": "..."}` | types into the focused field |
 | `POST /swipe` | `{"from_x", "from_y", "to_x", "to_y", "reason"}` | a quick drag |
 | `POST /home` | `{"reason": "..."}` | the home screen |
-| `POST /launch` | `{"bundle": "com.example.app", "reason": "..."}` | opens an app by its bundle name |
+| `POST /launch` | `{"bundle": "com.example.app", "reason": "...", "fresh": false}` | opens an app by its bundle name; `fresh` closes it first so it starts from its first screen |
+| `GET /map` or `GET /map?app=BUNDLE` | | the semantic map, needs an open session |
+| `GET /holds/HOLD` | | the state of one hold: waiting, approved, denied, or used. Read only |
 
 Every answer is JSON with `result` and `said` (a plain sentence). Results:
 
@@ -129,6 +169,7 @@ Every answer is JSON with `result` and `said` (a plain sentence). Results:
 | `no_consent` | 403 | no open phone session |
 | `secure_field`, `submit_not_allowed`, `not_approved` | 403 | refused, see above |
 | `held_for_approval` | 409 | waiting for the owner; carries `hold` |
+| `owner_approving_on_phone` | 409 | the phone is showing its own payment approval; touch nothing, read again |
 | `phone_locked`, `no_phone`, `not_trusted`, `several_phones`, `screen_unreadable` | 409 | the phone is not in a state to drive |
 | `not_found` | 404 | no element with that label on screen |
 | `bad_request` | 400 | malformed body, or no `reason` |
@@ -164,41 +205,20 @@ written, so this interface follows the pattern its brief describes (local, authe
 plainly logged) and stands on its own. When it lands, reconcile: same port family and token
 handling, and `/v1/phone` mounted under the runtime's interface or beside it.
 
-## Seam for the ride concierge (threads 08 and 13)
+## The iPhone ride backend
 
-The first use case is booking flows in apps with no public interface. For rides, the phone path
-is a third way to fulfil a booking, next to an official partner backend and the human concierge:
-your agent books the ride in your own ride app on your own phone.
+The first use case, booking flows in apps with no public interface, is built:
+`connectors/ride/ride_phone` implements the ride connector's backend interface by driving the
+owner's own Uber or Lyft app through this interface. It finds the app and its destination field
+in the semantic map, reads the priced rows, re-reads the price before booking and refuses if it
+rose, taps the request button (held for `sirven phone approve`), then waits, touching nothing,
+while the owner answers the phone's own payment prompt. The calling agent never learns that a
+phone was involved; the provider is only a returned value. See `connectors/ride/README.md` and
+the contract's "What the payment approval reads".
 
-**For the ride connector contract (thread 08).** The phone path sits *behind* the contract as a
-backend. The calling agent never learns that a phone was involved; the provider is only a
-returned attribute value, as the contract requires.
-
-| Contract call | Phone backend does |
-|---|---|
-| `quote_ride` | `launch` the ride app, `type` origin and destination, `screen` to read each option's price, estimated arrival, and trip time, then return them as ranked options. Read-only apart from typing; no hold fires. |
-| `book_ride(quote_id)` | `tap` the request button. The money hold fires, so the backend returns a result meaning "waiting for the owner's approval" with a way to poll; after `approve`, it repeats the tap with the approval and reads the confirmation screen for the booking identifier and tracking. |
-| `cancel_ride(booking_id)` | `launch`, find the trip, `tap` cancel (also held when the label reads like a charge, such as a cancellation fee), read the outcome. |
-
-Open questions for thread 08, to settle in the contract, not here:
-- an error or status for "waiting for the owner's approval", which every backend that charges
-  money may need;
-- an error for "backend unavailable" (phone unplugged, locked, no session open), distinct from
-  "no rides available";
-- how a quote that was read off a screen expires, since the app's price can change between quote
-  and book. The phone backend should re-read the price before tapping and refuse if it rose above
-  the quoted amount or the budget ceiling.
-
-**For the end-to-end demo (thread 13).** The phone path is an alternative to the human concierge
-leg for the Waymo booking, for a user whose phone is plugged in with the Waymo app signed in.
-
-- If the phone is not available, the orchestrator says so to the user and offers the human
-  concierge. It never switches paths silently.
-- Payment goes through whatever payment method is saved in the user's own ride app. The
-  per-booking virtual card from thread 11 applies only if the user adds it to the app, which this
-  integration does not do.
-- The demo stays rehearsal only: no real booking until Jose runs it himself. Against the fake
-  phone in `tests/lib/fake_phone.py` the whole quote, hold, approve, and tap sequence runs today.
+Open for Jose: the phone's own prompt appears only when the ride app pays with Apple Pay; with a
+saved card the money hold is the only approval. Whether sirven should refuse to book in that
+case is his decision.
 
 ## What is verified
 
@@ -210,6 +230,11 @@ leg for the Waymo booking, for a user whose phone is plugged in with the Waymo a
   inside a request button; an unreadable screen; password field and return refusals; locked
   phone; session expiry and stop; failed actions in the log; the test seam never honoured for
   a real phone; the plain-language log.
+- Verified against the fake phone in world mode (`tests/unit/test_phone_map.sh`,
+  `tests/phone/`): onboarding, the map's privacy rules, prune, the once-a-day offer, and the map
+  route; and (`tests/unit/test_phone_ride.sh`) quoting and booking a ride with both live
+  approvals, a refused hold, a decline on the phone, a price that rose, cancelling, and the
+  payment prompt never touched.
 - **Not yet verified against a real iPhone.** To do it: plug in and trust a phone, run the setup
   plan, then `sirven phone status`, `sirven phone allow`, `sirven phone serve`, and from another
   terminal `GET /screen` and a `POST /tap` on something harmless, then `sirven phone log`.

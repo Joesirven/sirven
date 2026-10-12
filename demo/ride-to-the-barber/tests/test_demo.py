@@ -19,10 +19,13 @@ sys.path.insert(0, DEMO_DIR)
 
 import demo  # noqa: E402
 from ride_demo import gates, request  # noqa: E402
+from ride_demo.agent import onboard  # noqa: E402
+from ride_demo.charges import ChargeRecords  # noqa: E402
 from ride_demo.concierge_queue import ConciergeQueue, QueueError  # noqa: E402
-from ride_demo.connector import Router, money  # noqa: E402
-from ride_demo.partner_backend import FixturePartnerBackend  # noqa: E402
-from ride_demo.payment import RIDE_CATEGORY, Declined, TestModeCards  # noqa: E402
+from ride_demo.connector import ConnectorError, Router, money, option_for, rank_options  # noqa: E402
+from ride_demo.phone_backend import BOOKED_BY, PhoneBackend  # noqa: E402
+from ride_demo.recorder import Recorder  # noqa: E402
+from ride_demo.rehearsal_phone import PhoneRefusal, RehearsalPhone  # noqa: E402
 
 FAST = "0.2,0.2,0.2,0.2"
 WINDOW = {"earliest": "2026-10-13T14:50:00-07:00", "latest": "2026-10-13T15:05:00-07:00"}
@@ -62,22 +65,45 @@ class RequestTest(unittest.TestCase):
             request.parse("take me somewhere nice")
 
 
+class Owner:
+    """plays the owner for the rehearsal phone: answers by kind, and remembers every question."""
+
+    def __init__(self, **answers):
+        self.answers = answers
+        self.asked = []
+
+    def __call__(self, question, kind):
+        self.asked.append(kind)
+        return self.answers.get(kind, True)
+
+
+def onboarded_phone(owner):
+    phone = RehearsalPhone(owner)
+    with contextlib.redirect_stdout(io.StringIO()):
+        onboard(phone, Recorder())
+    return phone
+
+
 class ConnectorTest(unittest.TestCase):
-    def router(self):
-        return Router([FixturePartnerBackend(os.path.join(DEMO_DIR, "fixtures", "partner-quotes.json"))])
+    def router(self, owner=None):
+        self.owner = owner or Owner()
+        self.phone = onboarded_phone(self.owner)
+        return Router([PhoneBackend(self.phone)])
 
     def test_budget_counts_the_tip_ceiling(self):
-        quotes = self.router().quote_ride("a", "b", WINDOW, PREFERENCES, money(2100))
-        flagged = {option["product"]: option["constraint_flags"] for option in quotes["options"]}
-        # UberX is 18.90 plus a 3.00 tip ceiling: 21.90, over a 21.00 budget.
-        self.assertIn("over_budget", flagged["UberX"])
+        option = option_for("r", "Uber", "Standard", 1890, 300, 4, 16, WINDOW, PREFERENCES)
+        # 18.90 plus a 3.00 tip ceiling is 21.90, over a 21.00 budget.
+        self.assertIn("over_budget", rank_options([option], PREFERENCES, money(2100))[0]["constraint_flags"])
 
     def test_quotes_never_name_a_backend(self):
         quotes = self.router().quote_ride("a", "b", WINDOW, PREFERENCES, money(2500))["options"]
+        self.assertEqual({option["provider"] for option in quotes}, {"Uber", "Lyft"})
         for option in quotes:
             self.assertNotIn("backend_reference", option)
+            self.assertEqual(option["tip_ceiling"]["amount_minor"], 0)
             text = json.dumps(option).lower()
-            for word in ("partner", "fixture", "concierge", "req_"):
+            for word in ("partner", "fixture", "concierge", "req_", "phone", "rehearsal", "phone-option",
+                         "ubercab", "zimride", "com.", "uberx"):
                 self.assertNotIn(word, text)
 
     def test_book_is_idempotent_and_cancel_reconciles(self):
@@ -86,33 +112,143 @@ class ConnectorTest(unittest.TestCase):
         first = router.book_ride(quote["quote_id"], idempotency_key="key-1")
         again = router.book_ride(quote["quote_id"], idempotency_key="key-1")
         self.assertEqual(first["booking_id"], again["booking_id"])
+        self.assertEqual(first["confirmation"]["booked_by"], BOOKED_BY)
+        self.assertEqual(self.owner.asked, ["phone_hold", "phone_payment"], "one booking, asked once each")
         self.assertEqual(router.cancel_ride(first["booking_id"])["status"], "cancelled")
+        self.assertEqual(self.phone.where(), ("Uber", "cancelled"))
+
+    def test_a_phone_that_is_not_there_is_reported_not_hidden(self):
+        class NoPhone:
+            def phone_map(self, app=None):
+                raise PhoneRefusal("bridge_not_running", "the phone bridge did not answer", 503, {})
+        quotes = Router([PhoneBackend(NoPhone())]).quote_ride("a", "b", WINDOW, PREFERENCES, money(2500))
+        self.assertEqual(quotes["options"], [])
+        self.assertEqual(quotes["unavailable"], [{"provider": "Uber", "reason": "provider_unavailable"},
+                                                 {"provider": "Lyft", "reason": "provider_unavailable"}])
+
+    def test_an_unonboarded_phone_has_no_rides(self):
+        quotes = Router([PhoneBackend(RehearsalPhone(Owner()))]).quote_ride("a", "b", WINDOW, PREFERENCES, money(2500))
+        self.assertEqual(quotes["options"], [])
+        self.assertEqual({entry["provider"] for entry in quotes["unavailable"]}, {"Uber", "Lyft"})
 
 
-class PaymentTest(unittest.TestCase):
-    def setUp(self):
-        self.tmp = tempfile.mkdtemp()
-        self.cards = TestModeCards(os.path.join(self.tmp, "cards.json"))
-        quote = {"quote_id": "q_1", "provider": "Waymo", "product": "Waymo One",
-                 "price": money(2140), "tip_ceiling": money(0)}
-        self.card = self.cards.hold(quote, "the reason")
+class RehearsalPhoneTest(unittest.TestCase):
+    """the bridge's rules, kept by the rehearsal phone."""
 
-    def tearDown(self):
-        shutil.rmtree(self.tmp)
+    def at_checkout(self, owner=None):
+        phone = onboarded_phone(owner or Owner())
+        phone.launch("com.ubercab.UberClient", "test")
+        phone.tap("Where to?", "test")
+        phone.type_text("2400 Mission St", "test")
+        phone.tap("UberX, 4 min away, 14 min trip, $18.40", "test")
+        return phone
 
-    def test_cap_and_category(self):
-        self.assertEqual(self.card["spending_limit_minor"], 2140)
-        with self.assertRaises(Declined):
-            self.cards.authorize(self.card["card_id"], 2141, RIDE_CATEGORY)
-        with self.assertRaises(Declined):
-            self.cards.authorize(self.card["card_id"], 500, "restaurants")
-        self.cards.authorize(self.card["card_id"], 2140, RIDE_CATEGORY)
+    def held(self, phone):
+        with self.assertRaises(PhoneRefusal) as caught:
+            phone.tap("Request UberX", "test")
+        self.assertEqual(caught.exception.result, "held_for_approval")
+        return caught.exception.hold
 
-    def test_release_charges_nothing(self):
-        released = self.cards.release(self.card["card_id"], "booking failed")
-        self.assertEqual((released["status"], released["authorized_minor"]), ("released", 0))
-        with self.assertRaises(Declined):
-            self.cards.authorize(self.card["card_id"], 100, RIDE_CATEGORY)
+    def test_onboarding_finds_the_destination_field_through_the_map(self):
+        phone = onboarded_phone(Owner())
+        answer = phone.phone_map()["map"]
+        self.assertEqual(answer["inventory"]["names"], ["Uber", "Lyft"])
+        self.assertTrue(answer["onboarded_at"])
+        self.assertNotIn("value", json.dumps(answer))
+
+    def test_a_request_tap_is_held(self):
+        phone = self.at_checkout()
+        first, second = self.held(phone), self.held(phone)
+        self.assertNotEqual(first, second, "every held tap gets a fresh hold")
+        self.assertEqual(phone.where(), ("Uber", "options_x"))
+
+    def test_an_approval_works_once_and_for_that_tap_only(self):
+        owner = Owner()
+        phone = self.at_checkout(owner)
+        hold = self.held(phone)
+        self.assertEqual(phone.hold_state(hold)["state"], "approved")
+        phone.tap("Request UberX", "test", money=True, approval=hold)
+        self.assertEqual(phone.where(), ("Uber", "pay_x"))
+        self.assertEqual(phone.hold_state(hold)["state"], "used")
+        self.assertEqual(owner.asked, ["phone_hold"], "the owner is asked once per hold")
+        phone.state = dict(phone.state, screen="options_x")
+        with self.assertRaises(PhoneRefusal) as caught:
+            phone.tap("Request UberX", "test", money=True, approval=hold)
+        self.assertEqual(caught.exception.result, "not_approved")
+        other = self.held(phone)
+        phone.hold_state(other)
+        phone.tap("Comfort, 6 min away, 13 min trip, $24.10", "test")
+        with self.assertRaises(PhoneRefusal) as caught:
+            phone.tap("Request Comfort", "test", approval=other)
+        self.assertEqual(caught.exception.result, "not_approved", "an approval is for one label")
+
+    def test_a_denied_hold_is_never_tapped(self):
+        phone = self.at_checkout(Owner(phone_hold=False))
+        hold = self.held(phone)
+        self.assertEqual(phone.hold_state(hold)["state"], "denied")
+        with self.assertRaises(PhoneRefusal):
+            phone.tap("Request UberX", "test", approval=hold)
+
+    def test_the_payment_sheet_refuses_every_touch(self):
+        owner = Owner()
+        phone = self.at_checkout(owner)
+        hold = self.held(phone)
+        phone.hold_state(hold)
+        phone.tap("Request UberX", "test", approval=hold)
+        for touch in (lambda: phone.tap("Cancel", "test"), lambda: phone.type_text("x", "test"),
+                      lambda: phone.driver().swipe({"from_x": 300, "to_x": 80, "reason": "test"})):
+            with self.assertRaises(PhoneRefusal) as caught:
+                touch()
+            self.assertEqual(caught.exception.result, "owner_approving_on_phone")
+        self.assertEqual(phone.where(), ("Uber", "pay_x"))
+        self.assertNotIn("phone_payment", owner.asked, "only reading the sheet asks the owner, never a touch")
+        self.assertTrue(phone.screen("test")["owner_approving_on_phone"])
+        self.assertEqual(phone.where(), ("Uber", "on_the_way"))
+
+    def test_onboarding_never_taps_money(self):
+        phone = self.at_checkout()
+        with self.assertRaises(PhoneRefusal) as caught:
+            phone.driver().tap({"label": "Request UberX", "reason": "test"})
+        self.assertEqual((caught.exception.result, caught.exception.hold), ("held_for_approval", None))
+        self.assertEqual(phone.holds, {})
+
+    def test_declining_on_the_phone_books_nothing(self):
+        owner = Owner(phone_payment=False)
+        phone = onboarded_phone(owner)
+        router = Router([PhoneBackend(phone)])
+        quote = router.quote_ride("a", "b", WINDOW, PREFERENCES, money(2500))["options"][0]
+        with self.assertRaises(ConnectorError) as caught:
+            router.book_ride(quote["quote_id"], idempotency_key="key-1")
+        self.assertEqual(caught.exception.code, "payment_declined")
+        self.assertEqual(owner.asked, ["phone_hold", "phone_payment"])
+        self.assertEqual(phone.where(), ("Uber", "options"))
+
+    def test_a_price_above_the_cap_is_refused(self):
+        owner = Owner()
+        phone = onboarded_phone(owner)
+        router = Router([PhoneBackend(phone)])
+        quote = router.quote_ride("a", "b", WINDOW, PREFERENCES, money(2500))["options"][0]
+        self.assertEqual(quote["price"]["amount_minor"], 1840)
+        phone.reprice("UberX, 4 min away, 14 min trip, $18.40", "UberX, 4 min away, 14 min trip, $22.90")
+        with self.assertRaises(ConnectorError) as caught:
+            router.book_ride(quote["quote_id"], idempotency_key="key-1")
+        self.assertEqual(caught.exception.code, "price_changed")
+        self.assertEqual(owner.asked, [], "nothing reached the owner, so nothing was held or paid")
+        self.assertEqual(phone.holds, {})
+
+
+class ChargeRecordTest(Temporary):
+    def test_a_record_carries_no_card(self):
+        records = ChargeRecords(os.path.join(self.tmp, "charges.json"))
+        quote = {"quote_id": "q_1", "provider": "Uber", "product": "Standard", "price": money(1840),
+                 "tip_ceiling": money(0)}
+        record = records.write(quote, 1840, "the reason")
+        records.not_booked(record["record_id"], "payment_declined")
+        with open(os.path.join(self.tmp, "charges.json")) as handle:
+            saved = json.load(handle)[0]
+        self.assertEqual((saved["status"], saved["cap_minor"], saved["paid_how"]), ("not_booked", 1840, "nothing was paid"))
+        for word in ("card", "last4", "stripe", "issuing"):
+            self.assertNotIn(word, json.dumps(saved).lower())
 
 
 class QueueTest(Temporary):
@@ -170,10 +306,12 @@ class EndToEndTest(Temporary):
             ics = handle.read()
         self.assertTrue(all(len(line.encode()) <= 75 for line in ics.split("\r\n")))
         with open(os.path.join(state, "charge-records.json")) as handle:
-            card = json.load(handle)[0]
-        self.assertEqual((card["spending_limit_minor"], card["authorized_minor"]), (2140, 2140))
-        self.assertTrue(card["charge_record"]["booking_id"].startswith("b_"))
-        self.assertIn("preferred service", card["charge_record"]["rationale"])
+            charge = json.load(handle)[0]
+        self.assertEqual((charge["cap_minor"], charge["booked_minor"], charge["status"]), (2140, 2140, "booked"))
+        self.assertTrue(charge["booking_id"].startswith("b_"))
+        self.assertIn("preferred service", charge["rationale"])
+        self.assertIn("no payment method", charge["paid_how"])
+        self.assertNotIn("card", json.dumps(charge))
         with open(os.path.join(state, "service-levels.jsonl")) as handle:
             levels = [json.loads(line) for line in handle]
         self.assertEqual([(entry["leg"], entry["met"]) for entry in levels], [("quote", True), ("booking", True)])
@@ -188,8 +326,9 @@ class EndToEndTest(Temporary):
         self.assertEqual(status, 0, out)
         request = ConciergeQueue(os.path.join(state, "concierge-queue")).list(("booked",))[0]
         self.assertEqual(sorted(request["trip"]), ["departure_window", "destination", "origin", "provider"])
-        self.assertEqual(sorted(request["payment"]),
-                         ["allowed_categories", "card_id", "last4", "mode", "spending_limit_minor"])
+        self.assertEqual(request["payment"]["cap_minor"], 2140)
+        self.assertEqual(sorted(request["payment"]), ["cap_minor", "note"])
+        self.assertIn("no payment method", request["payment"]["note"])
 
     def test_a_second_run_on_the_same_state_still_finds_the_barber(self):
         state = os.path.join(self.tmp, "shared")
@@ -206,13 +345,23 @@ class EndToEndTest(Temporary):
         self.assertIn("I am not going to keep trying behind your back", out)
         self.assertIn("Ride to Mission Street Barbers (Uber)", out)
         self.assertIn("agent: Jose (rehearsal), a sirven concierge, saw this trip request.", out)
+        # the phone path: the real crawler mapped the phone, the bridge held the request, and the
+        # phone's own prompt was asked, each once
+        self.assertIn("destination field found through the map in Uber, Lyft", out)
+        self.assertEqual(out.count("? sirven phone approve "), 1)
+        self.assertEqual(out.count("the phone's own Apple Pay sheet"), 1)
+        with open(os.path.join(state, "calendar.json")) as handle:
+            ride = json.load(handle)["events"][-1]
+        self.assertIn("the owner's phone, approved live", ride["description"])
+        self.assertNotIn("test card", ride["description"])
 
-    def test_fare_over_the_limit_releases_the_card(self):
+    def test_fare_over_the_cap_books_nothing(self):
         status, out, state, _ = self.run_demo("--yes", "--scripted-concierge", "--scenario", "fare_over_cap")
         self.assertEqual(status, 4, out)
         with open(os.path.join(state, "charge-records.json")) as handle:
-            card = json.load(handle)[0]
-        self.assertEqual((card["status"], card["authorized_minor"]), ("released", 0))
+            record = json.load(handle)[0]
+        self.assertEqual((record["status"], record["not_booked_because"]), ("not_booked", "price_changed"))
+        self.assertFalse(os.path.exists(os.path.join(state, "calendar.json")))
         withdrawn = ConciergeQueue(os.path.join(state, "concierge-queue")).list(("withdrawn",))
         self.assertIn("cancel this ride", withdrawn[0]["withdrawn_because"])
         self.assertIn("agent: Jose (rehearsal), a sirven concierge, saw this trip request.", out)

@@ -1,0 +1,1138 @@
+{
+ "substitution": "The owner's iPhone, for the rehearsal: a home screen and the Uber and Lyft apps, adapted from tests/lib/phone_world.json. Prices, cars, and plates are invented. A screen with awaits_owner is the phone's own Apple Pay sheet, which only the owner answers, on the phone.",
+ "start": {
+  "app": "com.apple.springboard",
+  "screen": "page1"
+ },
+ "apps": {
+  "com.apple.springboard": {
+   "name": "Home Screen",
+   "first": "page1",
+   "screens": {
+    "page1": {
+     "elements": [
+      {
+       "type": "Icon",
+       "label": "Uber",
+       "frame": [
+        24,
+        80,
+        64,
+        64
+       ],
+       "launch": "com.ubercab.UberClient"
+      },
+      {
+       "type": "Icon",
+       "label": "Lyft",
+       "frame": [
+        114,
+        80,
+        64,
+        64
+       ],
+       "launch": "com.zimride.instant"
+      }
+     ]
+    }
+   }
+  },
+  "com.ubercab.UberClient": {
+   "name": "Uber",
+   "first": "home",
+   "screens": {
+    "home": {
+     "elements": [
+      {
+       "type": "TextField",
+       "label": "Where to?",
+       "frame": [
+        20,
+        120,
+        350,
+        44
+       ],
+       "goto": "search"
+      },
+      {
+       "type": "StaticText",
+       "label": "Good afternoon",
+       "frame": [
+        20,
+        60,
+        350,
+        30
+       ]
+      },
+      {
+       "type": "Button",
+       "label": "Home",
+       "frame": [
+        0,
+        780,
+        130,
+        64
+       ],
+       "goto": "home"
+      },
+      {
+       "type": "Button",
+       "label": "Services",
+       "frame": [
+        130,
+        780,
+        130,
+        64
+       ],
+       "goto": "services"
+      },
+      {
+       "type": "Button",
+       "label": "Account",
+       "frame": [
+        260,
+        780,
+        130,
+        64
+       ],
+       "goto": "account"
+      }
+     ]
+    },
+    "search": {
+     "elements": [
+      {
+       "type": "TextField",
+       "label": "Search destination",
+       "frame": [
+        20,
+        120,
+        350,
+        44
+       ],
+       "typing": true
+      },
+      {
+       "type": "Button",
+       "label": "Back",
+       "frame": [
+        10,
+        40,
+        60,
+        40
+       ],
+       "goto": "home"
+      }
+     ],
+     "on_type": "options"
+    },
+    "options": {
+     "elements": [
+      {
+       "type": "Button",
+       "label": "Back",
+       "frame": [
+        10,
+        40,
+        60,
+        40
+       ],
+       "goto": "home"
+      },
+      {
+       "type": "Cell",
+       "label": "UberX, 4 min away, 14 min trip, $18.40",
+       "frame": [
+        20,
+        200,
+        350,
+        64
+       ],
+       "goto": "options_x"
+      },
+      {
+       "type": "Cell",
+       "label": "Comfort, 6 min away, 13 min trip, $24.10",
+       "frame": [
+        20,
+        270,
+        350,
+        64
+       ],
+       "goto": "options_comfort"
+      },
+      {
+       "type": "Cell",
+       "label": "Uber XL, 9 min away, 14 min trip, $31.75",
+       "frame": [
+        20,
+        340,
+        350,
+        64
+       ],
+       "goto": "options_xl"
+      },
+      {
+       "type": "StaticText",
+       "label": "Apple Pay",
+       "frame": [
+        20,
+        700,
+        150,
+        30
+       ]
+      }
+     ]
+    },
+    "options_x": {
+     "elements": [
+      {
+       "type": "Button",
+       "label": "Back",
+       "frame": [
+        10,
+        40,
+        60,
+        40
+       ],
+       "goto": "home"
+      },
+      {
+       "type": "Cell",
+       "label": "UberX, 4 min away, 14 min trip, $18.40",
+       "frame": [
+        20,
+        200,
+        350,
+        64
+       ],
+       "goto": "options_x"
+      },
+      {
+       "type": "Cell",
+       "label": "Comfort, 6 min away, 13 min trip, $24.10",
+       "frame": [
+        20,
+        270,
+        350,
+        64
+       ],
+       "goto": "options_comfort"
+      },
+      {
+       "type": "Cell",
+       "label": "Uber XL, 9 min away, 14 min trip, $31.75",
+       "frame": [
+        20,
+        340,
+        350,
+        64
+       ],
+       "goto": "options_xl"
+      },
+      {
+       "type": "Button",
+       "label": "Request UberX",
+       "frame": [
+        20,
+        740,
+        350,
+        50
+       ],
+       "goto": "pay_x"
+      }
+     ]
+    },
+    "pay_x": {
+     "awaits_owner": "on_the_way",
+     "declined": "options",
+     "elements": [
+      {
+       "type": "StaticText",
+       "label": "Uber, $18.40",
+       "frame": [
+        20,
+        500,
+        350,
+        30
+       ]
+      },
+      {
+       "type": "StaticText",
+       "label": "Double Click to Pay",
+       "frame": [
+        20,
+        600,
+        350,
+        30
+       ]
+      },
+      {
+       "type": "Button",
+       "label": "Cancel",
+       "frame": [
+        20,
+        700,
+        350,
+        50
+       ],
+       "goto": "options"
+      }
+     ]
+    },
+    "options_comfort": {
+     "elements": [
+      {
+       "type": "Button",
+       "label": "Back",
+       "frame": [
+        10,
+        40,
+        60,
+        40
+       ],
+       "goto": "home"
+      },
+      {
+       "type": "Cell",
+       "label": "UberX, 4 min away, 14 min trip, $18.40",
+       "frame": [
+        20,
+        200,
+        350,
+        64
+       ],
+       "goto": "options_x"
+      },
+      {
+       "type": "Cell",
+       "label": "Comfort, 6 min away, 13 min trip, $24.10",
+       "frame": [
+        20,
+        270,
+        350,
+        64
+       ],
+       "goto": "options_comfort"
+      },
+      {
+       "type": "Cell",
+       "label": "Uber XL, 9 min away, 14 min trip, $31.75",
+       "frame": [
+        20,
+        340,
+        350,
+        64
+       ],
+       "goto": "options_xl"
+      },
+      {
+       "type": "Button",
+       "label": "Request Comfort",
+       "frame": [
+        20,
+        740,
+        350,
+        50
+       ],
+       "goto": "pay_comfort"
+      }
+     ]
+    },
+    "pay_comfort": {
+     "awaits_owner": "on_the_way",
+     "declined": "options",
+     "elements": [
+      {
+       "type": "StaticText",
+       "label": "Uber, $24.10",
+       "frame": [
+        20,
+        500,
+        350,
+        30
+       ]
+      },
+      {
+       "type": "StaticText",
+       "label": "Double Click to Pay",
+       "frame": [
+        20,
+        600,
+        350,
+        30
+       ]
+      },
+      {
+       "type": "Button",
+       "label": "Cancel",
+       "frame": [
+        20,
+        700,
+        350,
+        50
+       ],
+       "goto": "options"
+      }
+     ]
+    },
+    "options_xl": {
+     "elements": [
+      {
+       "type": "Button",
+       "label": "Back",
+       "frame": [
+        10,
+        40,
+        60,
+        40
+       ],
+       "goto": "home"
+      },
+      {
+       "type": "Cell",
+       "label": "UberX, 4 min away, 14 min trip, $18.40",
+       "frame": [
+        20,
+        200,
+        350,
+        64
+       ],
+       "goto": "options_x"
+      },
+      {
+       "type": "Cell",
+       "label": "Comfort, 6 min away, 13 min trip, $24.10",
+       "frame": [
+        20,
+        270,
+        350,
+        64
+       ],
+       "goto": "options_comfort"
+      },
+      {
+       "type": "Cell",
+       "label": "Uber XL, 9 min away, 14 min trip, $31.75",
+       "frame": [
+        20,
+        340,
+        350,
+        64
+       ],
+       "goto": "options_xl"
+      },
+      {
+       "type": "Button",
+       "label": "Request Uber XL",
+       "frame": [
+        20,
+        740,
+        350,
+        50
+       ],
+       "goto": "pay_xl"
+      }
+     ]
+    },
+    "pay_xl": {
+     "awaits_owner": "on_the_way",
+     "declined": "options",
+     "elements": [
+      {
+       "type": "StaticText",
+       "label": "Uber, $31.75",
+       "frame": [
+        20,
+        500,
+        350,
+        30
+       ]
+      },
+      {
+       "type": "StaticText",
+       "label": "Double Click to Pay",
+       "frame": [
+        20,
+        600,
+        350,
+        30
+       ]
+      },
+      {
+       "type": "Button",
+       "label": "Cancel",
+       "frame": [
+        20,
+        700,
+        350,
+        50
+       ],
+       "goto": "options"
+      }
+     ]
+    },
+    "on_the_way": {
+     "elements": [
+      {
+       "type": "StaticText",
+       "label": "Your driver is on the way",
+       "frame": [
+        20,
+        100,
+        350,
+        30
+       ]
+      },
+      {
+       "type": "StaticText",
+       "label": "Pickup in 4 min",
+       "frame": [
+        20,
+        140,
+        350,
+        30
+       ]
+      },
+      {
+       "type": "StaticText",
+       "label": "Toyota Prius, white, 7ABC123",
+       "frame": [
+        20,
+        180,
+        350,
+        30
+       ]
+      },
+      {
+       "type": "Button",
+       "label": "Cancel ride",
+       "frame": [
+        20,
+        700,
+        350,
+        50
+       ],
+       "goto": "cancel_confirm"
+      }
+     ]
+    },
+    "cancel_confirm": {
+     "elements": [
+      {
+       "type": "StaticText",
+       "label": "Cancel this ride? No fee if you cancel now.",
+       "frame": [
+        20,
+        300,
+        350,
+        30
+       ]
+      },
+      {
+       "type": "Button",
+       "label": "Yes, cancel",
+       "frame": [
+        20,
+        600,
+        350,
+        50
+       ],
+       "goto": "cancelled"
+      },
+      {
+       "type": "Button",
+       "label": "Keep ride",
+       "frame": [
+        20,
+        670,
+        350,
+        50
+       ],
+       "goto": "on_the_way"
+      }
+     ]
+    },
+    "cancelled": {
+     "elements": [
+      {
+       "type": "StaticText",
+       "label": "Your ride was cancelled",
+       "frame": [
+        20,
+        100,
+        350,
+        30
+       ]
+      },
+      {
+       "type": "TextField",
+       "label": "Where to?",
+       "frame": [
+        20,
+        160,
+        350,
+        44
+       ],
+       "goto": "search"
+      }
+     ]
+    },
+    "services": {
+     "elements": [
+      {
+       "type": "Button",
+       "label": "Ride",
+       "frame": [
+        20,
+        120,
+        350,
+        50
+       ],
+       "goto": "home"
+      },
+      {
+       "type": "Button",
+       "label": "Reserve",
+       "frame": [
+        20,
+        190,
+        350,
+        50
+       ]
+      },
+      {
+       "type": "Button",
+       "label": "Rent",
+       "frame": [
+        20,
+        260,
+        350,
+        50
+       ]
+      },
+      {
+       "type": "Button",
+       "label": "Home",
+       "frame": [
+        0,
+        780,
+        130,
+        64
+       ],
+       "goto": "home"
+      },
+      {
+       "type": "Button",
+       "label": "Services",
+       "frame": [
+        130,
+        780,
+        130,
+        64
+       ],
+       "goto": "services"
+      },
+      {
+       "type": "Button",
+       "label": "Account",
+       "frame": [
+        260,
+        780,
+        130,
+        64
+       ],
+       "goto": "account"
+      }
+     ]
+    },
+    "account": {
+     "elements": [
+      {
+       "type": "Button",
+       "label": "Wallet",
+       "frame": [
+        20,
+        140,
+        350,
+        50
+       ]
+      },
+      {
+       "type": "Button",
+       "label": "Sign out",
+       "frame": [
+        20,
+        600,
+        350,
+        50
+       ]
+      },
+      {
+       "type": "Button",
+       "label": "Home",
+       "frame": [
+        0,
+        780,
+        130,
+        64
+       ],
+       "goto": "home"
+      },
+      {
+       "type": "Button",
+       "label": "Services",
+       "frame": [
+        130,
+        780,
+        130,
+        64
+       ],
+       "goto": "services"
+      },
+      {
+       "type": "Button",
+       "label": "Account",
+       "frame": [
+        260,
+        780,
+        130,
+        64
+       ],
+       "goto": "account"
+      }
+     ]
+    }
+   }
+  },
+  "com.zimride.instant": {
+   "name": "Lyft",
+   "first": "home",
+   "screens": {
+    "home": {
+     "elements": [
+      {
+       "type": "TextField",
+       "label": "Search destination",
+       "frame": [
+        20,
+        120,
+        350,
+        44
+       ],
+       "goto": "search"
+      },
+      {
+       "type": "Button",
+       "label": "Rides",
+       "frame": [
+        0,
+        780,
+        195,
+        64
+       ],
+       "goto": "home"
+      },
+      {
+       "type": "Button",
+       "label": "Profile",
+       "frame": [
+        195,
+        780,
+        195,
+        64
+       ],
+       "goto": "profile"
+      }
+     ]
+    },
+    "search": {
+     "elements": [
+      {
+       "type": "TextField",
+       "label": "Enter destination",
+       "frame": [
+        20,
+        120,
+        350,
+        44
+       ],
+       "typing": true
+      },
+      {
+       "type": "Button",
+       "label": "Back",
+       "frame": [
+        10,
+        40,
+        60,
+        40
+       ],
+       "goto": "home"
+      }
+     ],
+     "on_type": "options"
+    },
+    "options": {
+     "elements": [
+      {
+       "type": "Button",
+       "label": "Back",
+       "frame": [
+        10,
+        40,
+        60,
+        40
+       ],
+       "goto": "home"
+      },
+      {
+       "type": "Cell",
+       "label": "Lyft, 6 min away, 16 min trip, $19.50",
+       "frame": [
+        20,
+        200,
+        350,
+        64
+       ],
+       "goto": "options_standard"
+      },
+      {
+       "type": "Cell",
+       "label": "Lyft XL, 8 min away, 16 min trip, $32.80",
+       "frame": [
+        20,
+        270,
+        350,
+        64
+       ],
+       "goto": "options_xl"
+      },
+      {
+       "type": "StaticText",
+       "label": "Apple Pay",
+       "frame": [
+        20,
+        700,
+        150,
+        30
+       ]
+      }
+     ]
+    },
+    "options_standard": {
+     "elements": [
+      {
+       "type": "Button",
+       "label": "Back",
+       "frame": [
+        10,
+        40,
+        60,
+        40
+       ],
+       "goto": "home"
+      },
+      {
+       "type": "Cell",
+       "label": "Lyft, 6 min away, 16 min trip, $19.50",
+       "frame": [
+        20,
+        200,
+        350,
+        64
+       ],
+       "goto": "options_standard"
+      },
+      {
+       "type": "Cell",
+       "label": "Lyft XL, 8 min away, 16 min trip, $32.80",
+       "frame": [
+        20,
+        270,
+        350,
+        64
+       ],
+       "goto": "options_xl"
+      },
+      {
+       "type": "Button",
+       "label": "Request Lyft",
+       "frame": [
+        20,
+        740,
+        350,
+        50
+       ],
+       "goto": "pay_standard"
+      }
+     ]
+    },
+    "pay_standard": {
+     "awaits_owner": "on_the_way",
+     "declined": "options",
+     "elements": [
+      {
+       "type": "StaticText",
+       "label": "Lyft, $19.50",
+       "frame": [
+        20,
+        500,
+        350,
+        30
+       ]
+      },
+      {
+       "type": "StaticText",
+       "label": "Double Click to Pay",
+       "frame": [
+        20,
+        600,
+        350,
+        30
+       ]
+      },
+      {
+       "type": "Button",
+       "label": "Cancel",
+       "frame": [
+        20,
+        700,
+        350,
+        50
+       ],
+       "goto": "options"
+      }
+     ]
+    },
+    "options_xl": {
+     "elements": [
+      {
+       "type": "Button",
+       "label": "Back",
+       "frame": [
+        10,
+        40,
+        60,
+        40
+       ],
+       "goto": "home"
+      },
+      {
+       "type": "Cell",
+       "label": "Lyft, 6 min away, 16 min trip, $19.50",
+       "frame": [
+        20,
+        200,
+        350,
+        64
+       ],
+       "goto": "options_standard"
+      },
+      {
+       "type": "Cell",
+       "label": "Lyft XL, 8 min away, 16 min trip, $32.80",
+       "frame": [
+        20,
+        270,
+        350,
+        64
+       ],
+       "goto": "options_xl"
+      },
+      {
+       "type": "Button",
+       "label": "Request Lyft XL",
+       "frame": [
+        20,
+        740,
+        350,
+        50
+       ],
+       "goto": "pay_xl"
+      }
+     ]
+    },
+    "pay_xl": {
+     "awaits_owner": "on_the_way",
+     "declined": "options",
+     "elements": [
+      {
+       "type": "StaticText",
+       "label": "Lyft, $32.80",
+       "frame": [
+        20,
+        500,
+        350,
+        30
+       ]
+      },
+      {
+       "type": "StaticText",
+       "label": "Double Click to Pay",
+       "frame": [
+        20,
+        600,
+        350,
+        30
+       ]
+      },
+      {
+       "type": "Button",
+       "label": "Cancel",
+       "frame": [
+        20,
+        700,
+        350,
+        50
+       ],
+       "goto": "options"
+      }
+     ]
+    },
+    "on_the_way": {
+     "elements": [
+      {
+       "type": "StaticText",
+       "label": "Your driver is on the way",
+       "frame": [
+        20,
+        100,
+        350,
+        30
+       ]
+      },
+      {
+       "type": "StaticText",
+       "label": "Pickup in 6 min",
+       "frame": [
+        20,
+        140,
+        350,
+        30
+       ]
+      },
+      {
+       "type": "StaticText",
+       "label": "Honda Civic, gray, 8XYZ456",
+       "frame": [
+        20,
+        180,
+        350,
+        30
+       ]
+      },
+      {
+       "type": "Button",
+       "label": "Cancel ride",
+       "frame": [
+        20,
+        700,
+        350,
+        50
+       ],
+       "goto": "cancel_confirm"
+      }
+     ]
+    },
+    "cancel_confirm": {
+     "elements": [
+      {
+       "type": "StaticText",
+       "label": "Cancel this ride? No fee if you cancel now.",
+       "frame": [
+        20,
+        300,
+        350,
+        30
+       ]
+      },
+      {
+       "type": "Button",
+       "label": "Yes, cancel",
+       "frame": [
+        20,
+        600,
+        350,
+        50
+       ],
+       "goto": "cancelled"
+      },
+      {
+       "type": "Button",
+       "label": "Keep ride",
+       "frame": [
+        20,
+        670,
+        350,
+        50
+       ],
+       "goto": "on_the_way"
+      }
+     ]
+    },
+    "cancelled": {
+     "elements": [
+      {
+       "type": "StaticText",
+       "label": "Your ride was cancelled",
+       "frame": [
+        20,
+        100,
+        350,
+        30
+       ]
+      },
+      {
+       "type": "TextField",
+       "label": "Search destination",
+       "frame": [
+        20,
+        160,
+        350,
+        44
+       ],
+       "goto": "search"
+      }
+     ]
+    },
+    "profile": {
+     "elements": [
+      {
+       "type": "Button",
+       "label": "Payment",
+       "frame": [
+        20,
+        140,
+        350,
+        50
+       ]
+      },
+      {
+       "type": "Button",
+       "label": "Rides",
+       "frame": [
+        0,
+        780,
+        195,
+        64
+       ],
+       "goto": "home"
+      },
+      {
+       "type": "Button",
+       "label": "Profile",
+       "frame": [
+        195,
+        780,
+        195,
+        64
+       ],
+       "goto": "profile"
+      }
+     ]
+    }
+   }
+  }
+ }
+}

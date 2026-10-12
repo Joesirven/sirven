@@ -7,6 +7,11 @@ consent the user gave before a person saw the trip, and the name of the concierg
 the quote and the booking each wait on the concierge queue for at most their service-level
 target. a late answer is withdrawn, recorded as a missed target, and reported; it is never
 waited on silently and never routed around.
+
+payment: none, in this build. the concierge receives no card and no payment details, only the
+cap the user approved (the price the concierge quoted, with no tip) and a plain note that this
+path has no payment method yet. how a concierge pays Waymo is a decision left for Jose. a fare
+above the cap is still refused: nothing is booked at a price the user did not approve.
 """
 
 import time
@@ -14,19 +19,20 @@ from datetime import datetime, timedelta
 
 from . import service_levels
 from .concierge_queue import QueueError
-from .connector import ConnectorError, option_for
-from .payment import RIDE_CATEGORY, Declined
+from .connector import ConnectorError, dollars, money, option_for
 
 PROVIDER = "Waymo"
 PRODUCT = "Waymo One"
+NO_PAYMENT_METHOD = ("the concierge path has no payment method in this build; how a concierge pays "
+                     "is Jose's decision. book nothing above the cap.")
+PAID_BY = "nothing in this build: the concierge path has no payment method yet"
 
 
 class ConciergeBackend:
-    def __init__(self, queue, cards, service_level_log, notify=print, poll_seconds=0.25,
+    def __init__(self, queue, service_level_log, notify=print, poll_seconds=0.25,
                  quote_wait_seconds=service_levels.QUOTE_TARGET_SECONDS,
                  booking_wait_seconds=service_levels.BOOKING_TARGET_SECONDS):
         self.queue = queue
-        self.cards = cards
         self.service_level_log = service_level_log
         self.notify = notify
         self.poll_seconds = poll_seconds
@@ -34,6 +40,7 @@ class ConciergeBackend:
         self.booking_wait_seconds = booking_wait_seconds
         self.measurements = []
         self._pickups = {}
+        self._caps = {}
 
     def _wait(self, request_id, done_states, seconds):
         deadline = time.monotonic() + seconds
@@ -95,19 +102,16 @@ class ConciergeBackend:
         option = option_for(request_id, PROVIDER, PRODUCT, seen["price_minor"], 0, seen["pickup_minutes"],
                             seen["trip_minutes"], departure_window, user_preferences)
         self._pickups[request_id] = datetime.fromisoformat(option["estimated_pickup"])
+        # the most the user can approve for this ride: the quoted price, and no tip
+        self._caps[request_id] = seen["price_minor"]
         return {"options": [option]}
 
     def book(self, request_id, quote_id):
-        card = self.cards.card_for_quote(quote_id)
-        if card is None:
-            raise ConnectorError("payment_required", "no held card for quote %s" % quote_id)
-        request = self.queue.move(request_id, "quoted", "waiting_booking", payment={
-            "card_id": card["card_id"],
-            "mode": card["mode"],
-            "last4": card["last4"],
-            "spending_limit_minor": card["spending_limit_minor"],
-            "allowed_categories": card["allowed_categories"],
-        })
+        cap = self._caps.get(request_id)
+        if cap is None:
+            raise ConnectorError("unknown_quote", "no concierge quote %s" % quote_id)
+        request = self.queue.move(request_id, "quoted", "waiting_booking",
+                                  payment={"cap_minor": cap, "note": NO_PAYMENT_METHOD})
         started = self.queue.entered(request, "waiting_booking")
         self.notify("request %s is waiting for the concierge to book" % request_id)
         answered = self._wait(request_id, ("booked", "declined"), self.booking_wait_seconds)
@@ -128,13 +132,13 @@ class ConciergeBackend:
         self.measurements.append(entry)
         self.notify(service_levels.describe(entry))
         result = answered["booking"]
-        try:
-            self.cards.authorize(card["card_id"], result["fare_minor"], RIDE_CATEGORY)
-        except Declined as declined:
+        if result["fare_minor"] > cap:
             self.queue.move(request_id, "booked", "withdrawn",
-                            withdrawn_because="fare over the card's limit: cancel this ride in the Waymo app")
-            raise ConnectorError("payment_declined", "the fare the concierge saw was declined: %s; "
-                                 "the concierge must cancel the ride" % declined.reason, seen_by=self._seen_by(request_id))
+                            withdrawn_because="fare over the cap the user approved: cancel this ride in the Waymo app")
+            raise ConnectorError("price_changed", "the fare the concierge saw, %s, is above the %s cap the user approved; "
+                                 "the concierge must cancel the ride" % (dollars(money(result["fare_minor"])),
+                                                                         dollars(money(cap))),
+                                 seen_by=self._seen_by(request_id))
         pickup = self._pickups[request_id]
         return {
             "backend_reference": request_id,
@@ -150,6 +154,7 @@ class ConciergeBackend:
             "confirmation": {
                 "provider_confirmation": result["confirmation_code"],
                 "booked_by": "concierge " + answered["concierge"]["name"],
+                "paid_by": PAID_BY,
             },
         }
 

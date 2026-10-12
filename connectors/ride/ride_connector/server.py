@@ -1,6 +1,9 @@
 """a model context protocol server over standard input and output, serving the ride tools.
 
     python3 -m ride_connector.server            serve the fake demo backends on the real clock
+    python3 -m ride_connector.server --phone    serve the iPhone ride backend (connectors/ride/ride_phone):
+                                                the owner's own ride app on the owner's plugged-in
+                                                iPhone, through the phone bridge (docs/phone-interface.md)
     python3 -m ride_connector.server --tools    print the tool list and exit
 
 one JSON remote procedure call (JSON-RPC 2.0) message per line, as the model context protocol
@@ -74,7 +77,11 @@ def main(argv):
     if "--tools" in argv:
         print(json.dumps(bundle_tools(), indent=2, sort_keys=True))
         return 0
-    connector, _, _ = demo_connector(system_clock)
+    if "--phone" in argv:
+        from ride_phone import build_connector
+        connector, _ = build_connector(clock=system_clock)
+    else:
+        connector, _, _ = demo_connector(system_clock)
     serve(connector)
     return 0
 

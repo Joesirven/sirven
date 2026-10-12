@@ -1,8 +1,0 @@
-{
-  "substitution": "Recorded fixture standing in for thread 09, the official-partner backend (Uber for Business and Lyft Business). Prices are invented for the rehearsal.",
-  "options": [
-    {"provider": "Uber", "product": "UberX", "price_minor": 1890, "tip_ceiling_minor": 300, "pickup_minutes": 4, "trip_minutes": 16},
-    {"provider": "Lyft", "product": "Lyft Standard", "price_minor": 1950, "tip_ceiling_minor": 300, "pickup_minutes": 6, "trip_minutes": 16},
-    {"provider": "Uber", "product": "Uber Black", "price_minor": 3420, "tip_ceiling_minor": 500, "pickup_minutes": 7, "trip_minutes": 15}
-  ]
-}

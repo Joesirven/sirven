@@ -15,6 +15,8 @@ import sys
 import tempfile
 from datetime import datetime
 
+# the demo reuses the repository's ride connector and phone libraries; leave no bytecode in their folders
+sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from ride_demo import agent, console, gates  # noqa: E402
