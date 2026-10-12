@@ -1,10 +1,10 @@
 import AppKit
 import SirvenMenuCore
 
-/// Owns the menu bar item. The menu shows the last known state the moment it opens, then
+/// Owns the menu bar item. The signed app's AppDelegate creates it and calls install(). The menu shows the last known state the moment it opens, then
 /// refreshes in the background and redraws only if something changed. Every Tailscale call runs
 /// on one serial queue, never on the main thread.
-final class MenuBarController: NSObject, NSApplicationDelegate, NSMenuDelegate {
+final class MenuBarController: NSObject, NSMenuDelegate {
     /// the Menu Bar pane of System Settings on macOS 26, where "Allow in the Menu Bar" lives.
     static let menuBarSettingsURL = URL(string: "x-apple.systempreferences:com.apple.ControlCenter-Settings.extension")!
     /// the App Store build first, then the standalone build.
@@ -26,7 +26,7 @@ final class MenuBarController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         self.stateProvider = stateProvider
     }
 
-    func applicationDidFinishLaunching(_ notification: Notification) {
+    func install() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem.button?.image = Self.icon()
         statusItem.button?.setAccessibilityLabel(MenuCopy.appName)
@@ -167,16 +167,17 @@ final class MenuBarController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: icon
 
-    /// A template glyph, so macOS tints it for light, dark, and tinted menu bars: a ring with a
-    /// point at its center. The final mark comes with the signed app bundle.
+    /// The sirven mark (the same ring and dot as SirvenMark in the wizard), as a template glyph
+    /// so macOS tints it for light, dark, and tinted menu bars.
     static func icon() -> NSImage {
         let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { rect in
             NSColor.black.setStroke()
             NSColor.black.setFill()
-            let ring = NSBezierPath(ovalIn: rect.insetBy(dx: 3, dy: 3))
+            let ring = NSBezierPath(ovalIn: rect.insetBy(dx: 2.5, dy: 2.5))
             ring.lineWidth = 1.6
             ring.stroke()
-            NSBezierPath(ovalIn: NSRect(x: rect.midX - 2, y: rect.midY - 2, width: 4, height: 4)).fill()
+            let dot = rect.width * 0.34 * (13 / 18)
+            NSBezierPath(ovalIn: NSRect(x: rect.midX - dot / 2, y: rect.midY - dot / 2, width: dot, height: dot)).fill()
             return true
         }
         image.isTemplate = true

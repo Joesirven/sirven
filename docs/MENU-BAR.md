@@ -2,7 +2,11 @@
 
 Sirven on macOS lives in the menu bar and nowhere else: no Dock icon, no main window. One click
 on the menu bar item opens a small menu with Sirven's state and the Tailscale settings Sirven
-cares about. The source is `macos/menu-bar/`, a Swift package.
+cares about. The menu ships inside the one signed app, `Sirven.app` from `app/macos/` (see
+`docs/DOWNLOAD-AND-ONBOARDING.md`); there is no separate menu bar app. `macos/menu-bar/` is a Swift
+package holding the library `SirvenMenuCore` (the Tailscale client, the state provider, and the
+menu model) and its tests. The AppKit side, `MenuBarController`, lives in the signed app at
+`app/macos/Sources/Sirven/MenuBarController.swift`.
 
 ## What the menu shows
 
@@ -24,12 +28,12 @@ cares about. The source is `macos/menu-bar/`, a Swift package.
   Quit Sirven
 ```
 
-`SirvenMenuBar --print-menu` prints exactly this from live state, read-only, and exits.
+`Sirven --print-menu` (the signed app's executable) prints exactly this from live state, read-only, and exits.
 
 Design: the native macOS menu, system font, one semibold heading, quiet gray lines for state and
 plain items for actions. No custom colors or ornament. The menu bar icon is a template image, a
-ring with a point at its center, so macOS tints it for every menu bar appearance. The final mark
-comes with the signed app bundle.
+ring with a dot at its center, the same mark the onboarding wizard and the app icon draw, so macOS
+tints it for every menu bar appearance.
 
 ## Tailscale: read and change through its own command-line tool
 
@@ -130,15 +134,15 @@ it is coming.
 ## Build, test, run
 
 ```
-make menu-bar           builds macos/menu-bar/build/<name>.app (release build, LSUIElement, ad hoc signature)
+make app                builds dist/macos/Sirven.app, the one signed bundle, menu included (ad hoc signature locally)
 make test-menu-bar      swift test: parsing, the command-line tool calls against a fake, and the menu as text
-open macos/menu-bar/build/Sirven.app
+open dist/macos/Sirven.app
 ```
 
-The product name is read from `project.json` (it is a working name), into the bundle and from
-there into the menu. The bundle identifier defaults to a placeholder, `org.example.sirven.menu-bar`;
-`BUNDLE_IDENTIFIER=...` sets the real one once the signed bundle and the keep-awake helper settle
-a shared identifier. The menu copy in `MenuCopy.swift` still says "Sirven" in prose.
+The bundle identifier is the signed app's: `xyz.sirven.app`, a placeholder until Jose chooses
+the final one (see the open decisions in `docs/DOWNLOAD-AND-ONBOARDING.md`). The keep-awake helper
+trusts that same identifier as its host app. The menu copy in `MenuCopy.swift` still says
+"Sirven" in prose.
 
 Changing actions (connect, disconnect, exit node) are tested against
 `Tests/SirvenMenuCoreTests/Fixtures/fake-tailscale.sh`, never against a real tailnet. The

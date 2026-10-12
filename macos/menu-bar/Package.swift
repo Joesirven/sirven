@@ -1,17 +1,17 @@
 // swift-tools-version:5.9
-// the sirven menu bar app: a core library (the Tailscale client, the sirven state provider, and
-// the menu model) and a thin AppKit app that draws the model as a menu bar menu.
+// the sirven menu bar core: the Tailscale client, the sirven state provider, and the menu model.
+// it is a library only. the signed app (app/macos) links it and draws the model as its menu bar
+// menu, so sirven ships as one app bundle.
 import PackageDescription
 
 let package = Package(
     name: "SirvenMenuBar",
     platforms: [.macOS(.v13)],
     products: [
-        .executable(name: "SirvenMenuBar", targets: ["SirvenMenuBar"]),
+        .library(name: "SirvenMenuCore", targets: ["SirvenMenuCore"]),
     ],
     targets: [
         .target(name: "SirvenMenuCore"),
-        .executableTarget(name: "SirvenMenuBar", dependencies: ["SirvenMenuCore"]),
         .testTarget(
             name: "SirvenMenuCoreTests",
             dependencies: ["SirvenMenuCore"],

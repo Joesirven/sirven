@@ -1,16 +1,18 @@
 import AppKit
+import SirvenMenuCore
 import SirvenOnboarding
 import SwiftUI
 
-// the Sirven executable inside Sirven.app. no dock icon (LSUIElement in Info.plist): on
-// first launch it shows the onboarding wizard, then lives in the menu bar. the menu here is
-// a placeholder for the menu-bar app (see docs/DOWNLOAD-AND-ONBOARDING.md, integration seams).
+// the Sirven executable inside Sirven.app, the one bundle sirven ships. no dock icon (LSUIElement
+// in Info.plist): it owns sirven's menu bar item (MenuBarController, drawn from SirvenMenuCore in
+// macos/menu-bar), and on first launch it also shows the onboarding wizard.
 //
 //   Sirven                     normal launch
 //   Sirven --demo              the wizard against test data: fake permissions, a sample
 //                              endpoint, nothing saved to your real settings
 //   Sirven --snapshot <dir>    render each wizard step to an image in <dir>, then quit
 //   Sirven --reset-onboarding  forget the saved result, so the wizard shows again
+//   Sirven --print-menu        print the menu bar menu as text from live, read-only state, then quit
 //   Sirven --render-icon <dir> write AppIcon.iconset into <dir> (build.sh uses it), then quit
 
 let arguments = CommandLine.arguments
@@ -84,7 +86,7 @@ func snapshot(into directory: URL) {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
   private var window: NSWindow?
-  private var statusItem: NSStatusItem?
+  private var menuBar: MenuBarController?
   private let demo = arguments.contains("--demo")
 
   private lazy var store: OnboardingStore = {
@@ -96,7 +98,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     if arguments.contains("--reset-onboarding") { try? store.reset() }
-    installStatusItem()
+    let menuBar = MenuBarController(
+      tailscale: TailscaleClient(executable: TailscaleClient.resolveExecutable()),
+      stateProvider: StateFileProvider(path: StateFileProvider.defaultPath())
+    )
+    menuBar.install()
+    self.menuBar = menuBar
     if demo || store.load() == nil { showWizard() }
   }
 
@@ -127,37 +134,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     window.makeKeyAndOrderFront(nil)
   }
 
-  private func installStatusItem() {
-    let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-    item.button?.image = Self.markImage()
-    item.button?.setAccessibilityLabel("sirven")
-    let menu = NSMenu()
-    menu.addItem(withTitle: "Show welcome again", action: #selector(showWelcomeAgain), keyEquivalent: "").target = self
-    menu.addItem(.separator())
-    menu.addItem(withTitle: "Quit sirven", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-    item.menu = menu
-    statusItem = item
-  }
-
-  @objc private func showWelcomeAgain() {
-    if let window { window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true); return }
-    showWizard()
-  }
-
-  // the same ring-and-dot as SirvenMark, as a template image so the menu bar tints it.
-  static func markImage() -> NSImage {
-    let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { rect in
-      NSColor.black.set()
-      let ring = NSBezierPath(ovalIn: rect.insetBy(dx: 2.5, dy: 2.5))
-      ring.lineWidth = 1.6
-      ring.stroke()
-      let dot = rect.width * 0.34 * (13 / 18)
-      NSBezierPath(ovalIn: NSRect(x: rect.midX - dot / 2, y: rect.midY - dot / 2, width: dot, height: dot)).fill()
-      return true
-    }
-    image.isTemplate = true
-    return image
-  }
 }
 
 // the app icon: the sirven mark in white on the accent, on the rounded square macOS expects,
@@ -190,6 +166,13 @@ func renderIcon(into directory: URL) {
     }
   }
   print(iconset.path)
+}
+
+if arguments.contains("--print-menu") {
+  let tailscale = TailscaleClient(executable: TailscaleClient.resolveExecutable())
+  let state = StateFileProvider(path: StateFileProvider.defaultPath()).current()
+  print(MenuModel.render(MenuModel.build(state: state, tailscale: tailscale.snapshot())))
+  exit(0)
 }
 
 if let directory = argument(after: "--render-icon") {

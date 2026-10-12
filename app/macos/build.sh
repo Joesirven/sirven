@@ -175,6 +175,7 @@ cat > "$APP_PATH/Contents/Info.plist" <<PLIST
   <key>CFBundleVersion</key><string>$BUILD_NUMBER</string>
   <key>LSMinimumSystemVersion</key><string>$MINIMUM_MACOS</string>
   <key>LSUIElement</key><true/>
+  <key>NSHighResolutionCapable</key><true/>
   <key>LSApplicationCategoryType</key><string>public.app-category.utilities</string>
   <key>NSHumanReadableCopyright</key><string>MIT license</string>
 </dict>

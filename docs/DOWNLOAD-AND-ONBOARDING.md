@@ -6,7 +6,7 @@ available for people who prefer it.
 
 | Piece | Where | What it is |
 |---|---|---|
-| The app | `app/macos/` | A Swift package. `SirvenOnboarding` is the wizard (a library the menu-bar app links); `Sirven` is the executable inside `Sirven.app`. macOS 13 or newer, Apple silicon and Intel. |
+| The app | `app/macos/` | A Swift package. `SirvenOnboarding` is the wizard; `Sirven` is the executable inside `Sirven.app`, and it also owns the menu bar item, drawn from the `SirvenMenuCore` library in `macos/menu-bar/`. This is the only app bundle sirven ships. macOS 13 or newer, Apple silicon and Intel. |
 | The wizard's words | `copy/onboarding-wizard.json` | Every word the wizard shows, in one file, so review is one read. |
 | The build pipeline | `app/macos/build.sh` | Builds the app, signs it, wraps it in a disk image, notarizes it (release only), and writes `release.json`. |
 | The download page | `site/download/` | One static page with one button. It reads `release.json` and has no build step and no third-party scripts. |
@@ -123,9 +123,10 @@ manifest.
   `build.sh --release` writes. If the image is hosted elsewhere, add a `"url"` field to
   `release.json` and the button uses it instead of `"file"`. A test fails if the sample manifest
   drifts from the fields `build.sh` writes.
-- **Menu-bar app (thread 15).** `main.swift` installs a placeholder menu bar item (show welcome
-  again, quit). The menu-bar app replaces that menu and keeps the launch logic: show
-  `OnboardingView` when `OnboardingStore.standard.load()` is nil. The wizard's last screen
+- **Menu bar.** Folded into this app: `main.swift` creates `MenuBarController`
+  (`app/macos/Sources/Sirven/MenuBarController.swift`), which draws the menu from `SirvenMenuCore`
+  in `macos/menu-bar/`, and shows `OnboardingView` when `OnboardingStore.standard.load()` is nil.
+  There is no second app bundle. To show the wizard again, run `Sirven --reset-onboarding`. The wizard's last screen
   promises five menu items: tier, agent, keep awake, network, settings. If the menu changes,
   update `menuBarItems` in `copy/onboarding-wizard.json`. If thread 15 finds a supported way to
   hide Tailscale's own menu bar item, its consent line belongs in the permissions step as an

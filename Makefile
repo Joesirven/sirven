@@ -8,8 +8,7 @@
 #                   Apple Silicon and Intel. needs the Xcode command line tools
 #   make keep-awake        macos only: build the keep-awake program behind sirven awake
 #   make test-keep-awake   macos only: its unit tests, and a short real power assertion
-#   make menu-bar       the macos menu bar app, macos/menu-bar/build/Sirven.app (needs swift)
-#   make test-menu-bar  the menu bar app's swift tests (needs swift)
+#   make test-menu-bar  the menu bar core's swift tests (needs swift); the menu ships inside make app
 #   make app        the macOS app and its disk image, ad-hoc signed, in dist/macos (macOS only)
 #   make app-test   the onboarding wizard's Swift tests (macOS only)
 
@@ -17,9 +16,9 @@ SHELL := /bin/sh
 PACKAGE := $(shell sed -n 's/^[[:space:]]*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' project.json | head -n 1 | tr '[:upper:]' '[:lower:]')
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo unversioned)
 DIST ?= dist
-SHELL_FILES := install.sh uninstall.sh bin/sirven app/macos/build.sh $(wildcard lib/*.sh) $(wildcard lib/attestation/*.sh) tests/run.sh tests/golden/run.sh $(wildcard tests/lib/*.sh) $(wildcard tests/unit/*.sh) macos/menu-bar/build-app.sh
+SHELL_FILES := install.sh uninstall.sh bin/sirven app/macos/build.sh $(wildcard lib/*.sh) $(wildcard lib/attestation/*.sh) tests/run.sh tests/golden/run.sh $(wildcard tests/lib/*.sh) $(wildcard tests/unit/*.sh)
 
-.PHONY: help test lint package runtime keep-awake test-keep-awake menu-bar test-menu-bar app app-test
+.PHONY: help test lint package runtime keep-awake test-keep-awake test-menu-bar app app-test
 
 help:
 	@echo "make test      run every test: tests/run.sh"
@@ -28,7 +27,6 @@ help:
 	@echo "make runtime   macos: build dist/runtime/sirven-fetch, the runtime's fetch helper"
 	@echo "make keep-awake        build the keep-awake program behind sirven awake (macos)"
 	@echo "make test-keep-awake   run its tests (macos)"
-	@echo "make menu-bar  macos/menu-bar/build/Sirven.app, the menu bar app (macos, needs swift)"
 	@echo "make test-menu-bar  the menu bar app's swift tests (macos, needs swift)"
 	@echo "make app       dist/macos/Sirven.app and its disk image, ad-hoc signed (release: app/macos/build.sh --release)"
 	@echo "make app-test  the onboarding wizard's Swift tests"
@@ -37,9 +35,6 @@ test:
 	bash tests/run.sh
 
 # the menu bar app is macos only, so make test leaves it out and stays green on linux.
-menu-bar:
-	bash macos/menu-bar/build-app.sh
-
 test-menu-bar:
 	swift test --package-path macos/menu-bar
 app:
