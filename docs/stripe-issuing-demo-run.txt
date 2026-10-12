@@ -1,7 +1,7 @@
 mode: in-memory stand-in for Stripe test mode
 
 ride 1: held $23.40 (fare plus tip ceiling) before booking, minted card ending 4242, then booked
-  book_ride carried payment_reference sirven_hold_qt_demo1, never a card detail
+  book_ride carried payment_reference sirven_hold_qtgupfmevkykdoqmyrougnjb, never a card detail
   authorization of $18.40 at Demo Ride Service: approved (webhook_approved)
   authorization of $3.00 at Demo Ride Service: approved (webhook_approved)
 booking bk_demo1 (settled)
@@ -35,7 +35,7 @@ booking bk_demo3 (settled)
 
 ride 4: cancelled late; the ride service charges a fee, and nothing else gets through
   authorization of $5.00 at Demo Ride Service: approved (webhook_approved)
-  authorization of $10.00 at Demo Ride Service: declined (sirven declined: booking_closed)
+  authorization of $10.00 at Demo Ride Service: declined (sirven declined: over_reported_total)
 booking bk_demo4 (settled)
   why: ranked first: cheapest option arriving before the 3pm appointment, and under the $25 budget even with the full tip allowance
   you asked: book me a ride to the barber after my 2pm meeting, under $25

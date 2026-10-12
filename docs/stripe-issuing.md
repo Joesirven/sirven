@@ -59,7 +59,10 @@ The user's hold lasts 7 days for an online card payment, so settlement must happ
 | A charge from a merchant that is not a ride service | Declined by spending controls before sirven is asked |
 | One charge over the cap | Declined by spending controls |
 | Charges that add up past the cap | Declined by sirven's real-time decision (`over_cap`) |
-| A charge after the booking was cancelled | Declined by sirven (`booking_closed`) |
+| A charge after the booking was cancelled | Declined by sirven (`booking_closed`), except up to a cancellation fee the connector reported (`over_reported_total` past it) |
+| The connector reports a total the card has not paid yet (a tip, a fee) | Settlement waits, card live, until the card catches up or the deadline |
+| The connector reports less than the card paid | The user is charged the reported total; `needs_review` |
+| A reservation still open after 6 days | Settled for what the card paid at the deadline; `needs_review` |
 | Partial reversal, then a smaller capture | The user is charged the captured amount |
 | An authorization that expires uncaptured | Nothing is charged; the hold is released |
 | The ride service captures more than the cap (a late tip, an error) | The user is charged the cap, never more; the record goes to `needs_review` and sirven absorbs the difference until a person looks |
@@ -69,7 +72,9 @@ The user's hold lasts 7 days for an online card payment, so settlement must happ
 
 Known limit: single-use cards. With no tip ceiling the card allows one payment, and with one it allows two. A ride service that authorizes twice for the fare itself (an estimate, then the final amount) would be declined on its second or third authorization. Whether the ride services do this has not been checked; it should be checked against the official-partner backend's recorded fixtures (thread 09) before live use, and `single_use=False` turns the lifecycle control off while keeping every other limit.
 
-Known limit: a tip posted as a new charge after settlement is declined, because the card is closed at settlement. The caller decides when to report completion; it should allow for the ride service's tip window first. A tip added by over-capturing the fare is still caught before settlement.
+Late tips and fees: when the orchestrator passes the booking to `complete` or `cancel`, settlement waits while `final_charge.total` is above what the card has paid. A tip still to come, or a cancellation fee not yet charged, keeps the card live, still bounded by the cap (and after a cancellation, by the reported fee). If `complete` is called without the booking, settlement happens as soon as nothing is pending, and a tip posted later is declined because the card is closed.
+
+Settlement deadline: an online card hold lasts 7 days, so a reservation still open 6 days after the hold settles what the card has paid and goes to `needs_review`. `sweep()` reconciles every open reservation and enforces the deadline; run it on a schedule (a `bb automation`, hourly).
 
 ## The charge-with-rationale record
 
@@ -92,7 +97,7 @@ Fields: `quote_id`, `booking_id` (empty until booked), `user` (an opaque referen
 Reconciled against the published contract, [docs/ride-connector-contract.md](ride-connector-contract.md) (thread 08's branch, commit c8a15e1, version 1), section "What the money layer reads". The fields are read in one place, [lib/issuing/contract.py](../lib/issuing/contract.py):
 
 - before booking, `quote_terms` reads the quoted option: `quote_id`, `bookable`, and `charge_terms` (`quoted_amount`, `fare_ceiling`, `tip_ceiling`, `authorization_cap`, `currency`), plus `provider`, `rank`, `price.kind`, `constraint_flags`, `estimated_pickup_at`, `estimated_trip_minutes` for the rationale. It refuses an option whose `authorization_cap` is not `fare_ceiling + tip_ceiling`. The card cap is `authorization_cap`.
-- the reservation returns a `payment_reference` (`sirven_hold_` plus the quote identifier: letters, digits, `_` and `-`, never card-shaped), which the orchestrator passes to `book_ride`.
+- the reservation returns a `payment_reference`: `sirven_hold_` plus 24 random lower-case letters, so it cannot be built from a quote identifier and can never trip the gateway's check for card-like runs of digits. The orchestrator passes it to `book_ride`.
 - after booking, `booking_details` reads `booking_id`, `quote_id`, `status`, `cancellation_policy`.
 - at completion or cancellation, `final_charge.total` from `get_ride` or `cancel_ride` is checked against what the card actually paid. The user is charged the lower of the two, and any difference sends the record to `needs_review`.
 
@@ -101,8 +106,9 @@ The card never travels back through the contract: the agent sees the booking and
 What the other threads need from this one:
 
 - The orchestrator (thread 13, and whatever runs bookings in production) calls `reserve_and_mint` when the person approves an option, calls `book_ride` with the returned `payment_reference` only if that succeeds, then calls `attach_booking`, or `release` if `book_ride` fails. When `get_ride` reports `completed` it calls `complete(quote_id, booking)`; after `cancel_ride` it calls `cancel(quote_id, booking)`.
-- The official-partner backend (thread 09) receives `payment_reference` from the gateway in `RideBackend.book`, and calls `card_for_payment_reference(payment_reference)` server side to get the Stripe card reference. It retrieves the card's details from Stripe itself when it pays the ride service. This lookup never passes through the agent-facing contract.
-- Production should run the gateway with `require_payment_reference` on, so `book_ride` cannot commit without held funds.
+- The official-partner backend (thread 09) receives `payment_reference` and `authorization_cap_minor` from the gateway in `RideBackend.book`, and calls `card_for_payment_reference(payment_reference, authorization_cap_minor)` server side to get the Stripe card reference. A cap that does not match what was held is refused, so a reference held for one quote cannot pay for another. It retrieves the card's details from Stripe itself when it pays the ride service. This lookup never passes through the agent-facing contract.
+- Production should run the gateway with `require_payment_reference` on, so `book_ride` cannot commit without held funds. The gateway (thread 08) should also confirm that the reference belongs to the quote being booked; the cap check here is the backstop, not the first line.
+- Something calls `sweep()` on a schedule.
 
 ## Running it
 

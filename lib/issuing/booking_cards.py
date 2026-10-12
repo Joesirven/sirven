@@ -30,6 +30,10 @@ ALLOWED_CATEGORIES = ("taxicabs_limousines",)
 # the reservation is keyed by quote: it exists before book_ride commits, so it can gate it.
 METADATA_QUOTE = "sirven_quote_id"
 TERMINAL_AUTHORIZATION_STATUSES = ("closed", "reversed", "expired")
+# an online card hold lasts 7 days (docs.stripe.com/payments/place-a-hold-on-a-payment-method).
+# a reservation still open after 6 days settles what the card has paid, so the user's hold
+# never lapses with money owed, and a person reviews the rest.
+SETTLE_DEADLINE_SECONDS = 6 * 24 * 3600
 
 
 class FlowError(Exception):
@@ -145,12 +149,17 @@ class BookingCards:
                 self.store.put(record)
             return record
 
-    def card_for_payment_reference(self, reference):
-        """the backend's lookup: book_ride hands it the payment_reference, and this returns the
-        Stripe card reference to pay the ride service with. server side only."""
+    def card_for_payment_reference(self, reference, authorization_cap_minor):
+        """the backend's lookup: RideBackend.book receives the payment_reference and the
+        booking's authorization cap, and this returns the Stripe card reference to pay the ride
+        service with. the cap must match what was held, so a reference held for one quote
+        cannot pay for a different one. server side only."""
         quote_id = self.store.quote_for_reference(reference)
         if quote_id is None:
             raise FlowError("no funds are held under that payment reference")
+        record = self._require(quote_id)
+        if record["amounts"]["cap"] != authorization_cap_minor:
+            raise FlowError("that payment reference holds funds for a different amount")
         return self.card_for_quote(quote_id)
 
     def card_for_quote(self, quote_id):
@@ -176,8 +185,15 @@ class BookingCards:
         """return (approved, reason). pure: reads the record, changes nothing."""
         if record is None:
             return False, "unknown_card"
-        if record["state"] not in R.OPEN_STATES or not record.get("accepting_authorizations", True):
+        if record["state"] not in R.OPEN_STATES:
             return False, "booking_closed"
+        limit, over = record["amounts"]["cap"], "over_cap"
+        if not record.get("accepting_authorizations", True):
+            # after a cancellation only the reported cancellation fee may still be charged.
+            reported = record["amounts"].get("reported_by_ride_service")
+            if reported is None:
+                return False, "booking_closed"
+            limit, over = min(limit, reported), "over_reported_total"
         pending = authorization.get("pending_request") or {}
         requested = pending.get("amount", authorization.get("amount", 0))
         currency = (pending.get("currency") or authorization.get("currency") or "").lower()
@@ -187,8 +203,8 @@ class BookingCards:
         if category not in ALLOWED_CATEGORIES:
             return False, "merchant_category_not_allowed"
         committed = R.pending_authorized(record) + R.net_card_spend(record)
-        if committed + requested > record["amounts"]["cap"]:
-            return False, "over_cap"
+        if committed + requested > limit:
+            return False, over
         return True, "within_cap"
 
     def authorize(self, authorization):
@@ -365,10 +381,23 @@ class BookingCards:
         return self.store.get(quote_id)
 
     def _settle_if_ready(self, record):
-        """settle a record that the caller has just refreshed from Stripe, under its lock."""
-        if record["state"] not in R.OPEN_STATES or not record.get("ride_completed"):
+        """settle a record that the caller has just refreshed from Stripe, under its lock.
+
+        waits while an authorization is pending, and while the ride connector reports a total
+        the card has not paid yet (a tip or a cancellation fee still to come). the card stays
+        live meanwhile, still bounded by the cap and by the real-time decision. the wait ends
+        at the settlement deadline, before the user's hold can lapse."""
+        if record["state"] not in R.OPEN_STATES:
             return
-        if R.pending_authorized(record) > 0:
+        if self.clock() - record.get("reserved_at", self.clock()) >= SETTLE_DEADLINE_SECONDS:
+            self._review(record, "settled at the deadline before the user's hold lapses; anything still owed "
+                                 "to or by the ride service is reconciled by a person")
+            self._settle(record)
+            return
+        if not record.get("ride_completed") or R.pending_authorized(record) > 0:
+            return
+        reported = record["amounts"].get("reported_by_ride_service")
+        if reported is not None and R.net_card_spend(record) < reported:
             return
         self._settle(record)
 
@@ -434,6 +463,15 @@ class BookingCards:
             self._settle_if_ready(record)
             self.store.put(record)
         return changed
+
+    def sweep(self):
+        """reconcile every open reservation. run it on a schedule (a bb automation, say, every
+        hour): it is what settles a reservation whose webhooks never came, and what enforces
+        the settlement deadline. returns the quote identifiers it looked at."""
+        open_quotes = [r["quote_id"] for r in self.store.all() if r["state"] in R.OPEN_STATES]
+        for quote_id in open_quotes:
+            self.reconcile(quote_id)
+        return open_quotes
 
     def _require(self, quote_id):
         record = self.store.get(quote_id)

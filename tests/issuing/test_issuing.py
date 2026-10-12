@@ -42,8 +42,9 @@ def booking():
             "final_charge": None}
 
 
-def finished(total):
-    return dict(booking(), final_charge={"fare": money(total), "tip": money(0), "cancellation_fee": money(0),
+def finished(total, fee=0):
+    fare = total - fee
+    return dict(booking(), final_charge={"fare": money(fare), "tip": money(0), "cancellation_fee": money(fee),
                                          "total": money(total), "amount_to_release": money(2340 - total)})
 
 
@@ -57,7 +58,9 @@ class Wired:
         self.client = StripeClient("sk_test_unit", self.fake)
         cardholder = self.client.post("/v1/issuing/cardholders", {"type": "company", "name": "Sirven ride bookings"})
         self.store = R.RecordStore(directory)
-        self.cards = BookingCards(self.client, self.store, cardholder["id"], webhook_secret=SECRET)
+        self.now = [1_800_000_000.0]
+        self.cards = BookingCards(self.client, self.store, cardholder["id"], webhook_secret=SECRET,
+                                  clock=lambda: self.now[0])
         if deliver:
             self.fake.endpoint = self.cards.handle_webhook
         self.customer = self.client.post("/v1/customers", {})["id"]
@@ -238,11 +241,15 @@ class BookingOrder(unittest.TestCase):
         self.assertIsNone(record["booking_id"])
         self.assertEqual("requires_capture", wired.intents()[0]["status"])
         self.assertEqual(record["stripe"]["card"], wired.cards.card_for_quote("q-1"))
-        self.assertEqual("sirven_hold_q-1", record["payment_reference"])
-        self.assertEqual(record["stripe"]["card"], wired.cards.card_for_payment_reference(record["payment_reference"]))
+        reference = record["payment_reference"]
+        self.assertRegex(reference, r"^sirven_hold_[a-z]{24}$")
+        self.assertNotIn("q-1", reference)
+        self.assertEqual(record["stripe"]["card"], wired.cards.card_for_payment_reference(reference, 2340))
+        with self.assertRaises(FlowError):
+            wired.cards.card_for_payment_reference(reference, 9999)
         for unknown in ("sirven_hold_other", "../q-1", ""):
             with self.assertRaises(FlowError):
-                wired.cards.card_for_payment_reference(unknown)
+                wired.cards.card_for_payment_reference(unknown, 2340)
 
     def test_attaching_the_booking_records_it_once(self):
         wired = Wired()
@@ -424,6 +431,42 @@ class FinalCharge(unittest.TestCase):
         wired.capture(wired.authorize(record, 1840))
         record = wired.cards.complete("q-1", finished(1500))
         self.assertEqual(("needs_review", 1500), (record["state"], record["amounts"]["charged_to_user"]))
+
+    def test_a_tip_after_the_completed_report_is_waited_for(self):
+        wired = Wired()
+        record = wired.mint()
+        wired.capture(wired.authorize(record, 1840))
+        record = wired.cards.complete("q-1", finished(2140))
+        self.assertEqual("reserved", record["state"])
+        self.assertEqual("active", wired.fake.objects[record["stripe"]["card"]]["status"])
+        wired.capture(wired.authorize(record, 300))
+        record = wired.record()
+        self.assertEqual(("settled", 2140, []), (record["state"], record["amounts"]["charged_to_user"],
+                                                 record["review_reasons"]))
+
+    def test_a_fee_reported_before_it_is_charged_is_waited_for_and_nothing_more_gets_through(self):
+        wired = Wired()
+        record = wired.mint()
+        record = wired.cards.cancel("q-1", finished(500, fee=500))
+        self.assertEqual("reserved", record["state"])
+        self.assertFalse(wired.authorize(record, 600)["approved"])
+        wired.capture(wired.authorize(record, 500))
+        record = wired.record()
+        self.assertEqual(("settled", 500), (record["state"], record["amounts"]["charged_to_user"]))
+
+    def test_the_deadline_settles_what_was_paid_before_the_hold_lapses(self):
+        wired = Wired()
+        record = wired.mint()
+        wired.capture(wired.authorize(record, 1840))
+        wired.cards.complete("q-1", finished(2140))
+        self.assertEqual(["q-1"], wired.cards.sweep())
+        self.assertEqual("reserved", wired.record()["state"])
+        wired.now[0] += 6 * 24 * 3600
+        wired.cards.sweep()
+        record = wired.record()
+        self.assertEqual(("needs_review", 1840), (record["state"], record["amounts"]["charged_to_user"]))
+        self.assertEqual("canceled", wired.fake.objects[record["stripe"]["card"]]["status"])
+        self.assertEqual([], wired.cards.sweep())
 
     def test_an_open_booking_reports_nothing(self):
         wired = Wired()

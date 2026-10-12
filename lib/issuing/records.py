@@ -14,6 +14,8 @@ import contextlib
 import fcntl
 import json
 import os
+import secrets
+import string
 import tempfile
 import time
 
@@ -25,11 +27,11 @@ def now_iso(clock=time.time):
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(clock()))
 
 
-def payment_reference(quote_id):
-    """the opaque handle book_ride carries for funds already held: letters, digits, _ and -,
-    8 to 128 characters, never anything card-shaped (the connector contract's rule)."""
-    safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in quote_id)
-    return f"sirven_hold_{safe}"[:128]
+def new_payment_reference():
+    """the opaque handle book_ride carries for funds already held. random, so nobody can build
+    one from a quote_id they can see, and letters only, so the gateway's check for card-like
+    runs of digits can never trip on it (contract: letters, digits, _ and -, 8 to 128)."""
+    return "sirven_hold_" + "".join(secrets.choice(string.ascii_lowercase) for _ in range(24))
 
 
 def new_record(terms, rationale, user_reference, clock=time.time):
@@ -52,7 +54,7 @@ def new_record(terms, rationale, user_reference, clock=time.time):
             "refunded_to_user": 0,
             "reported_by_ride_service": None,
         },
-        "payment_reference": payment_reference(terms["quote_id"]),
+        "payment_reference": new_payment_reference(),
         "rationale": {
             "quote": {
                 "quote_id": terms["quote_id"],
