@@ -5,15 +5,16 @@
 #   app/macos/build.sh                  local build: this Mac's architecture, ad-hoc signed,
 #                                       not notarized. needs no credentials.
 #   app/macos/build.sh --release        the public build: universal (Apple Silicon and Intel),
-#                                       signed with a Developer ID, notarized, and stapled.
+#                                       signed with Jose's Apple distribution certificate,
+#                                       notarized, and stapled.
 #                                       stops before building unless both credentials are set.
 #   --dry-run                           print the plan and change nothing
 #   --out <dir>                         where the app, disk image, and release.json go
 #                                       (default: dist/macos in the repository)
 #
 # credentials for --release are Jose's and never live in this repository. pass them by name:
-#   SIRVEN_SIGNING_IDENTITY   the Developer ID Application certificate's name in the login
-#                             keychain, for example "Developer ID Application: Name (TEAMID1234)"
+#   SIRVEN_SIGNING_IDENTITY   the full name of the Apple certificate for distributing apps
+#                             outside the App Store, exactly as security find-identity lists it
 #   SIRVEN_NOTARY_PROFILE     a notarytool keychain profile, created once with
 #                             xcrun notarytool store-credentials <profile name>
 # see docs/DOWNLOAD-AND-ONBOARDING.md for the one-time setup.
@@ -87,7 +88,7 @@ check_release_credentials() {
   [ -n "${SIRVEN_NOTARY_PROFILE:-}" ] || missing="$missing SIRVEN_NOTARY_PROFILE"
   if [ -n "$missing" ]; then
     DIE_STATUS=2 die "a release build needs Jose's Apple Developer credentials, and these are not set:$missing
-  SIRVEN_SIGNING_IDENTITY  the Developer ID Application certificate name in the login keychain
+  SIRVEN_SIGNING_IDENTITY  the Apple distribution certificate name, as security find-identity -v -p codesigning lists it
   SIRVEN_NOTARY_PROFILE    a keychain profile made with: xcrun notarytool store-credentials <name>
   setup: docs/DOWNLOAD-AND-ONBOARDING.md, section 'signing and notarization'.
   for a local test build, run without --release."
@@ -202,6 +203,7 @@ fi
 # 6. the manifest the download page reads. it states the signing truthfully, so the page
 # can say "not notarized" when that is the case.
 bytes="$(wc -c < "$DMG_PATH" | tr -d ' ')"
+app_bytes="$(( $(du -sk "$APP_PATH" | cut -f1) * 1024 ))"
 sha="$(shasum -a 256 "$DMG_PATH" | cut -d' ' -f1)"
 cat > "$MANIFEST_PATH" <<JSON
 {
@@ -210,6 +212,7 @@ cat > "$MANIFEST_PATH" <<JSON
   "build": "$BUILD_NUMBER",
   "file": "$DMG_NAME",
   "bytes": $bytes,
+  "appBytes": $app_bytes,
   "sha256": "$sha",
   "minimumMacOS": "$MINIMUM_MACOS",
   "architectures": $ARCHITECTURES,

@@ -9,7 +9,7 @@ import SwiftUI
 //   Sirven                     normal launch
 //   Sirven --demo              the wizard against test data: fake permissions, a sample
 //                              endpoint, nothing saved to your real settings
-//   Sirven --snapshot <dir>    render each wizard step to a PNG in <dir>, then quit
+//   Sirven --snapshot <dir>    render each wizard step to an image in <dir>, then quit
 //   Sirven --reset-onboarding  forget the saved result, so the wizard shows again
 //   Sirven --render-icon <dir> write AppIcon.iconset into <dir> (build.sh uses it), then quit
 

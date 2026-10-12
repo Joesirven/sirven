@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en" class="no-script">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Download sirven for Mac</title>
+  <meta name="description" content="sirven for Mac: your personal agent, on your own connection.">
+  <link rel="stylesheet" href="download.css">
+</head>
+<body>
+  <main class="page">
+    <section class="hero" aria-labelledby="title">
+      <div class="mark enter" aria-hidden="true"><span class="ring"></span><span class="dot"></span></div>
+      <h1 id="title" class="enter">sirven for Mac</h1>
+      <p class="lede enter">Your personal agent, on your own connection. It asks you before it does anything in the real world.</p>
+
+      <!-- the one button. its link, size, and signing note come from release.json, which
+           app/macos/build.sh writes. until that loads, the button says so instead of guessing. -->
+      <div class="action enter">
+        <a class="download" data-download href="#" aria-disabled="true">Download for Mac</a>
+        <p class="meta" data-meta>Checking for the latest version</p>
+      </div>
+      <p class="notice enter" data-notice hidden></p>
+      <p class="notice enter" data-platform-note hidden>sirven runs on Mac for now. You can download it here and open it on a Mac.</p>
+    </section>
+
+    <section class="details" aria-label="Details">
+      <div class="card enter">
+        <h2>System requirements</h2>
+        <ul class="facts">
+          <li><span>macOS</span><span data-requirement-macos>13 Ventura or newer</span></li>
+          <li><span>Processor</span><span data-requirement-processor>Apple silicon or Intel</span></li>
+          <li><span>Space</span><span data-requirement-space>A few megabytes</span></li>
+          <li><span>Network</span><span>Your own internet connection</span></li>
+        </ul>
+      </div>
+
+      <div class="card enter">
+        <h2>After you open it</h2>
+        <ol class="steps">
+          <li>What sirven is.</li>
+          <li>How much to share. Solo, sharing nothing, is the default.</li>
+          <li>Two optional permissions, and why.</li>
+        </ol>
+        <p class="small">Then one screen that says exactly what is now true. sirven lives in your menu bar from then on, with no dock icon.</p>
+      </div>
+
+      <div class="card enter">
+        <h2>Leaving is easy</h2>
+        <p class="small">Quit sirven from its menu bar mark, then drag it from Applications to the Trash. A small settings folder stays at Library/Application Support/sirven until you delete it; setup changes nothing else.</p>
+      </div>
+
+      <div class="card enter">
+        <h2>Prefer the command line?</h2>
+        <p class="small">The command line install path stays available: <a href="https://github.com/Joesirven/sirven/blob/main/docs/WALKTHROUGH.md">the walkthrough</a> covers it in three steps and a confirmation.</p>
+      </div>
+    </section>
+
+    <footer class="verify enter" data-verify hidden>
+      <span>sha256</span> <code data-sha></code>
+    </footer>
+  </main>
+
+  <script src="download.js"></script>
+</body>
+</html>

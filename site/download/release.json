@@ -1,0 +1,15 @@
+{
+  "_testData": "a sample manifest so the page renders before the first real build. app/macos/build.sh writes the real one; see docs/DOWNLOAD-AND-ONBOARDING.md, integration seams.",
+  "name": "Sirven",
+  "version": "0.1.0",
+  "build": "28",
+  "file": "Sirven-0.1.0.dmg",
+  "bytes": 596765,
+  "appBytes": 1118208,
+  "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "minimumMacOS": "13.0",
+  "architectures": ["arm64", "x86_64"],
+  "signing": "ad-hoc",
+  "notarized": false,
+  "builtAt": "2026-10-12T00:09:53Z"
+}

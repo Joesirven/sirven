@@ -1,0 +1,213 @@
+/* the download page in docs/DESIGN-LANGUAGE.md terms: light product surface, one blue
+   accent, hairline cards, motion on transform and opacity only, and a reduced-motion
+   fallback for every animation. */
+
+:root {
+  --background: #fdfdfd;
+  --stage: #f9f9f9;
+  --text: #0d0d0d;
+  --muted: #6c6c6c;
+  --faint: #8f8f8f;
+  --hairline: rgba(0, 0, 0, 0.06);
+  --accent: #0073e5;
+  --accent-hover: #0064c8;
+  --accent-tint: rgba(0, 115, 229, 0.09);
+  --smooth-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --fast: 250ms;
+  --medium: 350ms;
+  --quick: 150ms;
+  --stagger: 40ms;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  --shadow-large: 0 4px 42px rgba(0, 0, 0, 0.06), 0 2px 6px rgba(0, 0, 0, 0.05), 0 0 0 1px var(--hairline);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--text);
+  font: 16px/1.5 Inter, -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.page {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 96px 24px 72px;
+}
+
+/* a soft ambient wash behind the hero, the one place a gradient is allowed. */
+.hero {
+  position: relative;
+  text-align: center;
+  padding-bottom: 72px;
+}
+
+.hero::before {
+  content: "";
+  position: absolute;
+  inset: -96px -40% auto;
+  height: 420px;
+  background: radial-gradient(closest-side, var(--accent-tint), transparent);
+  z-index: -1;
+  pointer-events: none;
+}
+
+.mark {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  margin: 0 auto 32px;
+}
+
+.mark .ring {
+  position: absolute;
+  inset: 0;
+  border: 3px solid var(--accent);
+  border-radius: 50%;
+}
+
+.mark .dot {
+  position: absolute;
+  inset: 33%;
+  background: var(--accent);
+  border-radius: 50%;
+}
+
+h1 {
+  font-size: 46px;
+  font-weight: 500;
+  letter-spacing: -0.23px;
+  line-height: 1.1;
+  margin: 0 0 16px;
+}
+
+.lede {
+  color: var(--muted);
+  font-size: 18px;
+  max-width: 460px;
+  margin: 0 auto 40px;
+}
+
+.action { display: grid; justify-items: center; gap: 12px; }
+
+/* the hover darkens through an overlay's opacity, so only opacity and transform animate. */
+.download {
+  position: relative;
+  display: inline-block;
+  padding: 14px 32px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 500;
+  font-size: 16px;
+  text-decoration: none;
+  overflow: hidden;
+  transition: transform var(--quick) ease-out;
+}
+
+.download::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--accent-hover);
+  opacity: 0;
+  transition: opacity var(--quick) ease-out;
+  z-index: 0;
+}
+
+.download:hover::after { opacity: 1; }
+.download:active { transform: scale(0.98); }
+.download:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.download > * { position: relative; z-index: 1; }
+
+.download[aria-disabled="true"] {
+  background: var(--stage);
+  color: var(--faint);
+  cursor: default;
+  box-shadow: 0 0 0 1px var(--hairline);
+}
+
+.download[aria-disabled="true"]::after { display: none; }
+
+.meta { margin: 0; color: var(--faint); font-size: 13px; }
+
+.notice {
+  max-width: 480px;
+  margin: 24px auto 0;
+  padding: 12px 16px;
+  border-radius: 12px;
+  background: var(--stage);
+  color: var(--muted);
+  font-size: 14px;
+  text-align: left;
+}
+
+.details { display: grid; gap: 12px; }
+
+.card {
+  background: #fff;
+  border-radius: 16px;
+  padding: 24px;
+  box-shadow: var(--shadow), 0 0 0 1px var(--hairline);
+}
+
+h2 { font-size: 15px; font-weight: 500; margin: 0 0 12px; }
+
+.facts { list-style: none; margin: 0; padding: 0; }
+
+.facts li {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 8px 0;
+  border-top: 1px solid var(--hairline);
+  font-size: 14px;
+}
+
+.facts li:first-child { border-top: 0; padding-top: 0; }
+.facts li span:first-child { color: var(--muted); }
+
+.steps { margin: 0 0 12px; padding-left: 20px; font-size: 14px; }
+.steps li { padding: 2px 0; }
+
+.small { margin: 0; color: var(--muted); font-size: 14px; }
+.small a { color: var(--accent); text-decoration: none; }
+.small a:hover { text-decoration: underline; }
+
+.verify {
+  margin-top: 40px;
+  text-align: center;
+  color: var(--faint);
+  font-size: 12px;
+}
+
+.verify code {
+  font-family: "Roboto Mono", ui-monospace, Menlo, monospace;
+  word-break: break-all;
+}
+
+/* entrances: 8 pixels of travel and opacity on the smooth-out curve, 40 milliseconds apart.
+   download.js sets --index on each element and adds .shown. */
+.enter {
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity var(--medium) var(--smooth-out), transform var(--medium) var(--smooth-out);
+  transition-delay: calc(var(--index, 0) * var(--stagger));
+}
+
+.enter.shown { opacity: 1; transform: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .enter { transform: none; transition: opacity var(--fast) ease-out; transition-delay: 0ms; }
+  .download, .download::after { transition: none; }
+}
+
+/* without JavaScript, nothing waits for an entrance. */
+.no-script .enter { opacity: 1; transform: none; }
+
+@media (max-width: 520px) {
+  .page { padding-top: 64px; }
+  h1 { font-size: 36px; }
+}
