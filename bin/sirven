@@ -7,6 +7,8 @@
 #                           docs/runtime-interface.md and sirven runtime --help
 #   sirven awake ...        keep the Mac awake while the agent has work in flight (macos only)
 #   sirven phone ...        the owner's iPhone, driven by the owner's agent: lib/phone_bridge.py
+#   sirven add|remove ...   optional components, copied into the owner's own folder:
+#                           lib/components.sh and docs/COMPONENTS.md. core never needs one
 #
 # inspect only reads. rollback is a plan like install.sh: --dry-run prints it and changes
 # nothing, and without --dry-run the identical plan is printed and then applied, under the
@@ -47,6 +49,8 @@ ROOT_DIR="$(cd "$(dirname "$_sirven_self")/.." && pwd)"
 . "$ROOT_DIR/lib/audit.sh"
 # shellcheck source=lib/access_control.sh
 . "$ROOT_DIR/lib/access_control.sh"
+# shellcheck source=lib/components.sh
+. "$ROOT_DIR/lib/components.sh"
 
 AFTER_ALPHA_SESSIONS="sessions already open keep the rights they started with until they end. ending them belongs to the forced-command wrapper, built after alpha. to cut everything now: ./install.sh revoke --all --dry-run"
 
@@ -60,6 +64,8 @@ usage:
   sirven awake [command]             keep the Mac awake while your agent works; sirven awake --help
   sirven phone COMMAND               let your agent drive your plugged-in iPhone, with consent.
                                      sirven phone --help lists the commands
+  sirven add --list                  optional components. sirven never needs one
+  sirven add NAME | remove NAME      add or remove one, as a plan: sirven add --help
 
 options:
   --prefix PATH    read a fake root that install.sh was applied to with --prefix
@@ -451,6 +457,12 @@ main() {
     shift
     keep_awake "$@"
   fi
+  case "${1:-}" in
+    add | remove)
+      components_main "$@"
+      exit $?
+      ;;
+  esac
   if [ "${1:-}" = phone ]; then
     shift
     command -v python3 >/dev/null 2>&1 || die "python3 was not found on PATH; the phone bridge needs it"

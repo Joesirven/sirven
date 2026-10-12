@@ -8,7 +8,7 @@ shell_files() {
     for path in install.sh uninstall.sh bin/sirven; do
       [ -f "$path" ] && printf '%s\n' "$path"
     done
-    find lib tests -type f -name '*.sh'
+    find lib tests components -type f -name '*.sh'
   ) | grep -v '^tests/unit/test_portability.sh$' | sort
 }
 

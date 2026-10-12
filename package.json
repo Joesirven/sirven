@@ -12,6 +12,7 @@
     "copy",
     "connectors",
     "levels",
+    "components",
     "docs",
     "install.sh",
     "uninstall.sh",
