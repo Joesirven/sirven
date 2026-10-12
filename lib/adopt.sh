@@ -353,7 +353,7 @@ _adopt_tailscale_line() {
       if [ -n "$unused" ]; then
         printf '%s, installed and not logged in.%s kept as it is.' "$version" "$unused"
       else
-        printf '%s, installed and not logged in. kept as it is, never reinstalled: the join below logs it in with the tagged key.' "$version"
+        printf '%s, installed and not logged in. the install is kept, never reinstalled. there is no login to adopt, so the join below is the fresh setup, as plan only.' "$version"
       fi
       ;;
     unanswered)

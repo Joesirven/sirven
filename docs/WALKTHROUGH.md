@@ -10,7 +10,7 @@ sirven is built for people who already have a personal agent or muse running (a 
 
 The installer checks first and adopts what it finds instead of installing it again:
 
-- **Tailscale.** Installed, logged in, and this machine's own tags are read from `tailscale status --json`. A machine already logged in with `tag:agent` is the agent node: the plan skips the auth key and the join, and never runs `tailscale up` on it. A machine that is not logged in keeps the usual join step. sirven never logs Tailscale in or out, re-keys it, re-tags it, or changes its settings in an adopt path.
+- **Tailscale.** Installed, logged in, and this machine's own tags are read from `tailscale status --json`. A machine already logged in with `tag:agent` is the agent node: the plan skips the auth key and the join, and never runs `tailscale up` on it. A machine that is installed but not logged in has no login to adopt: its install is kept, and the join is the usual fresh setup step, which stays plan only. sirven never logs Tailscale in or out, re-keys it, re-tags it, or changes its settings in an adopt path.
 - **bb.** Found on the path, it is kept as it is, and `--with-bb` has nothing left to install.
 - **An earlier sirven run.** The grant in force, the policy copy, the audit log, and the install record are kept. A level or path you leave open is taken from the grant in force, so a plain re-run keeps what you set up before.
 
