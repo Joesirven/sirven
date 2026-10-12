@@ -12,7 +12,7 @@
       "maxLength": 32
     },
     "timestamp": {
-      "description": "A date and time in RFC 3339 form with an explicit offset, for example 2026-10-12T15:00:00-07:00.",
+      "description": "A date and time in Request for Comments 3339 form with an explicit offset, for example 2026-10-12T15:00:00-07:00.",
       "type": "string",
       "format": "date-time",
       "maxLength": 40

@@ -12,6 +12,7 @@ invisible by construction:
 
 import base64
 import copy
+import re
 import secrets
 import threading
 from datetime import datetime, timedelta, timezone
@@ -169,6 +170,10 @@ class RideConnector:
         problems = self.validator.validate(arguments, tool + "_input")
         if problems:
             raise ConnectorError("invalid_argument", field=problems[0][0])
+        reference = arguments.get("payment_reference") if tool == "book_ride" else None
+        if reference is not None and re.search(r"[0-9]{12,}", reference.replace("-", "").replace("_", "")):
+            # a long run of digits looks like a card number. card details never enter the contract.
+            raise ConnectorError("invalid_argument", field="/payment_reference")
         requested = arguments.get("contract_version")
         if requested is not None and requested.split(".")[0] != self.version.split(".")[0]:
             raise ConnectorError("unsupported_contract_version", field="/contract_version")
@@ -220,6 +225,10 @@ class RideConnector:
             except BackendError as error:
                 self._log("quote refused", backend=name, reason=error.reason, detail=error.detail)
                 refusals.append(error)
+                continue
+            except Exception as error:  # one broken backend must not sink the others.
+                self._log("quote failed", backend=name, detail=repr(error))
+                refusals.append(BackendError("down", repr(error)))
                 continue
             for option in result.options:
                 gathered.append((name, option))

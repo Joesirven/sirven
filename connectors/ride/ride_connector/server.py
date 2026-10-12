@@ -3,9 +3,10 @@
     python3 -m ride_connector.server            serve the fake demo backends
     python3 -m ride_connector.server --tools    print the tool list and exit
 
-one JSON-RPC message per line, as the model context protocol stdio transport specifies. this is
-the reference wiring for a real deployment: swap demo_connector for a RideConnector over real
-backends and nothing the agent sees changes.
+one JSON remote procedure call (JSON-RPC 2.0) message per line, as the model context protocol
+standard input and output transport specifies. this is the reference wiring for a real
+deployment: swap demo_connector for a RideConnector over real backends and nothing the agent
+sees changes.
 """
 
 import json

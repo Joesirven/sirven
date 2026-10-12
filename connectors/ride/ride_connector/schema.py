@@ -22,7 +22,7 @@ CHECKED = {
     "pattern", "format", "anyOf", "oneOf", "allOf",
 }
 
-RFC3339 = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$")
+TIMESTAMP_FORM = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$")
 
 
 class SchemaError(Exception):
@@ -39,8 +39,8 @@ def contract_version(schema=None):
 
 
 def parse_timestamp(text):
-    """an RFC 3339 timestamp with an offset, as an aware datetime, or None."""
-    if not isinstance(text, str) or not RFC3339.match(text):
+    """a timestamp in the Request for Comments 3339 form, with an offset, as an aware datetime, or None."""
+    if not isinstance(text, str) or not TIMESTAMP_FORM.match(text):
         return None
     try:
         return datetime.fromisoformat(text.replace("Z", "+00:00"))
@@ -132,7 +132,7 @@ class Validator:
             if "pattern" in schema and not re.search(schema["pattern"], value):
                 found.append((path or "/", "does not match %s" % schema["pattern"]))
             if schema.get("format") == "date-time" and parse_timestamp(value) is None:
-                found.append((path or "/", "not an RFC 3339 date and time with an offset"))
+                found.append((path or "/", "not a date and time with an offset, like 2026-10-12T15:00:00-07:00"))
 
         if _type_ok(value, "number"):
             if "minimum" in schema and value < schema["minimum"]:
