@@ -4,6 +4,8 @@
 #   make test       run tests/run.sh
 #   make lint       bash -n on every shell file, then shellcheck when it is installed
 #   make package    a tarball of the files git tracks, in dist/ (or DIST=path)
+#   make keep-awake        macos only: build the keep-awake program behind sirven awake
+#   make test-keep-awake   macos only: its unit tests, and a short real power assertion
 
 SHELL := /bin/sh
 PACKAGE := $(shell sed -n 's/^[[:space:]]*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' project.json | head -n 1 | tr '[:upper:]' '[:lower:]')
@@ -11,12 +13,14 @@ VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo unve
 DIST ?= dist
 SHELL_FILES := install.sh uninstall.sh bin/sirven $(wildcard lib/*.sh) tests/run.sh tests/golden/run.sh $(wildcard tests/lib/*.sh) $(wildcard tests/unit/*.sh)
 
-.PHONY: help test lint package
+.PHONY: help test lint package keep-awake test-keep-awake
 
 help:
 	@echo "make test      run every test: tests/run.sh"
 	@echo "make lint      bash -n on every shell file, then shellcheck if it is installed"
 	@echo "make package   $(DIST)/$(PACKAGE)-$(VERSION).tar.gz from the files git tracks"
+	@echo "make keep-awake        build the keep-awake program behind sirven awake (macos)"
+	@echo "make test-keep-awake   run its tests (macos)"
 
 test:
 	bash tests/run.sh
@@ -43,3 +47,9 @@ package:
 	tar -cf - -T "$$stage/files" | (cd "$$stage/$$name" && tar -xf -); \
 	tar -czf "$(DIST)/$$name.tar.gz" -C "$$stage" "$$name"; \
 	echo "package: $(DIST)/$$name.tar.gz, $$(grep -c . "$$stage/files") files"
+
+keep-awake:
+	swift build --package-path macos/keep-awake -c release
+
+test-keep-awake:
+	swift test --package-path macos/keep-awake
