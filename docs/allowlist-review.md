@@ -19,9 +19,17 @@ The tool is `lib/allowlist_review.py`. The records live in `allowlist/`.
 | Reviewer | the names in `allowlist/policy.json` | reads the review sheet and votes. Only votes decide |
 
 Jose Sirven is the only reviewer for the first six months (his decision of 2026-10-11), so the
-quorum is one. The preparer and the reviewer are kept apart in the records: a decision record
-names who prepared it, and `validate` refuses a record where the preparer also voted. An agent
-may prepare a review. An agent never votes.
+quorum is one. Every decision record names who prepared it, apart from who voted. With a single
+reviewer, Jose may prepare and vote on the same review, so the whole workflow runs end to end
+with one person. Once a council takes over (quorum above one), the preparer of a review does not
+vote on it: `vote` refuses and `validate` flags it. An agent may prepare a review. An agent never
+votes.
+
+**Reviewer identity rests on process alone for now.** A vote records a reviewer's name as typed,
+and anyone with write access to the repository could type Jose's name. On this machine even the
+agent's commits carry Jose's git identity. Until votes are signed (a dependency on the
+attestation work, see Publication), the safeguards are that only Jose runs `vote`, that votes
+arrive in commits he makes himself, and that every vote is public in the registry history.
 
 ## The workflow, end to end
 
@@ -64,9 +72,8 @@ A reviewer with a prepared request needs a few minutes: read one sheet, run one 
    period to have passed.
 
 5. **Build and check.** `lib/allowlist_review.py build` regenerates `allowlist/registry.json`,
-   then `lib/allowlist_review.py validate` checks everything. Commit the records and the registry
-   together; the commit is the reviewer's signature until the attestation layer signs registry
-   versions (see Publication).
+   then `lib/allowlist_review.py validate` checks everything. The reviewer commits the records
+   and the registry together.
 
 ## The rubric
 
@@ -109,8 +116,10 @@ Growth of the list is curated and legible, never quiet or fast. Two numbers in
 `allowlist/policy.json` enforce it, and both are proposals awaiting Jose's confirmation:
 
 - `notice_days` (proposed: 7): an approval counts only on or after this many days after the
-  request was received. Every request is published in the registry's `pending` list during that
-  time, so operators see a site coming before they can be asked to carry it.
+  request was received. Each new request enters the registry's `pending` list at the next build,
+  so once the registry is published, operators can see a site coming before they can be asked to
+  carry it. The period counts from the request date, not from a publish date, so the reviewer
+  should publish the registry soon after accepting a request.
 - `max_additions_per_version` (proposed: 3): `build` refuses a registry version that approves
   more sites than this at once.
 
@@ -144,7 +153,9 @@ Each entry has `domain`, `includes_subdomains`, `decision_record` (a path under 
 Matching rules, for the local policy engine:
 
 - `domain` is a lowercase host name in punycode, with no scheme, port, path, wildcard, or
-  trailing dot. Normalize the requested host the same way before comparing.
+  trailing dot, and with a leading `www.` label dropped: `www.zillow.com` is recorded as
+  `zillow.com`. Normalize the requested host the same way before comparing, so a request to
+  `www.zillow.com` matches the entry `zillow.com`.
 - `includes_subdomains: false` matches that exact host only. `true` matches the host and every
   subdomain. Every entry so far is `false`; a reviewer widens it by editing the decision record
   before voting.
@@ -167,7 +178,8 @@ DIR/versions/registry-vN.json every published version, kept forever
 DIR/versions/registry-vN.json.sha256
 ```
 
-It refuses to publish when `validate` finds a problem, refuses to overwrite a published version
+Each `.sha256` file holds the file's SHA-256 checksum (a fingerprint of its exact bytes), so an
+operator can confirm the copy they fetched is the one published. It refuses to publish when `validate` finds a problem, refuses to overwrite a published version
 with different content, and refuses to replace a newer version with an older one.
 
 - `--staging` publishes anywhere for rehearsal.
@@ -176,9 +188,10 @@ with different content, and refuses to replace a newer version with an older one
 
 The public location is Jose's call. The proposal is a static site, such as GitHub Pages for this
 repository, so operators can fetch `registry.json` and check it against its checksum. Until the attestation layer exists, the
-checksum proves integrity in transit only; signing each version with a sirven key is a
-dependency on the attestation work, and the policy engine should verify that signature once it
-exists.
+checksum proves integrity in transit only. Two signatures are dependencies on the attestation
+work: each reviewer's vote, so a vote proves who cast it, and each registry version, so a node can
+prove the copy it fetched came from sirven. The policy engine should verify the version signature
+once it exists.
 
 The `allowlist/` folder is not in the npm package's files list on purpose: nodes fetch the
 published registry rather than trusting whatever copy shipped with the installer.

@@ -2,9 +2,9 @@
   "request": "2026-10-11-amazon.com-1",
   "domain": "amazon.com",
   "received": "2026-10-11",
-  "requested_by": "sirven_user",
-  "case_for_personal_agent_use": "a personal agent compares prices and places orders on the user's own Amazon account, the most common shopping request users make of agents.",
-  "risk_notes": "Amazon sued Perplexity in November 2025 over its Comet agent shopping in signed-in accounts; a preliminary injunction in March 2026 was vacated by the Ninth Circuit in August 2026; the case is ongoing.",
+  "requested_by": "sirven",
+  "case_for_personal_agent_use": "a personal agent compares prices and places orders on the user's own Amazon account. filed by this review thread as a dry run, not by a user.",
+  "risk_notes": "Amazon sued Perplexity in November 2025 over its Comet agent shopping in signed-in accounts; a district court granted a preliminary injunction in March 2026; a Law360 headline reports the Ninth Circuit vacated it in August 2026 (secondary report, not read in full); the case continues.",
   "public_positions": [
     {
       "kind": "enforcement",

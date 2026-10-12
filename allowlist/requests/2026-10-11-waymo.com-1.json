@@ -3,7 +3,7 @@
   "domain": "waymo.com",
   "received": "2026-10-11",
   "requested_by": "sirven",
-  "case_for_personal_agent_use": "a personal agent checks Waymo service areas and availability for its user, and books a ride for the user the user will be present for. the end-to-end demo (book a ride to the barber) depends on it.",
+  "case_for_personal_agent_use": "a personal agent checks Waymo service areas and availability for its user, and books a ride the user will be present for. filed by this review thread as a dry run.",
   "risk_notes": "booking runs through the Waymo app and its account; the account is single-user and the terms bar applications that interact with the service without written consent.",
   "public_positions": [
     {

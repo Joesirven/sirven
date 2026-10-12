@@ -77,7 +77,8 @@ def default_root():
 
 
 def normalize_domain(text):
-    """the registry matching contract: lowercase, punycode, no scheme, port, path, or dot."""
+    """the registry matching contract: lowercase, punycode, no scheme, port, path, trailing
+    dot, or leading www label."""
     raw = text.strip()
     if not raw or re.search(r"[/:@*\s]", raw):
         raise ReviewError("domain '%s' must be a bare host name: no scheme, port, path, or wildcard" % text)
@@ -85,6 +86,8 @@ def normalize_domain(text):
         domain = raw.rstrip(".").encode("idna").decode("ascii").lower()
     except UnicodeError:
         raise ReviewError("domain '%s' is not a valid host name" % text)
+    if domain.startswith("www.") and domain.count(".") >= 2:
+        domain = domain[len("www."):]
     labels = domain.split(".")
     if len(labels) < 2 or not all(LABEL_PATTERN.match(label) for label in labels):
         raise ReviewError("domain '%s' is not a valid host name" % text)
@@ -352,6 +355,8 @@ def command_vote(args):
             args.decision, current[record["domain"]]["decision"]))
     if args.reviewer not in policy["reviewers"]:
         raise ReviewError("'%s' is not a reviewer in policy.json" % args.reviewer)
+    if policy["quorum"] > 1 and args.reviewer == record["prepared_by"]:
+        raise ReviewError("%s prepared this review; with a council, the preparer does not vote on it" % args.reviewer)
     date = args.date or today()
     check_date(date, "--date")
     scope = list(dict.fromkeys(args.scope or []))
@@ -433,10 +438,14 @@ def build_registry(root):
     old = read_json(path) if os.path.exists(path) else {"version": 0, "history": []}
     policy = load_policy(root)
     lists, newest_date = registry_content(root)
-    same = all(old.get(key, []) == lists[key] for key in lists)
+    same_policy = old.get("reviewers") == policy["reviewers"] and old.get("quorum") == policy["quorum"]
+    same = same_policy and all(old.get(key, []) == lists[key] for key in lists)
     if same and old["version"] > 0:
         return old, False
     change = summarize_change(old, lists)
+    if not same_policy and old["version"] > 0:
+        change["reviewers_now"] = policy["reviewers"]
+        change["quorum_now"] = policy["quorum"]
     added = change.get("added_to_approved", [])
     if len(added) > policy["max_additions_per_version"]:
         raise ReviewError("this version would approve %d domains (%s); policy.json allows %d per version" % (
@@ -533,7 +542,7 @@ def validate(root):
                     problems.append("%s: vote by %s, who is not a reviewer in policy.json" % (where, vote["reviewer"]))
                 if vote["decision"] not in DECISIONS or not set(vote.get("scope", [])) <= set(SCOPES):
                     problems.append("%s: a vote has an unknown decision or scope" % where)
-                if vote["reviewer"] == record["prepared_by"]:
+                if policy["quorum"] > 1 and vote["reviewer"] == record["prepared_by"]:
                     problems.append("%s: %s both prepared and voted; a council must keep those apart" % (where, vote["reviewer"]))
         except (ReviewError, KeyError) as error:
             problems.append("%s: %s" % (where, error))

@@ -15,6 +15,11 @@ json_value() {
   python3 -c 'import json, sys; print(eval("data" + sys.argv[2], {"data": json.load(open(sys.argv[1]))}))' "$@"
 }
 
+# sha256 check of a published file: shasum on macos, sha256sum on minimal linux.
+check_sha256() {
+  if command -v shasum > /dev/null 2>&1; then shasum -a 256 -c "$1"; else sha256sum -c "$1"; fi
+}
+
 setup_root() {
   mkdir -p "$TEST_TMP/allowlist"
   cat > "$TEST_TMP/allowlist/policy.json" <<'END'
@@ -62,6 +67,14 @@ test_domains_are_normalized_and_bare() {
     capture review request --domain "$bad" --requested-by sirven --case "x" --date 2026-10-01
     assert_eq 1 "$CAPTURED_STATUS" "should refuse $bad"
   done
+}
+
+test_a_leading_www_label_is_dropped() {
+  setup_root
+  capture review request --domain www.zillow.com --requested-by sirven --case "x" --date 2026-10-01
+  assert_eq "2026-10-01-zillow.com-1" "$CAPTURED_STDOUT"
+  capture review request --domain www.example --requested-by sirven --case "x" --date 2026-10-01
+  assert_eq "2026-10-01-www.example-1" "$CAPTURED_STDOUT"
 }
 
 test_unicode_domains_become_punycode() {
@@ -224,8 +237,8 @@ test_staging_publish_writes_versions_and_checksums() {
   assert_eq 0 "$CAPTURED_STATUS"
   assert_file_exists "$TEST_TMP/site/registry.json"
   assert_file_exists "$TEST_TMP/site/versions/registry-v1.json"
-  (cd "$TEST_TMP/site" && shasum -a 256 -c registry.json.sha256 > /dev/null) || fail "registry checksum does not match"
-  (cd "$TEST_TMP/site/versions" && shasum -a 256 -c registry-v1.json.sha256 > /dev/null) || fail "version checksum does not match"
+  (cd "$TEST_TMP/site" && check_sha256 registry.json.sha256 > /dev/null) || fail "registry checksum does not match"
+  (cd "$TEST_TMP/site/versions" && check_sha256 registry-v1.json.sha256 > /dev/null) || fail "version checksum does not match"
   assert_status 0 review publish --dest "$TEST_TMP/site" --staging
 }
 
@@ -258,4 +271,40 @@ test_the_review_sheet_shows_the_vote_commands() {
   assert_contains "$CAPTURED_STDOUT" "vote 2026-10-02-a.example-1 --reviewer NAME --decision approve --scope public_pages"
   capture review queue
   assert_contains "$CAPTURED_STDOUT" "a.example	recommended: approve public_pages"
+}
+
+test_a_single_reviewer_may_vote_on_a_review_they_prepared() {
+  setup_root
+  review request --domain a.example --requested-by sirven --case "x" --date 2026-10-01 > /dev/null
+  review prepare 2026-10-01-a.example-1 --prepared-by "Jose Sirven" --date 2026-10-01 > /dev/null
+  assert_status 0 review vote 2026-10-01-a.example-1 --reviewer "Jose Sirven" --decision decline --note "no" --date 2026-10-02
+  review build > /dev/null
+  assert_status 0 review validate
+}
+
+test_a_council_keeps_preparer_and_voter_apart() {
+  setup_root
+  cat > "$TEST_TMP/allowlist/policy.json" <<'END'
+{"created": "2026-10-01", "reviewers": ["Jose Sirven", "Second Reviewer"], "quorum": 2, "notice_days": 0, "max_additions_per_version": 2}
+END
+  review request --domain a.example --requested-by sirven --case "x" --date 2026-10-01 > /dev/null
+  review prepare 2026-10-01-a.example-1 --prepared-by "Jose Sirven" --date 2026-10-01 > /dev/null
+  capture review vote 2026-10-01-a.example-1 --reviewer "Jose Sirven" --decision decline --date 2026-10-02
+  assert_eq 1 "$CAPTURED_STATUS"
+  assert_contains "$CAPTURED_STDERR" "the preparer does not vote"
+}
+
+test_a_council_handoff_is_a_new_registry_version() {
+  setup_root
+  review build > /dev/null
+  cat > "$TEST_TMP/allowlist/policy.json" <<'END'
+{"created": "2026-10-01", "reviewers": ["Jose Sirven", "Second Reviewer"], "quorum": 2, "notice_days": 7, "max_additions_per_version": 2}
+END
+  assert_status 1 review build --check
+  assert_status 1 review validate
+  review build > /dev/null
+  local registry="$TEST_TMP/allowlist/registry.json"
+  assert_eq 2 "$(json_value "$registry" '["version"]')"
+  assert_eq 2 "$(json_value "$registry" '["quorum"]')"
+  assert_eq "['Jose Sirven', 'Second Reviewer']" "$(json_value "$registry" '["history"][-1]["reviewers_now"]')"
 }

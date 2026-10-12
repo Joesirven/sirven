@@ -17,7 +17,7 @@
     },
     "site_position": {
       "rating": "fail",
-      "finding": "Amazon sued Perplexity in November 2025 over the Comet agent shopping in signed-in accounts; a district court granted a preliminary injunction in March 2026; the Ninth Circuit vacated it in August 2026; the case continues. Amazon also blocked Meta's Muse agent (TechCrunch, 2026-10-06). the site plainly treats this traffic as abuse."
+      "finding": "Amazon sued Perplexity in November 2025 over the Comet agent shopping in signed-in accounts, and a district court granted a preliminary injunction in March 2026 (Cooley, 2026-03-17). a Law360 headline reports the Ninth Circuit vacated that injunction in August 2026; that is a secondary report, not read in full. TechCrunch (2026-10-06) reports Amazon also blocked Meta's Muse agent. either way, the site plainly treats this traffic as abuse."
     }
   },
   "recommendation": {
