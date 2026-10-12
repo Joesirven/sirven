@@ -151,6 +151,9 @@ def world_action(method, path, body):
                 state = dict(state, screen=then, typed=state["typed"])
         elif bare == "/wda/homescreen":
             state = dict(state, app=the_world["start"]["app"], screen=the_world["start"]["screen"], typed="")
+        elif bare.endswith("/wda/apps/terminate"):
+            if body["bundleId"] == state["app"]:
+                state = dict(state, app=the_world["start"]["app"], screen=the_world["start"]["screen"], typed="")
         elif bare.endswith("/wda/apps/activate"):
             app = the_world["apps"].get(body["bundleId"])
             if app is None:
