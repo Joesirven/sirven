@@ -8,7 +8,7 @@ calendar app can import by hand.
 
 import json
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 
@@ -82,6 +82,20 @@ def _ics_text(value):
     return value.replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,").replace("\n", "\\n")
 
 
+def _fold(line):
+    """standard calendar files keep lines to 75 octets; longer ones continue after a space."""
+    data = line.encode("utf-8")
+    parts = []
+    while len(data) > 75:
+        cut = 75 if not parts else 74
+        while cut > 0 and (data[cut] & 0xC0) == 0x80:
+            cut -= 1
+        parts.append(data[:cut].decode("utf-8"))
+        data = data[cut:]
+    parts.append(data.decode("utf-8"))
+    return "\r\n ".join(parts)
+
+
 def to_ics(event, start, end):
     universal = "%Y%m%dT%H%M%SZ"
     lines = [
@@ -89,14 +103,14 @@ def to_ics(event, start, end):
         "VERSION:2.0",
         "PRODID:-//sirven//ride rehearsal//EN",
         "BEGIN:VEVENT",
-        "UID:%s@sirven.invalid" % event["event_id"],
-        "DTSTAMP:%s" % datetime.now(ZoneInfo("UTC")).strftime(universal),
-        "DTSTART:%s" % start.astimezone(ZoneInfo("UTC")).strftime(universal),
-        "DTEND:%s" % end.astimezone(ZoneInfo("UTC")).strftime(universal),
+        "UID:%s@sirven.invalid" % event["event_id"],  # literal: the calendar format's unique identifier property
+        "DTSTAMP:%s" % datetime.now(timezone.utc).strftime(universal),
+        "DTSTART:%s" % start.astimezone(timezone.utc).strftime(universal),
+        "DTEND:%s" % end.astimezone(timezone.utc).strftime(universal),
         "SUMMARY:%s" % _ics_text(event["title"]),
         "LOCATION:%s" % _ics_text(event["location"]),
         "DESCRIPTION:%s" % _ics_text(event["description"]),
         "END:VEVENT",
         "END:VCALENDAR",
     ]
-    return "\r\n".join(lines) + "\r\n"
+    return "\r\n".join(_fold(line) for line in lines) + "\r\n"

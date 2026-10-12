@@ -78,7 +78,7 @@ class ConciergeBackend:
             answered = self._withdraw(request_id, ("waiting_quote", "quote_claimed"), "quote_target_missed")
         if answered is None:
             entry = service_levels.missed(self.service_level_log, request_id, "quote", started,
-                                          service_levels.QUOTE_TARGET_SECONDS)
+                                          service_levels.QUOTE_TARGET_SECONDS, self.quote_wait_seconds)
             self.measurements.append(entry)
             self.notify(service_levels.describe(entry))
             return {"unavailable": [{"provider": PROVIDER, "reason": "quote_target_missed"}]}
@@ -113,7 +113,7 @@ class ConciergeBackend:
             answered = self._withdraw(request_id, ("waiting_booking", "booking_claimed"), "booking_target_missed")
         if answered is None:
             entry = service_levels.missed(self.service_level_log, request_id, "booking", started,
-                                          service_levels.BOOKING_TARGET_SECONDS)
+                                          service_levels.BOOKING_TARGET_SECONDS, self.booking_wait_seconds)
             self.measurements.append(entry)
             self.notify(service_levels.describe(entry))
             raise ConnectorError("booking_target_missed", "the concierge did not confirm inside the booking target")
@@ -127,6 +127,8 @@ class ConciergeBackend:
         try:
             self.cards.authorize(card["card_id"], result["fare_minor"], RIDE_CATEGORY)
         except Declined as declined:
+            self.queue.move(request_id, "booked", "withdrawn",
+                            withdrawn_because="fare over the card's limit: cancel this ride in the Waymo app")
             raise ConnectorError("payment_declined", "the fare the concierge saw was declined: %s; "
                                  "the concierge must cancel the ride" % declined.reason)
         pickup = self._pickups[request_id]

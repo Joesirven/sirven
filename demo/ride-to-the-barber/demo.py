@@ -42,6 +42,8 @@ def main(argv=None):
                      help="run a timed, clearly labeled operator at the concierge console instead of a person")
     run.add_argument("--scenario", choices=SCENARIOS, default="normal", help="what the scripted operator does")
     run.add_argument("--concierge-name", default="Jose (rehearsal)")
+    run.add_argument("--operator-delays", default="2,6,2,14",
+                     help="scripted operator seconds: before claiming the quote, quoting, claiming the booking, booking")
     run.add_argument("--quote-wait", type=float, default=30, help="seconds to wait for a quote; the target is 30")
     run.add_argument("--booking-wait", type=float, default=90, help="seconds to wait for a booking; the target is 90")
     run.add_argument("--live", action="store_true", help="ask for a live fire; always refused in this build")
@@ -49,6 +51,7 @@ def main(argv=None):
     operate = commands.add_parser("console", help="the concierge console a person operates")
     operate.add_argument("--state", default=default_state())
     operate.add_argument("--name", default="Jose (rehearsal)")
+    operate.add_argument("--once", action="store_true", help="leave after one booking or one decline")
 
     commands.add_parser("gates", help="print the ship gates")
 
@@ -62,7 +65,7 @@ def main(argv=None):
 
     if args.command == "console":
         try:
-            console.interactive(ConciergeQueue(os.path.join(args.state, "concierge-queue")), args.name)
+            console.interactive(ConciergeQueue(os.path.join(args.state, "concierge-queue")), args.name, once=args.once)
         except (KeyboardInterrupt, EOFError):
             print()
         return 0
@@ -79,7 +82,8 @@ def main(argv=None):
     if args.scripted_concierge:
         queue = ConciergeQueue(os.path.join(args.state, "concierge-queue"))
         operator = console.ScriptedOperator(
-            queue, args.concierge_name, lambda line: recorder.say(line, who="concierge"), scenario=args.scenario).start()
+            queue, args.concierge_name, lambda line: recorder.say(line, who="concierge"), scenario=args.scenario,
+            delays=tuple(float(part) for part in args.operator_delays.split(","))).start()
     try:
         status = agent.run(args, recorder)
     finally:

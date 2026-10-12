@@ -174,15 +174,21 @@ def _ask_dollars(prompt, default_minor):
             print("  a dollar amount, like 21.40")
 
 
-def interactive(queue, name, poll_seconds=0.5):
+def interactive(queue, name, poll_seconds=0.5, once=False):
     """the console a person operates. it waits for requests, shows each with the rules and a
-    running clock against its target, and writes back what the person enters."""
+    running clock against its target, and writes back what the person enters. with once, it
+    leaves after the first booking it confirms or request it declines."""
     print("sirven concierge console (rehearsal). concierge: %s" % name)
     print("rules for every request:")
     for rule in RULES:
         print("  - " + rule)
     print("waiting for requests. press control-c to leave.")
+    told = set()
     while True:
+        for request in queue.list(("withdrawn",)):
+            if request["request_id"] not in told:
+                told.add(request["request_id"])
+                print("\nrequest %s withdrawn by the agent: %s" % (request["request_id"], request["withdrawn_because"]))
         waiting = queue.list(("waiting_quote", "waiting_booking"))
         if not waiting:
             time.sleep(poll_seconds)
@@ -202,6 +208,9 @@ def interactive(queue, name, poll_seconds=0.5):
                 decline(queue, request_id, _ask("why", "cannot book this trip"))
             except QueueError as error:
                 print("  too late: %s" % error)
+                continue
+            if once:
+                return
             continue
         try:
             claim(queue, request_id, name)
@@ -219,3 +228,5 @@ def interactive(queue, name, poll_seconds=0.5):
             print("  too late, the agent stopped waiting: %s" % error)
             continue
         print("sent at %.1f seconds of %d" % (elapsed(queue.read(request_id), state), target))
+        if once and state == "waiting_booking":
+            return

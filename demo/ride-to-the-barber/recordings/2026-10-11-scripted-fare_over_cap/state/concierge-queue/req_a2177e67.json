@@ -1,0 +1,77 @@
+{
+  "booking": {
+    "confirmation_code": "REHEARSAL-WAYMO-0001",
+    "fare_minor": 2690,
+    "tracking_url": "https://example.invalid/waymo/trip/rehearsal-0001"
+  },
+  "concierge": {
+    "name": "Jose (rehearsal)"
+  },
+  "consent": {
+    "at": "2026-10-11T17:25:09-07:00",
+    "disclosure": "demo/ride-to-the-barber/copy/concierge-disclosure.md",
+    "disclosure_status": "draft for Jose's review",
+    "granted": true
+  },
+  "history": [
+    {
+      "at": "2026-10-11T17:25:09.096-07:00",
+      "state": "waiting_quote"
+    },
+    {
+      "at": "2026-10-11T17:25:11.376-07:00",
+      "state": "quote_claimed"
+    },
+    {
+      "at": "2026-10-11T17:25:17.383-07:00",
+      "state": "quoted"
+    },
+    {
+      "at": "2026-10-11T17:25:17.566-07:00",
+      "state": "waiting_booking"
+    },
+    {
+      "at": "2026-10-11T17:25:19.660-07:00",
+      "state": "booking_claimed"
+    },
+    {
+      "at": "2026-10-11T17:25:33.738-07:00",
+      "state": "booked"
+    },
+    {
+      "at": "2026-10-11T17:25:33.818-07:00",
+      "state": "withdrawn"
+    }
+  ],
+  "payment": {
+    "allowed_categories": [
+      "taxicabs_limousines"
+    ],
+    "card_id": "ic_test_cfdcf7ebf714",
+    "last4": "4242",
+    "mode": "test",
+    "spending_limit_minor": 2140
+  },
+  "quote": {
+    "pickup_minutes": 7,
+    "price_minor": 2140,
+    "trip_minutes": 16
+  },
+  "request_id": "req_a2177e67",
+  "state": "withdrawn",
+  "trip": {
+    "arrive_by": "2026-10-13T15:25:00-07:00",
+    "budget_ceiling": {
+      "amount_minor": 2500,
+      "currency": "USD"
+    },
+    "departure_window": {
+      "earliest": "2026-10-13T14:50:00-07:00",
+      "latest": "2026-10-13T15:05:00-07:00"
+    },
+    "destination": "Mission Street Barbers, 2400 Mission St, San Francisco, CA 94110",
+    "origin": "535 Mission St, San Francisco, CA 94105",
+    "provider": "Waymo"
+  },
+  "withdrawn_because": "fare over the card's limit: cancel this ride in the Waymo app"
+}

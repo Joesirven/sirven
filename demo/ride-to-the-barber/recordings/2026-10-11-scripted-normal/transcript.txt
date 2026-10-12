@@ -1,0 +1,64 @@
+    0.0  sirven rehearsal: one request, end to end. tier: Solo.
+    0.0  no real booking, no real money, no real Waymo account. the first live fire is Jose's.
+    0.0  
+    0.0  stand-ins in this run (each is marked SUBSTITUTION in its file):
+    0.0    - thread 08, ride connector contract -> ride_demo/connector.py: the three-call shape from the thread instructions; no published schemas yet
+    0.0    - thread 09, official-partner backend -> ride_demo/partner_backend.py: Uber and Lyft from a recorded fixture with invented prices
+    0.0    - thread 10, concierge queue and protocol -> ride_demo/concierge_queue.py and console.py: a file queue and the floor of the trust and safety rules
+    0.0    - thread 11, per-booking virtual cards -> ride_demo/payment.py: an in-memory test card; no Stripe call of any kind
+    0.0    - the user's calendar -> fixtures/calendar.json, written back to a copy and a .ics file in the run's state directory
+    0.0    - the language model reading the request -> ride_demo/request.py: fixed patterns for the demo sentence
+    0.0    - the Waymo app -> a person at the concierge console types what the app would show; in a recorded run, a scripted operator does
+    0.0  
+    0.0  ship gates (the rehearsal demonstrates them; it does not waive them):
+    0.0    human-concierge tier: CLOSED, not shippable
+    0.0      [ ] service-level targets: targets of 30 seconds to quote and 90 to book are enforced in this demo; thread 10's monitoring: not committed yet (thread 10)
+    0.0      [ ] concierge trust and safety protocol: not committed yet (thread 10, under concierge-ops/)
+    0.0      [ ] user-facing disclosure of concierge involvement: demo/ride-to-the-barber/copy/concierge-disclosure.md is 'draft for Jose's review'; it passes at 'approved', which is Jose's call
+    0.0    peer routing of authenticated traffic: CLOSED, not shippable
+    0.0      [-] not exercised: this run is Solo: every request leaves from the user's own connection, none through a peer
+    0.0  
+    0.0  user: "book me a ride to the barber after my 2pm meeting, Waymo preferred, under $25"
+    0.0  
+    0.0  agent: calendar read
+    0.0    the meeting: Design review, 2:00pm to 2:45pm, at 535 Mission St, San Francisco, CA 94105
+    0.0    next: Haircut at 3:30pm, so I will aim to have you there by 3:25pm
+    0.0    leave between 2:50pm and 3:05pm, from 535 Mission St, San Francisco, CA 94105 to Mission Street Barbers, 2400 Mission St, San Francisco, CA 94110
+    0.0  
+    0.0    ? Waymo rides are booked for you by a person on the sirven team (a concierge). To get a price and book, they will see your pickup (535 Mission St, San Francisco, CA 94105), where you are going (Mission Street Barbers, 2400 Mission St, San Francisco, CA 94110), and when (2:50pm to 3:05pm). They will not see your calendar, your card number, or anything else. Is that all right?
+    0.0      yes (answered by --yes, for the recording)
+    0.0  
+    0.0  agent: quote_ride(535 Mission St, San Francisco, CA 94105 -> Mission Street Barbers, 2400 Mission St, San Francisco, CA 94110, leave 2:50pm to 3:05pm, prefer Waymo, under $25.00)
+    0.0      request req_226bb970 is in the concierge queue, waiting for a quote
+    0.3  concierge | new request req_226bb970; the rules are on screen
+    2.3  concierge | claimed by Jose (rehearsal); opening the Waymo app for a price
+    2.5      concierge Jose (rehearsal) claimed the request
+    8.4  concierge | quote sent: $21.40, pickup in 7 minutes, 16 minute trip, at 8.4 seconds of 30
+    8.6      quote: 8.4 seconds against a 30 second target (met)
+    8.6    1. Waymo  Waymo One       $21.40  pickup 2:57pm, arrive 3:13pm  flags: preferred_provider
+    8.6    2. Uber   UberX           $18.90  pickup 2:54pm, arrive 3:10pm  flags: none
+    8.6    3. Lyft   Lyft Standard   $19.50  pickup 2:56pm, arrive 3:12pm  flags: none
+    8.6    4. Uber   Uber Black      $34.20  pickup 2:57pm, arrive 3:12pm  flags: over_budget
+    8.6  agent: choosing option 1: Waymo One at $21.40 is the best option under $25.00 that arrives on time, and it is your preferred service.
+    8.6  
+    8.6    ? Book Waymo One for $21.40? Pickup about 2:57pm at 535 Mission St, San Francisco, CA 94105, arriving about 3:13pm. A one-time card limited to $21.40, for ride services only, pays for it. A sirven concierge books this one in the Waymo app for you, and I will tell you who.
+    8.6      yes (answered by --yes, for the recording)
+    8.6  agent: held test card ic_test_d2e9bb432db2 ending 4242, limit $21.40, ride services only
+    8.6  agent: book_ride(q_a3e7b4ef3e5d)
+    8.6      request req_226bb970 is waiting for the concierge to book
+    8.7  concierge | booking requested for req_226bb970
+    8.7  concierge | pay with:    test card ending 4242, limit $21.40, ride services only
+   10.8  concierge | booking in the Waymo app
+   11.1      concierge Jose (rehearsal) claimed the request
+   24.8  concierge | confirmation REHEARSAL-WAYMO-0001 sent, fare $21.40, at 16.2 seconds of 90
+   25.1      booking: 16.2 seconds against a 90 second target (met)
+   25.2  agent: booked b_2dfc96082327, status confirmed
+   25.2  agent: Booked by Jose (rehearsal), a sirven concierge. Confirmation REHEARSAL-WAYMO-0001.
+   25.2    tracking: https://example.invalid/waymo/trip/rehearsal-0001
+   25.2    free cancellation until 2:55pm (rehearsal assumption; Waymo's own cancellation terms are not yet checked)
+   25.2  agent: on your calendar: Ride to Mission Street Barbers (Waymo), 2:57pm to 3:13pm
+   25.2  
+   25.2  done. service levels for the concierge leg:
+   25.2    quote: 8.4 seconds against a 30 second target (met)
+   25.2    booking: 16.2 seconds against a 90 second target (met)
+   25.2  state written to recordings/2026-10-11-scripted-normal/state: calendar.json, ride.ics, charge-records.json, service-levels.jsonl, concierge-queue/

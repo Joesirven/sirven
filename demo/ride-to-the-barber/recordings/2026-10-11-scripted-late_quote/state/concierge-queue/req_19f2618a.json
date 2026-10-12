@@ -1,0 +1,42 @@
+{
+  "concierge": {
+    "name": "Jose (rehearsal)"
+  },
+  "consent": {
+    "at": "2026-10-11T17:24:38-07:00",
+    "disclosure": "demo/ride-to-the-barber/copy/concierge-disclosure.md",
+    "disclosure_status": "draft for Jose's review",
+    "granted": true
+  },
+  "history": [
+    {
+      "at": "2026-10-11T17:24:38.305-07:00",
+      "state": "waiting_quote"
+    },
+    {
+      "at": "2026-10-11T17:24:40.559-07:00",
+      "state": "quote_claimed"
+    },
+    {
+      "at": "2026-10-11T17:25:08.546-07:00",
+      "state": "withdrawn"
+    }
+  ],
+  "request_id": "req_19f2618a",
+  "state": "withdrawn",
+  "trip": {
+    "arrive_by": "2026-10-13T15:25:00-07:00",
+    "budget_ceiling": {
+      "amount_minor": 2500,
+      "currency": "USD"
+    },
+    "departure_window": {
+      "earliest": "2026-10-13T14:50:00-07:00",
+      "latest": "2026-10-13T15:05:00-07:00"
+    },
+    "destination": "Mission Street Barbers, 2400 Mission St, San Francisco, CA 94110",
+    "origin": "535 Mission St, San Francisco, CA 94105",
+    "provider": "Waymo"
+  },
+  "withdrawn_because": "quote_target_missed"
+}

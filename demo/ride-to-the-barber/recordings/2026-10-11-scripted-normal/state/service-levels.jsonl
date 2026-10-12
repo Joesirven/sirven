@@ -1,0 +1,2 @@
+{"finished": "2026-10-11T17:24:21.005-07:00", "leg": "quote", "met": true, "request_id": "req_226bb970", "seconds": 8.4, "started": "2026-10-11T17:24:12.593-07:00", "target_seconds": 30}
+{"finished": "2026-10-11T17:24:37.380-07:00", "leg": "booking", "met": true, "request_id": "req_226bb970", "seconds": 16.2, "started": "2026-10-11T17:24:21.209-07:00", "target_seconds": 90}

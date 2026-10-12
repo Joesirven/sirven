@@ -30,12 +30,14 @@ def measure(log_path, request_id, leg, started, finished, target_seconds):
     return entry
 
 
-def missed(log_path, request_id, leg, started, target_seconds):
-    """record a leg that never finished inside its target."""
+def missed(log_path, request_id, leg, started, target_seconds, waited_seconds):
+    """record a leg that never finished. waited_seconds is how long the agent waited, which
+    is the target unless a test shortened it."""
     entry = {
         "request_id": request_id,
         "leg": leg,
         "seconds": None,
+        "waited_seconds": waited_seconds,
         "target_seconds": target_seconds,
         "met": False,
         "started": started.isoformat(timespec="milliseconds"),
@@ -48,7 +50,8 @@ def missed(log_path, request_id, leg, started, target_seconds):
 
 def describe(entry):
     if entry["seconds"] is None:
-        return "%s: no answer inside the %d second target (missed)" % (entry["leg"], entry["target_seconds"])
+        return "%s: no answer after %g seconds of waiting, against a %d second target (missed)" % (
+            entry["leg"], entry["waited_seconds"], entry["target_seconds"])
     verdict = "met" if entry["met"] else "MISSED"
     return "%s: %.1f seconds against a %d second target (%s)" % (
         entry["leg"], entry["seconds"], entry["target_seconds"], verdict)

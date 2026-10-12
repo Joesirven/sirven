@@ -1,0 +1,36 @@
+{
+  "substitution": "Fixture calendar. No calendar connector exists in the repo yet; a live fire reads Jose's own calendar instead.",
+  "time_zone": "America/Los_Angeles",
+  "events": [
+    {
+      "event_id": "evt-standup",
+      "title": "Team standup",
+      "start": "2026-10-13T10:00:00",
+      "end": "2026-10-13T10:15:00",
+      "location": "Video call"
+    },
+    {
+      "event_id": "evt-design-review",
+      "title": "Design review",
+      "start": "2026-10-13T14:00:00",
+      "end": "2026-10-13T14:45:00",
+      "location": "535 Mission St, San Francisco, CA 94105"
+    },
+    {
+      "event_id": "evt-haircut",
+      "title": "Haircut",
+      "start": "2026-10-13T15:30:00",
+      "end": "2026-10-13T16:00:00",
+      "location": "Mission Street Barbers, 2400 Mission St, San Francisco, CA 94110"
+    },
+    {
+      "event_id": "evt-ride-b_e3247f27d3f9",
+      "title": "Ride to Mission Street Barbers (Uber)",
+      "start": "2026-10-13T14:54:00-07:00",
+      "end": "2026-10-13T15:10:00-07:00",
+      "location": "535 Mission St, San Francisco, CA 94105",
+      "description": "Uber UberX, $18.90, booked by the sirven agent\nbooking: b_e3247f27d3f9\nconfirmation: FIXTURE (fixture)\ntracking: https://example.invalid/track/partner-booking-8bb1f7b4\nfree cancellation until: 2026-10-13T14:52:00-07:00\npaid with: test card ending 4242, limit $21.90\nwhy: UberX at $18.90 plus up to $3.00 tip is the best option under $25.00 that arrives on time",
+      "written_by": "sirven agent (rehearsal)"
+    }
+  ]
+}

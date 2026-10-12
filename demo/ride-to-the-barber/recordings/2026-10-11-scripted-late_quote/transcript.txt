@@ -1,0 +1,56 @@
+    0.0  sirven rehearsal: one request, end to end. tier: Solo.
+    0.0  no real booking, no real money, no real Waymo account. the first live fire is Jose's.
+    0.0  
+    0.0  stand-ins in this run (each is marked SUBSTITUTION in its file):
+    0.0    - thread 08, ride connector contract -> ride_demo/connector.py: the three-call shape from the thread instructions; no published schemas yet
+    0.0    - thread 09, official-partner backend -> ride_demo/partner_backend.py: Uber and Lyft from a recorded fixture with invented prices
+    0.0    - thread 10, concierge queue and protocol -> ride_demo/concierge_queue.py and console.py: a file queue and the floor of the trust and safety rules
+    0.0    - thread 11, per-booking virtual cards -> ride_demo/payment.py: an in-memory test card; no Stripe call of any kind
+    0.0    - the user's calendar -> fixtures/calendar.json, written back to a copy and a .ics file in the run's state directory
+    0.0    - the language model reading the request -> ride_demo/request.py: fixed patterns for the demo sentence
+    0.0    - the Waymo app -> a person at the concierge console types what the app would show; in a recorded run, a scripted operator does
+    0.0  
+    0.0  ship gates (the rehearsal demonstrates them; it does not waive them):
+    0.0    human-concierge tier: CLOSED, not shippable
+    0.0      [ ] service-level targets: targets of 30 seconds to quote and 90 to book are enforced in this demo; thread 10's monitoring: not committed yet (thread 10)
+    0.0      [ ] concierge trust and safety protocol: not committed yet (thread 10, under concierge-ops/)
+    0.0      [ ] user-facing disclosure of concierge involvement: demo/ride-to-the-barber/copy/concierge-disclosure.md is 'draft for Jose's review'; it passes at 'approved', which is Jose's call
+    0.0    peer routing of authenticated traffic: CLOSED, not shippable
+    0.0      [-] not exercised: this run is Solo: every request leaves from the user's own connection, none through a peer
+    0.0  
+    0.0  user: "book me a ride to the barber after my 2pm meeting, Waymo preferred, under $25"
+    0.0  
+    0.0  agent: calendar read
+    0.0    the meeting: Design review, 2:00pm to 2:45pm, at 535 Mission St, San Francisco, CA 94105
+    0.0    next: Haircut at 3:30pm, so I will aim to have you there by 3:25pm
+    0.0    leave between 2:50pm and 3:05pm, from 535 Mission St, San Francisco, CA 94105 to Mission Street Barbers, 2400 Mission St, San Francisco, CA 94110
+    0.0  
+    0.0    ? Waymo rides are booked for you by a person on the sirven team (a concierge). To get a price and book, they will see your pickup (535 Mission St, San Francisco, CA 94105), where you are going (Mission Street Barbers, 2400 Mission St, San Francisco, CA 94110), and when (2:50pm to 3:05pm). They will not see your calendar, your card number, or anything else. Is that all right?
+    0.0      yes (answered by --yes, for the recording)
+    0.0  
+    0.0  agent: quote_ride(535 Mission St, San Francisco, CA 94105 -> Mission Street Barbers, 2400 Mission St, San Francisco, CA 94110, leave 2:50pm to 3:05pm, prefer Waymo, under $25.00)
+    0.0      request req_19f2618a is in the concierge queue, waiting for a quote
+    0.3  concierge | new request req_19f2618a; the rules are on screen
+    2.3  concierge | claimed by Jose (rehearsal); opening the Waymo app for a price
+    2.3  concierge | the Waymo app is not answering; no quote sent (late_quote scenario)
+    2.5      concierge Jose (rehearsal) claimed the request
+   30.3      quote: no answer after 30 seconds of waiting, against a 30 second target (missed)
+   30.3    1. Uber   UberX           $18.90  pickup 2:54pm, arrive 3:10pm  flags: none
+   30.3    2. Lyft   Lyft Standard   $19.50  pickup 2:56pm, arrive 3:12pm  flags: none
+   30.3    3. Uber   Uber Black      $34.20  pickup 2:57pm, arrive 3:12pm  flags: over_budget
+   30.3    -  Waymo  unavailable: quote_target_missed
+   30.3  agent: I could not get a Waymo price in time (quote_target_missed). I am not going to keep trying behind your back. Here is what I can book instead.
+   30.3  agent: choosing option 1: UberX at $18.90 plus up to $3.00 tip is the best option under $25.00 that arrives on time.
+   30.3  
+   30.3    ? Book UberX for $18.90? Pickup about 2:54pm at 535 Mission St, San Francisco, CA 94105, arriving about 3:10pm. A one-time card limited to $21.90, for ride services only, pays for it.
+   30.3      yes (answered by --yes, for the recording)
+   30.3  agent: held test card ic_test_c3978b4ddc7c ending 4242, limit $21.90, ride services only
+   30.3  agent: book_ride(q_0e24539557d1)
+   30.3  agent: booked b_e3247f27d3f9, status confirmed
+   30.3    tracking: https://example.invalid/track/partner-booking-8bb1f7b4
+   30.3    free cancellation until 2:52pm
+   30.3  agent: on your calendar: Ride to Mission Street Barbers (Uber), 2:54pm to 3:10pm
+   30.3  
+   30.3  done. service levels for the concierge leg:
+   30.3    quote: no answer after 30 seconds of waiting, against a 30 second target (missed)
+   30.3  state written to recordings/2026-10-11-scripted-late_quote/state: calendar.json, ride.ics, charge-records.json, service-levels.jsonl, concierge-queue/
