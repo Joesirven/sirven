@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """grant compiler: turns a level plus a list of paths into access control list commands.
 
-this is the only python in the package. everything it prints is deterministic: paths are
-normalized, deduplicated, and sorted, so golden tests can pin the output byte for byte.
+standard library python, like lib/reciprocity.py. everything it prints is deterministic: paths
+are normalized, deduplicated, and sorted, so golden tests can pin the output byte for byte.
 
 subcommands
 
