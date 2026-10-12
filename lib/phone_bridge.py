@@ -1371,20 +1371,34 @@ def command_setup(team, bundle):
         fail("--team needs your ten character Apple development team, from Xcode > Settings > Accounts", 64)
     if not bundle or not re.fullmatch(r"[A-Za-z0-9.-]+", bundle):
         fail("--bundle needs a bundle name you own, like com.yourname.WebDriverAgentRunner", 64)
-    folder = os.path.join(os.path.expanduser("~"), ".sirven", "WebDriverAgent")
+    home = os.path.join(os.path.expanduser("~"), ".sirven")
+    runner_folder = os.path.join(home, "WebDriverAgent")
+    source_folder = os.path.join(home, "WebDriverAgent-source")
+    runner_identifier = bundle + ".xctrunner"
+    archive = "https://github.com/appium/WebDriverAgent/releases/download/%s/WebDriverAgentRunner-Runner.zip" \
+        % WEBDRIVERAGENT_RELEASE
     steps = [
         ("on the phone", "plug it in, unlock it, and tap Trust when it asks about this Mac"),
         ("on the phone", "Settings > Privacy & Security > Developer Mode: on, then restart the phone"),
-        ("on this Mac", "full Xcode, signed into your Apple account under Xcode > Settings > Accounts"),
-        ("on this Mac", "git clone %s %s && git -C %s checkout %s" % (WEBDRIVERAGENT_REPOSITORY, folder, folder,
-                                                                        WEBDRIVERAGENT_COMMIT)),
-        ("on this Mac", "xcodebuild -project %s/WebDriverAgent.xcodeproj -scheme WebDriverAgentRunner "
-                        "-destination 'platform=iOS,name=<your phone>' -allowProvisioningUpdates "
-                        "DEVELOPMENT_TEAM=%s CODE_SIGN_STYLE=Automatic PRODUCT_BUNDLE_IDENTIFIER=%s test"
-                        % (folder, team, bundle)),
-        ("on the phone", "the first time: Settings > General, the Device Management page, trust your developer certificate"),
+        ("on this Mac", "uv tool install pymobiledevice3==%s, with the Python tool installer, uv "
+                        "(needs Python 3.12 or newer; no administrator password)" % PYMOBILEDEVICE3_VERSION),
+        ("on this Mac", "mkdir -p %s && curl -L -o %s/runner.zip %s && unzip -o %s/runner.zip -d %s"
+                        % (runner_folder, runner_folder, archive, runner_folder, runner_folder)),
+        ("on this Mac", "sign and install the runner once, by route A: the xtool route in docs/phone-interface.md "
+                        "(EXPERIMENTAL and UNPROVEN on a real phone)"),
+        ("on this Mac", "or route B, the fallback: full Xcode, used only to sign and install once, never at run time"),
+        ("on this Mac", "route B, step 1: git clone %s %s && git -C %s checkout %s"
+                        % (WEBDRIVERAGENT_REPOSITORY, source_folder, source_folder, WEBDRIVERAGENT_COMMIT)),
+        ("on this Mac", "route B, step 2: xcodebuild -project %s/WebDriverAgent.xcodeproj "
+                        "-scheme WebDriverAgentRunner -destination 'platform=iOS,name=<your phone>' "
+                        "-allowProvisioningUpdates DEVELOPMENT_TEAM=%s CODE_SIGN_STYLE=Automatic "
+                        "PRODUCT_BUNDLE_IDENTIFIER=%s test, then press Ctrl-C once the test starts on the phone"
+                        % (source_folder, team, bundle)),
+        ("on the phone", "the first time: Settings > General > VPN & Device Management, "
+                         "trust your developer certificate"),
         ("on the phone", "Settings > Developer: turn on the user interface automation switch"),
-        ("on this Mac", "keep the xcodebuild command running, then: sirven phone status"),
+        ("on this Mac", "SIRVEN_PHONE_RUNNER_BUNDLE=%s sirven phone start, and leave it running" % runner_identifier),
+        ("on this Mac", "in another terminal: sirven phone status (the tunnel and the launcher should say running)"),
     ]
     print("WebDriverAgent setup plan. sirven only prints this; you run each step yourself.")
     print("it signs WebDriverAgent with your own Apple account, on your own phone. nothing is sent anywhere else.")
