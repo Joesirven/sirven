@@ -98,6 +98,9 @@ class Harness:
         self.sync(record["booking_id"])
         verdict = "approved" if authorization["approved"] else "declined"
         reason = (authorization.get("request_history") or [{}])[-1].get("reason")
+        if reason == "webhook_declined":
+            decisions = [e for e in self.store.get(record["booking_id"])["timeline"] if e["kind"] == "authorization_decision"]
+            reason = f"sirven declined: {decisions[-1]['detail'].rsplit(': ', 1)[-1]}" if decisions else reason
         self.say(f"  authorization of {R.format_money(amount, 'usd')} at {merchant['name']}: {verdict} ({reason})")
         return authorization
 

@@ -1,0 +1,90 @@
+mode: in-memory stand-in for Stripe test mode
+
+booking 1: held $23.40 (fare plus tip ceiling), minted card ending 4242
+  authorization of $18.40 at Demo Ride Service: approved (webhook_approved)
+  authorization of $3.00 at Demo Ride Service: approved (webhook_approved)
+booking booking-demo-1 (settled)
+  why: cheapest option arriving before the 3pm appointment; under the $25 budget even with the full tip allowance
+  you asked: book me a ride to the barber after my 2pm meeting, under $25
+  quote quote-demo-1 from a ride service: $18.40, tip allowed up to $5.00
+  held on your card at booking: $23.40
+  paid to the ride service: $21.40
+  charged to you: $21.40
+
+booking 2: the card refuses anything but ride services and anything over the cap
+  authorization of $12.00 at Demo Burger: declined (spending_controls)
+  authorization of $30.00 at Demo Ride Service: declined (spending_controls)
+booking booking-demo-2 (cancelled)
+  why: cheapest option arriving before the 3pm appointment; under the $25 budget even with the full tip allowance
+  you asked: book me a ride to the barber after my 2pm meeting, under $25
+  quote quote-demo-2 from a ride service: $18.40, tip allowed up to $5.00
+  held on your card at booking: $23.40
+  paid to the ride service: $0.00
+  charged to you: $0.00
+
+booking 3: the ride service holds the fare, releases part of it, then captures the rest
+  authorization of $18.40 at Demo Ride Service: approved (webhook_approved)
+booking booking-demo-3 (settled)
+  why: cheapest option arriving before the 3pm appointment; under the $25 budget even with the full tip allowance
+  you asked: book me a ride to the barber after my 2pm meeting, under $25
+  quote quote-demo-3 from a ride service: $18.40, tip allowed up to $5.00
+  held on your card at booking: $23.40
+  paid to the ride service: $15.00
+  charged to you: $15.00
+
+booking 4: cancelled late; the ride service charges a fee, and nothing else gets through
+  authorization of $5.00 at Demo Ride Service: approved (webhook_approved)
+  authorization of $10.00 at Demo Ride Service: declined (sirven declined: booking_closed)
+booking booking-demo-4 (settled)
+  why: cheapest option arriving before the 3pm appointment; under the $25 budget even with the full tip allowance
+  you asked: book me a ride to the barber after my 2pm meeting, under $25
+  quote quote-demo-4 from a ride service: $18.40, tip allowed up to $5.00
+  held on your card at booking: $23.40
+  paid to the ride service: $5.00
+  charged to you: $5.00
+
+booking 5: cancelled before any charge; the hold is released and the card closed
+booking booking-demo-5 (cancelled)
+  why: cheapest option arriving before the 3pm appointment; under the $25 budget even with the full tip allowance
+  you asked: book me a ride to the barber after my 2pm meeting, under $25
+  quote quote-demo-5 from a ride service: $18.40, tip allowed up to $5.00
+  held on your card at booking: $23.40
+  paid to the ride service: $0.00
+  charged to you: $0.00
+
+booking 6: the ride service refunds part of the fare after the user was charged
+  authorization of $18.40 at Demo Ride Service: approved (webhook_approved)
+booking booking-demo-6 (settled)
+  why: cheapest option arriving before the 3pm appointment; under the $25 budget even with the full tip allowance
+  you asked: book me a ride to the barber after my 2pm meeting, under $25
+  quote quote-demo-6 from a ride service: $18.40, tip allowed up to $5.00
+  held on your card at booking: $23.40
+  paid to the ride service: $13.40
+  charged to you: $18.40
+  refunded to you: $5.00
+
+booking 7: the ride service captures more than the cap; the user still pays at most the cap
+  authorization of $18.40 at Demo Ride Service: approved (webhook_approved)
+booking booking-demo-7 (needs_review)
+  why: cheapest option arriving before the 3pm appointment; under the $25 budget even with the full tip allowance
+  you asked: book me a ride to the barber after my 2pm meeting, under $25
+  quote quote-demo-7 from a ride service: $18.40, tip allowed up to $5.00
+  held on your card at booking: $23.40
+  paid to the ride service: $26.00
+  charged to you: $23.40
+  under review: the ride service took more than the cap; the user is charged at most the cap
+
+booking 8: the user's card refuses the hold, so no booking card is minted
+  refused: the user's card did not accept the hold: Your card was declined.
+
+booking 9: webhooks are lost; settlement pulls the card's history before charging anyone
+  authorization of $18.40 at Demo Ride Service: approved (webhook_approved)
+  the record had seen 0 card transaction(s) when the ride completed
+booking booking-demo-9 (settled)
+  why: cheapest option arriving before the 3pm appointment; under the $25 budget even with the full tip allowance
+  you asked: book me a ride to the barber after my 2pm meeting, under $25
+  quote quote-demo-9 from a ride service: $18.40, tip allowed up to $5.00
+  held on your card at booking: $23.40
+  paid to the ride service: $18.40
+  charged to you: $18.40
+
