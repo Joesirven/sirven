@@ -9,3 +9,4 @@ out/
 .claude/
 dist/
 __pycache__/
+*.pyc

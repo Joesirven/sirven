@@ -1,0 +1,2360 @@
+{
+  "tools": [
+    {
+      "annotations": {
+        "idempotentHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Get ranked ride options from origin to destination within a departure window, each with price, provider, estimated pickup and drop-off, and constraint flags. Read only: nothing is booked or charged.",
+      "inputSchema": {
+        "$defs": {
+          "accessibility_need": {
+            "enum": [
+              "wheelchair_accessible",
+              "service_animal",
+              "assistance_boarding",
+              "car_seat"
+            ],
+            "type": "string"
+          },
+          "contract_version": {
+            "description": "Semantic version of the contract. Requests may send a bare major (\"1\") or a full version; responses always carry the full version the gateway speaks.",
+            "maxLength": 32,
+            "pattern": "^[0-9]+(\\.[0-9]+\\.[0-9]+)?$",
+            "type": "string"
+          },
+          "currency": {
+            "description": "Three-letter currency code, uppercase, for example USD.",
+            "pattern": "^[A-Z]{3}$",
+            "type": "string"
+          },
+          "departure_window": {
+            "additionalProperties": false,
+            "description": "When the rider wants to be picked up. latest must not be before earliest. An earliest time in the past means as soon as possible.",
+            "properties": {
+              "earliest": {
+                "$ref": "#/$defs/timestamp"
+              },
+              "latest": {
+                "$ref": "#/$defs/timestamp"
+              }
+            },
+            "required": [
+              "earliest",
+              "latest"
+            ],
+            "type": "object"
+          },
+          "money": {
+            "additionalProperties": false,
+            "description": "An amount in the currency's smallest unit (cents for USD), so 2350 with USD is 23.50 dollars. Never a floating point number.",
+            "properties": {
+              "amount_minor": {
+                "maximum": 100000000,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "currency": {
+                "$ref": "#/$defs/currency"
+              }
+            },
+            "required": [
+              "amount_minor",
+              "currency"
+            ],
+            "type": "object"
+          },
+          "place": {
+            "additionalProperties": false,
+            "anyOf": [
+              {
+                "required": [
+                  "address"
+                ]
+              },
+              {
+                "required": [
+                  "coordinates"
+                ]
+              }
+            ],
+            "description": "A pickup or drop-off point. Give an address, coordinates, or both; when both are present the coordinates win.",
+            "properties": {
+              "address": {
+                "maxLength": 300,
+                "minLength": 1,
+                "type": "string"
+              },
+              "coordinates": {
+                "additionalProperties": false,
+                "properties": {
+                  "latitude": {
+                    "maximum": 90,
+                    "minimum": -90,
+                    "type": "number"
+                  },
+                  "longitude": {
+                    "maximum": 180,
+                    "minimum": -180,
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "latitude",
+                  "longitude"
+                ],
+                "type": "object"
+              },
+              "label": {
+                "description": "A human name for the place, for example \"barber\". Shown back to the person; never used for routing.",
+                "maxLength": 100,
+                "type": "string"
+              },
+              "pickup_notes": {
+                "maxLength": 300,
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "timestamp": {
+            "description": "A date and time in Request for Comments 3339 form with an explicit offset, for example 2026-10-12T15:00:00-07:00.",
+            "format": "date-time",
+            "maxLength": 40,
+            "type": "string"
+          },
+          "user_preferences": {
+            "additionalProperties": false,
+            "description": "Soft and hard preferences. Every field is optional.",
+            "properties": {
+              "accessibility_needs": {
+                "description": "Hard requirements. An option that cannot meet one is flagged accessibility_not_met and is not bookable.",
+                "items": {
+                  "$ref": "#/$defs/accessibility_need"
+                },
+                "maxItems": 4,
+                "type": "array",
+                "uniqueItems": true
+              },
+              "avoided_providers": {
+                "description": "Provider names never to offer. A filter: options from these providers are left out entirely.",
+                "items": {
+                  "maxLength": 60,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "maxItems": 10,
+                "type": "array",
+                "uniqueItems": true
+              },
+              "max_pickup_wait_minutes": {
+                "maximum": 120,
+                "minimum": 1,
+                "type": "integer"
+              },
+              "preferred_providers": {
+                "description": "Provider names, as they appear in the provider field of earlier results, to rank first. A preference, not a filter.",
+                "items": {
+                  "maxLength": 60,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "maxItems": 10,
+                "type": "array",
+                "uniqueItems": true
+              },
+              "ranking": {
+                "default": "balanced",
+                "description": "How to order bookable options. balanced puts preferred providers first, then the lowest authorization cap, then the earliest drop-off.",
+                "enum": [
+                  "balanced",
+                  "cheapest",
+                  "fastest"
+                ],
+                "type": "string"
+              },
+              "tip_ceiling_percent": {
+                "default": 20,
+                "description": "The most the rider will tip, as a percent of the fare ceiling. Default 20. The tip ceiling counts against budget_ceiling.",
+                "maximum": 100,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "vehicle_classes": {
+                "description": "Vehicle classes the rider wants. Others are still offered, flagged vehicle_class_not_requested.",
+                "items": {
+                  "$ref": "#/$defs/vehicle_class"
+                },
+                "maxItems": 7,
+                "type": "array",
+                "uniqueItems": true
+              }
+            },
+            "type": "object"
+          },
+          "vehicle_class": {
+            "description": "A service-neutral vehicle category.",
+            "enum": [
+              "standard",
+              "comfort",
+              "large",
+              "premium",
+              "accessible",
+              "autonomous",
+              "shared"
+            ],
+            "type": "string"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "budget_ceiling": {
+            "$ref": "#/$defs/money",
+            "description": "The most the person will pay in total, tip included. Options whose authorization_cap is above it are flagged over_budget."
+          },
+          "contract_version": {
+            "$ref": "#/$defs/contract_version"
+          },
+          "departure_window": {
+            "$ref": "#/$defs/departure_window"
+          },
+          "destination": {
+            "$ref": "#/$defs/place"
+          },
+          "origin": {
+            "$ref": "#/$defs/place"
+          },
+          "user_preferences": {
+            "$ref": "#/$defs/user_preferences"
+          }
+        },
+        "required": [
+          "origin",
+          "destination",
+          "departure_window",
+          "budget_ceiling"
+        ],
+        "type": "object"
+      },
+      "name": "quote_ride",
+      "outputSchema": {
+        "$defs": {
+          "cancellation_policy": {
+            "additionalProperties": false,
+            "description": "free_until: cancelling before this time costs nothing. After it, and until the trip starts, cancelling costs fee_after_free_period. Once the trip starts it cannot be cancelled.",
+            "properties": {
+              "fee_after_free_period": {
+                "$ref": "#/$defs/money"
+              },
+              "free_until": {
+                "$ref": "#/$defs/timestamp"
+              }
+            },
+            "required": [
+              "free_until",
+              "fee_after_free_period"
+            ],
+            "type": "object"
+          },
+          "charge_terms": {
+            "additionalProperties": false,
+            "description": "What the money layer needs to hold funds for one ride, and nothing about how it pays. quoted_amount is the expected fare, fare_ceiling the most the fare can be, tip_ceiling the most the tip can be, authorization_cap is fare_ceiling plus tip_ceiling and is the hard limit for a per-booking virtual card. All four share one currency.",
+            "properties": {
+              "authorization_cap": {
+                "$ref": "#/$defs/money"
+              },
+              "currency": {
+                "$ref": "#/$defs/currency"
+              },
+              "fare_ceiling": {
+                "$ref": "#/$defs/money"
+              },
+              "quoted_amount": {
+                "$ref": "#/$defs/money"
+              },
+              "tip_ceiling": {
+                "$ref": "#/$defs/money"
+              }
+            },
+            "required": [
+              "quoted_amount",
+              "fare_ceiling",
+              "tip_ceiling",
+              "authorization_cap",
+              "currency"
+            ],
+            "type": "object"
+          },
+          "constraint_flag": {
+            "description": "Why an option might not suit the request. Blocking flags (over_budget, outside_departure_window, accessibility_not_met) make the option unbookable; the rest are advisory.",
+            "enum": [
+              "over_budget",
+              "outside_departure_window",
+              "accessibility_not_met",
+              "provider_not_preferred",
+              "vehicle_class_not_requested",
+              "long_pickup_wait",
+              "price_is_estimate",
+              "surge_pricing",
+              "shared_ride",
+              "human_assisted"
+            ],
+            "type": "string"
+          },
+          "contract_version": {
+            "description": "Semantic version of the contract. Requests may send a bare major (\"1\") or a full version; responses always carry the full version the gateway speaks.",
+            "maxLength": 32,
+            "pattern": "^[0-9]+(\\.[0-9]+\\.[0-9]+)?$",
+            "type": "string"
+          },
+          "currency": {
+            "description": "Three-letter currency code, uppercase, for example USD.",
+            "pattern": "^[A-Z]{3}$",
+            "type": "string"
+          },
+          "fulfillment": {
+            "additionalProperties": false,
+            "description": "How the booking is carried out. automated means software books the ride. human_assisted means a person on the sirven concierge team books it on the rider's behalf; disclosure is then a plain sentence the agent must show the person before they approve the booking.",
+            "properties": {
+              "disclosure": {
+                "maxLength": 400,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "method": {
+                "enum": [
+                  "automated",
+                  "human_assisted"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "method",
+              "disclosure"
+            ],
+            "type": "object"
+          },
+          "money": {
+            "additionalProperties": false,
+            "description": "An amount in the currency's smallest unit (cents for USD), so 2350 with USD is 23.50 dollars. Never a floating point number.",
+            "properties": {
+              "amount_minor": {
+                "maximum": 100000000,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "currency": {
+                "$ref": "#/$defs/currency"
+              }
+            },
+            "required": [
+              "amount_minor",
+              "currency"
+            ],
+            "type": "object"
+          },
+          "notice": {
+            "additionalProperties": false,
+            "description": "Something the person should know about the quote as a whole, for example that a service refused agent access. Never names the backend.",
+            "properties": {
+              "code": {
+                "enum": [
+                  "blocked",
+                  "no_service",
+                  "partial_results"
+                ],
+                "type": "string"
+              },
+              "message": {
+                "maxLength": 400,
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "price": {
+            "additionalProperties": false,
+            "description": "fixed means the fare is guaranteed until the quote expires. estimate means the final fare may land anywhere up to maximum, and never above it.",
+            "properties": {
+              "amount": {
+                "$ref": "#/$defs/money"
+              },
+              "kind": {
+                "enum": [
+                  "fixed",
+                  "estimate"
+                ],
+                "type": "string"
+              },
+              "maximum": {
+                "$ref": "#/$defs/money"
+              }
+            },
+            "required": [
+              "kind",
+              "amount",
+              "maximum"
+            ],
+            "type": "object"
+          },
+          "quote_id": {
+            "description": "Identifies one quoted option. Opaque: callers must not parse it, and it never encodes which backend served the ride.",
+            "pattern": "^qt_[a-z2-7]{26}$",
+            "type": "string"
+          },
+          "ride_option": {
+            "additionalProperties": false,
+            "properties": {
+              "bookable": {
+                "description": "False when any blocking constraint flag is present. book_ride refuses unbookable options.",
+                "type": "boolean"
+              },
+              "cancellation_policy": {
+                "$ref": "#/$defs/cancellation_policy"
+              },
+              "charge_terms": {
+                "$ref": "#/$defs/charge_terms"
+              },
+              "constraint_flags": {
+                "items": {
+                  "$ref": "#/$defs/constraint_flag"
+                },
+                "type": "array",
+                "uniqueItems": true
+              },
+              "estimated_dropoff_at": {
+                "$ref": "#/$defs/timestamp"
+              },
+              "estimated_pickup_at": {
+                "$ref": "#/$defs/timestamp"
+              },
+              "estimated_pickup_wait_minutes": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "estimated_trip_minutes": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "expires_at": {
+                "$ref": "#/$defs/timestamp"
+              },
+              "fulfillment": {
+                "$ref": "#/$defs/fulfillment"
+              },
+              "price": {
+                "$ref": "#/$defs/price"
+              },
+              "provider": {
+                "description": "The ride service the rider will see on the car or in the receipt, as a plain display name. A returned attribute, never an input to routing.",
+                "maxLength": 60,
+                "minLength": 1,
+                "type": "string"
+              },
+              "quote_id": {
+                "$ref": "#/$defs/quote_id"
+              },
+              "rank": {
+                "description": "1 is the best match. Ranks are dense and start at 1.",
+                "minimum": 1,
+                "type": "integer"
+              },
+              "vehicle_class": {
+                "$ref": "#/$defs/vehicle_class"
+              }
+            },
+            "required": [
+              "quote_id",
+              "rank",
+              "bookable",
+              "provider",
+              "vehicle_class",
+              "price",
+              "charge_terms",
+              "estimated_pickup_at",
+              "estimated_dropoff_at",
+              "estimated_pickup_wait_minutes",
+              "estimated_trip_minutes",
+              "constraint_flags",
+              "fulfillment",
+              "cancellation_policy",
+              "expires_at"
+            ],
+            "type": "object"
+          },
+          "timestamp": {
+            "description": "A date and time in Request for Comments 3339 form with an explicit offset, for example 2026-10-12T15:00:00-07:00.",
+            "format": "date-time",
+            "maxLength": 40,
+            "type": "string"
+          },
+          "vehicle_class": {
+            "description": "A service-neutral vehicle category.",
+            "enum": [
+              "standard",
+              "comfort",
+              "large",
+              "premium",
+              "accessible",
+              "autonomous",
+              "shared"
+            ],
+            "type": "string"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "$ref": "#/$defs/contract_version"
+          },
+          "notices": {
+            "items": {
+              "$ref": "#/$defs/notice"
+            },
+            "maxItems": 10,
+            "type": "array"
+          },
+          "options": {
+            "items": {
+              "$ref": "#/$defs/ride_option"
+            },
+            "maxItems": 50,
+            "type": "array"
+          },
+          "quoted_at": {
+            "$ref": "#/$defs/timestamp"
+          }
+        },
+        "required": [
+          "contract_version",
+          "options",
+          "notices",
+          "quoted_at"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "readOnlyHint": false
+      },
+      "description": "Book one option from quote_ride by its quote_id. Ask the person first. Booking the same quote_id again returns the same booking; it never books twice.",
+      "inputSchema": {
+        "$defs": {
+          "contract_version": {
+            "description": "Semantic version of the contract. Requests may send a bare major (\"1\") or a full version; responses always carry the full version the gateway speaks.",
+            "maxLength": 32,
+            "pattern": "^[0-9]+(\\.[0-9]+\\.[0-9]+)?$",
+            "type": "string"
+          },
+          "quote_id": {
+            "description": "Identifies one quoted option. Opaque: callers must not parse it, and it never encodes which backend served the ride.",
+            "pattern": "^qt_[a-z2-7]{26}$",
+            "type": "string"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "contract_version": {
+            "$ref": "#/$defs/contract_version"
+          },
+          "payment_reference": {
+            "description": "An opaque handle from the sirven money layer for the funds held against this booking. Never a card number or any card detail.",
+            "pattern": "^[A-Za-z0-9_-]{8,128}$",
+            "type": "string"
+          },
+          "quote_id": {
+            "$ref": "#/$defs/quote_id"
+          }
+        },
+        "required": [
+          "quote_id"
+        ],
+        "type": "object"
+      },
+      "name": "book_ride",
+      "outputSchema": {
+        "$defs": {
+          "booking": {
+            "additionalProperties": false,
+            "properties": {
+              "booking_id": {
+                "$ref": "#/$defs/booking_id"
+              },
+              "cancellation_policy": {
+                "$ref": "#/$defs/cancellation_policy"
+              },
+              "charge_terms": {
+                "$ref": "#/$defs/charge_terms"
+              },
+              "confirm_by": {
+                "description": "For requested bookings: if not confirmed by this time the booking moves to failed and nothing is charged. null once confirmed.",
+                "format": "date-time",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "created_at": {
+                "$ref": "#/$defs/timestamp"
+              },
+              "destination": {
+                "$ref": "#/$defs/place"
+              },
+              "estimated_dropoff_at": {
+                "$ref": "#/$defs/timestamp"
+              },
+              "estimated_pickup_at": {
+                "$ref": "#/$defs/timestamp"
+              },
+              "final_charge": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/$defs/final_charge"
+                  }
+                ]
+              },
+              "fulfillment": {
+                "$ref": "#/$defs/fulfillment"
+              },
+              "origin": {
+                "$ref": "#/$defs/place"
+              },
+              "price": {
+                "$ref": "#/$defs/price"
+              },
+              "provider": {
+                "maxLength": 60,
+                "minLength": 1,
+                "type": "string"
+              },
+              "quote_id": {
+                "$ref": "#/$defs/quote_id"
+              },
+              "status": {
+                "$ref": "#/$defs/booking_status"
+              },
+              "tracking": {
+                "$ref": "#/$defs/tracking"
+              },
+              "updated_at": {
+                "$ref": "#/$defs/timestamp"
+              },
+              "vehicle_class": {
+                "$ref": "#/$defs/vehicle_class"
+              }
+            },
+            "required": [
+              "booking_id",
+              "quote_id",
+              "status",
+              "provider",
+              "vehicle_class",
+              "origin",
+              "destination",
+              "price",
+              "charge_terms",
+              "fulfillment",
+              "estimated_pickup_at",
+              "estimated_dropoff_at",
+              "confirm_by",
+              "cancellation_policy",
+              "tracking",
+              "final_charge",
+              "created_at",
+              "updated_at"
+            ],
+            "type": "object"
+          },
+          "booking_id": {
+            "description": "Identifies one booking. Opaque, like quote_id.",
+            "pattern": "^bk_[a-z2-7]{26}$",
+            "type": "string"
+          },
+          "booking_status": {
+            "description": "requested: accepted but not yet confirmed by the ride service (human_assisted bookings sit here until confirmed). confirmed: a ride is promised. driver_assigned: a vehicle is on its way. in_progress: the trip started. completed: the trip ended and final_charge is set. cancelled and failed are terminal.",
+            "enum": [
+              "requested",
+              "confirmed",
+              "driver_assigned",
+              "in_progress",
+              "completed",
+              "cancelled",
+              "failed"
+            ],
+            "type": "string"
+          },
+          "cancellation_policy": {
+            "additionalProperties": false,
+            "description": "free_until: cancelling before this time costs nothing. After it, and until the trip starts, cancelling costs fee_after_free_period. Once the trip starts it cannot be cancelled.",
+            "properties": {
+              "fee_after_free_period": {
+                "$ref": "#/$defs/money"
+              },
+              "free_until": {
+                "$ref": "#/$defs/timestamp"
+              }
+            },
+            "required": [
+              "free_until",
+              "fee_after_free_period"
+            ],
+            "type": "object"
+          },
+          "charge_terms": {
+            "additionalProperties": false,
+            "description": "What the money layer needs to hold funds for one ride, and nothing about how it pays. quoted_amount is the expected fare, fare_ceiling the most the fare can be, tip_ceiling the most the tip can be, authorization_cap is fare_ceiling plus tip_ceiling and is the hard limit for a per-booking virtual card. All four share one currency.",
+            "properties": {
+              "authorization_cap": {
+                "$ref": "#/$defs/money"
+              },
+              "currency": {
+                "$ref": "#/$defs/currency"
+              },
+              "fare_ceiling": {
+                "$ref": "#/$defs/money"
+              },
+              "quoted_amount": {
+                "$ref": "#/$defs/money"
+              },
+              "tip_ceiling": {
+                "$ref": "#/$defs/money"
+              }
+            },
+            "required": [
+              "quoted_amount",
+              "fare_ceiling",
+              "tip_ceiling",
+              "authorization_cap",
+              "currency"
+            ],
+            "type": "object"
+          },
+          "contract_version": {
+            "description": "Semantic version of the contract. Requests may send a bare major (\"1\") or a full version; responses always carry the full version the gateway speaks.",
+            "maxLength": 32,
+            "pattern": "^[0-9]+(\\.[0-9]+\\.[0-9]+)?$",
+            "type": "string"
+          },
+          "currency": {
+            "description": "Three-letter currency code, uppercase, for example USD.",
+            "pattern": "^[A-Z]{3}$",
+            "type": "string"
+          },
+          "final_charge": {
+            "additionalProperties": false,
+            "description": "Set once status is completed or cancelled. total never exceeds the booking's authorization_cap.",
+            "properties": {
+              "amount_to_release": {
+                "$ref": "#/$defs/money",
+                "description": "authorization_cap minus total: what the money layer should release from its hold."
+              },
+              "cancellation_fee": {
+                "$ref": "#/$defs/money"
+              },
+              "fare": {
+                "$ref": "#/$defs/money"
+              },
+              "tip": {
+                "$ref": "#/$defs/money"
+              },
+              "total": {
+                "$ref": "#/$defs/money"
+              }
+            },
+            "required": [
+              "fare",
+              "tip",
+              "cancellation_fee",
+              "total",
+              "amount_to_release"
+            ],
+            "type": "object"
+          },
+          "fulfillment": {
+            "additionalProperties": false,
+            "description": "How the booking is carried out. automated means software books the ride. human_assisted means a person on the sirven concierge team books it on the rider's behalf; disclosure is then a plain sentence the agent must show the person before they approve the booking.",
+            "properties": {
+              "disclosure": {
+                "maxLength": 400,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "method": {
+                "enum": [
+                  "automated",
+                  "human_assisted"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "method",
+              "disclosure"
+            ],
+            "type": "object"
+          },
+          "money": {
+            "additionalProperties": false,
+            "description": "An amount in the currency's smallest unit (cents for USD), so 2350 with USD is 23.50 dollars. Never a floating point number.",
+            "properties": {
+              "amount_minor": {
+                "maximum": 100000000,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "currency": {
+                "$ref": "#/$defs/currency"
+              }
+            },
+            "required": [
+              "amount_minor",
+              "currency"
+            ],
+            "type": "object"
+          },
+          "place": {
+            "additionalProperties": false,
+            "anyOf": [
+              {
+                "required": [
+                  "address"
+                ]
+              },
+              {
+                "required": [
+                  "coordinates"
+                ]
+              }
+            ],
+            "description": "A pickup or drop-off point. Give an address, coordinates, or both; when both are present the coordinates win.",
+            "properties": {
+              "address": {
+                "maxLength": 300,
+                "minLength": 1,
+                "type": "string"
+              },
+              "coordinates": {
+                "additionalProperties": false,
+                "properties": {
+                  "latitude": {
+                    "maximum": 90,
+                    "minimum": -90,
+                    "type": "number"
+                  },
+                  "longitude": {
+                    "maximum": 180,
+                    "minimum": -180,
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "latitude",
+                  "longitude"
+                ],
+                "type": "object"
+              },
+              "label": {
+                "description": "A human name for the place, for example \"barber\". Shown back to the person; never used for routing.",
+                "maxLength": 100,
+                "type": "string"
+              },
+              "pickup_notes": {
+                "maxLength": 300,
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "price": {
+            "additionalProperties": false,
+            "description": "fixed means the fare is guaranteed until the quote expires. estimate means the final fare may land anywhere up to maximum, and never above it.",
+            "properties": {
+              "amount": {
+                "$ref": "#/$defs/money"
+              },
+              "kind": {
+                "enum": [
+                  "fixed",
+                  "estimate"
+                ],
+                "type": "string"
+              },
+              "maximum": {
+                "$ref": "#/$defs/money"
+              }
+            },
+            "required": [
+              "kind",
+              "amount",
+              "maximum"
+            ],
+            "type": "object"
+          },
+          "quote_id": {
+            "description": "Identifies one quoted option. Opaque: callers must not parse it, and it never encodes which backend served the ride.",
+            "pattern": "^qt_[a-z2-7]{26}$",
+            "type": "string"
+          },
+          "timestamp": {
+            "description": "A date and time in Request for Comments 3339 form with an explicit offset, for example 2026-10-12T15:00:00-07:00.",
+            "format": "date-time",
+            "maxLength": 40,
+            "type": "string"
+          },
+          "tracking": {
+            "additionalProperties": false,
+            "description": "How to follow the ride. Call status_call with the booking_id no more often than every poll_interval_seconds. share_url, when present, is a sirven-relayed page and never a ride service's own link.",
+            "properties": {
+              "poll_interval_seconds": {
+                "maximum": 3600,
+                "minimum": 5,
+                "type": "integer"
+              },
+              "share_url": {
+                "maxLength": 500,
+                "pattern": "^https://",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "status_call": {
+                "const": "get_ride",
+                "type": "string"
+              },
+              "vehicle_description": {
+                "maxLength": 200,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "status_call",
+              "poll_interval_seconds",
+              "share_url",
+              "vehicle_description"
+            ],
+            "type": "object"
+          },
+          "vehicle_class": {
+            "description": "A service-neutral vehicle category.",
+            "enum": [
+              "standard",
+              "comfort",
+              "large",
+              "premium",
+              "accessible",
+              "autonomous",
+              "shared"
+            ],
+            "type": "string"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "booking": {
+            "$ref": "#/$defs/booking"
+          },
+          "contract_version": {
+            "$ref": "#/$defs/contract_version"
+          },
+          "replayed": {
+            "description": "True when this quote_id was already booked and this is the original booking returned again.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "contract_version",
+          "booking",
+          "replayed"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "readOnlyHint": false
+      },
+      "description": "Cancel a booking and reconcile what is owed. Safe to repeat: a second call returns the first cancellation unchanged.",
+      "inputSchema": {
+        "$defs": {
+          "booking_id": {
+            "description": "Identifies one booking. Opaque, like quote_id.",
+            "pattern": "^bk_[a-z2-7]{26}$",
+            "type": "string"
+          },
+          "contract_version": {
+            "description": "Semantic version of the contract. Requests may send a bare major (\"1\") or a full version; responses always carry the full version the gateway speaks.",
+            "maxLength": 32,
+            "pattern": "^[0-9]+(\\.[0-9]+\\.[0-9]+)?$",
+            "type": "string"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "booking_id": {
+            "$ref": "#/$defs/booking_id"
+          },
+          "contract_version": {
+            "$ref": "#/$defs/contract_version"
+          },
+          "reason": {
+            "enum": [
+              "plans_changed",
+              "found_alternative",
+              "booked_by_mistake",
+              "pickup_too_late",
+              "other"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "booking_id"
+        ],
+        "type": "object"
+      },
+      "name": "cancel_ride",
+      "outputSchema": {
+        "$defs": {
+          "booking": {
+            "additionalProperties": false,
+            "properties": {
+              "booking_id": {
+                "$ref": "#/$defs/booking_id"
+              },
+              "cancellation_policy": {
+                "$ref": "#/$defs/cancellation_policy"
+              },
+              "charge_terms": {
+                "$ref": "#/$defs/charge_terms"
+              },
+              "confirm_by": {
+                "description": "For requested bookings: if not confirmed by this time the booking moves to failed and nothing is charged. null once confirmed.",
+                "format": "date-time",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "created_at": {
+                "$ref": "#/$defs/timestamp"
+              },
+              "destination": {
+                "$ref": "#/$defs/place"
+              },
+              "estimated_dropoff_at": {
+                "$ref": "#/$defs/timestamp"
+              },
+              "estimated_pickup_at": {
+                "$ref": "#/$defs/timestamp"
+              },
+              "final_charge": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/$defs/final_charge"
+                  }
+                ]
+              },
+              "fulfillment": {
+                "$ref": "#/$defs/fulfillment"
+              },
+              "origin": {
+                "$ref": "#/$defs/place"
+              },
+              "price": {
+                "$ref": "#/$defs/price"
+              },
+              "provider": {
+                "maxLength": 60,
+                "minLength": 1,
+                "type": "string"
+              },
+              "quote_id": {
+                "$ref": "#/$defs/quote_id"
+              },
+              "status": {
+                "$ref": "#/$defs/booking_status"
+              },
+              "tracking": {
+                "$ref": "#/$defs/tracking"
+              },
+              "updated_at": {
+                "$ref": "#/$defs/timestamp"
+              },
+              "vehicle_class": {
+                "$ref": "#/$defs/vehicle_class"
+              }
+            },
+            "required": [
+              "booking_id",
+              "quote_id",
+              "status",
+              "provider",
+              "vehicle_class",
+              "origin",
+              "destination",
+              "price",
+              "charge_terms",
+              "fulfillment",
+              "estimated_pickup_at",
+              "estimated_dropoff_at",
+              "confirm_by",
+              "cancellation_policy",
+              "tracking",
+              "final_charge",
+              "created_at",
+              "updated_at"
+            ],
+            "type": "object"
+          },
+          "booking_id": {
+            "description": "Identifies one booking. Opaque, like quote_id.",
+            "pattern": "^bk_[a-z2-7]{26}$",
+            "type": "string"
+          },
+          "booking_status": {
+            "description": "requested: accepted but not yet confirmed by the ride service (human_assisted bookings sit here until confirmed). confirmed: a ride is promised. driver_assigned: a vehicle is on its way. in_progress: the trip started. completed: the trip ended and final_charge is set. cancelled and failed are terminal.",
+            "enum": [
+              "requested",
+              "confirmed",
+              "driver_assigned",
+              "in_progress",
+              "completed",
+              "cancelled",
+              "failed"
+            ],
+            "type": "string"
+          },
+          "cancellation_policy": {
+            "additionalProperties": false,
+            "description": "free_until: cancelling before this time costs nothing. After it, and until the trip starts, cancelling costs fee_after_free_period. Once the trip starts it cannot be cancelled.",
+            "properties": {
+              "fee_after_free_period": {
+                "$ref": "#/$defs/money"
+              },
+              "free_until": {
+                "$ref": "#/$defs/timestamp"
+              }
+            },
+            "required": [
+              "free_until",
+              "fee_after_free_period"
+            ],
+            "type": "object"
+          },
+          "charge_terms": {
+            "additionalProperties": false,
+            "description": "What the money layer needs to hold funds for one ride, and nothing about how it pays. quoted_amount is the expected fare, fare_ceiling the most the fare can be, tip_ceiling the most the tip can be, authorization_cap is fare_ceiling plus tip_ceiling and is the hard limit for a per-booking virtual card. All four share one currency.",
+            "properties": {
+              "authorization_cap": {
+                "$ref": "#/$defs/money"
+              },
+              "currency": {
+                "$ref": "#/$defs/currency"
+              },
+              "fare_ceiling": {
+                "$ref": "#/$defs/money"
+              },
+              "quoted_amount": {
+                "$ref": "#/$defs/money"
+              },
+              "tip_ceiling": {
+                "$ref": "#/$defs/money"
+              }
+            },
+            "required": [
+              "quoted_amount",
+              "fare_ceiling",
+              "tip_ceiling",
+              "authorization_cap",
+              "currency"
+            ],
+            "type": "object"
+          },
+          "contract_version": {
+            "description": "Semantic version of the contract. Requests may send a bare major (\"1\") or a full version; responses always carry the full version the gateway speaks.",
+            "maxLength": 32,
+            "pattern": "^[0-9]+(\\.[0-9]+\\.[0-9]+)?$",
+            "type": "string"
+          },
+          "currency": {
+            "description": "Three-letter currency code, uppercase, for example USD.",
+            "pattern": "^[A-Z]{3}$",
+            "type": "string"
+          },
+          "final_charge": {
+            "additionalProperties": false,
+            "description": "Set once status is completed or cancelled. total never exceeds the booking's authorization_cap.",
+            "properties": {
+              "amount_to_release": {
+                "$ref": "#/$defs/money",
+                "description": "authorization_cap minus total: what the money layer should release from its hold."
+              },
+              "cancellation_fee": {
+                "$ref": "#/$defs/money"
+              },
+              "fare": {
+                "$ref": "#/$defs/money"
+              },
+              "tip": {
+                "$ref": "#/$defs/money"
+              },
+              "total": {
+                "$ref": "#/$defs/money"
+              }
+            },
+            "required": [
+              "fare",
+              "tip",
+              "cancellation_fee",
+              "total",
+              "amount_to_release"
+            ],
+            "type": "object"
+          },
+          "fulfillment": {
+            "additionalProperties": false,
+            "description": "How the booking is carried out. automated means software books the ride. human_assisted means a person on the sirven concierge team books it on the rider's behalf; disclosure is then a plain sentence the agent must show the person before they approve the booking.",
+            "properties": {
+              "disclosure": {
+                "maxLength": 400,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "method": {
+                "enum": [
+                  "automated",
+                  "human_assisted"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "method",
+              "disclosure"
+            ],
+            "type": "object"
+          },
+          "money": {
+            "additionalProperties": false,
+            "description": "An amount in the currency's smallest unit (cents for USD), so 2350 with USD is 23.50 dollars. Never a floating point number.",
+            "properties": {
+              "amount_minor": {
+                "maximum": 100000000,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "currency": {
+                "$ref": "#/$defs/currency"
+              }
+            },
+            "required": [
+              "amount_minor",
+              "currency"
+            ],
+            "type": "object"
+          },
+          "place": {
+            "additionalProperties": false,
+            "anyOf": [
+              {
+                "required": [
+                  "address"
+                ]
+              },
+              {
+                "required": [
+                  "coordinates"
+                ]
+              }
+            ],
+            "description": "A pickup or drop-off point. Give an address, coordinates, or both; when both are present the coordinates win.",
+            "properties": {
+              "address": {
+                "maxLength": 300,
+                "minLength": 1,
+                "type": "string"
+              },
+              "coordinates": {
+                "additionalProperties": false,
+                "properties": {
+                  "latitude": {
+                    "maximum": 90,
+                    "minimum": -90,
+                    "type": "number"
+                  },
+                  "longitude": {
+                    "maximum": 180,
+                    "minimum": -180,
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "latitude",
+                  "longitude"
+                ],
+                "type": "object"
+              },
+              "label": {
+                "description": "A human name for the place, for example \"barber\". Shown back to the person; never used for routing.",
+                "maxLength": 100,
+                "type": "string"
+              },
+              "pickup_notes": {
+                "maxLength": 300,
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "price": {
+            "additionalProperties": false,
+            "description": "fixed means the fare is guaranteed until the quote expires. estimate means the final fare may land anywhere up to maximum, and never above it.",
+            "properties": {
+              "amount": {
+                "$ref": "#/$defs/money"
+              },
+              "kind": {
+                "enum": [
+                  "fixed",
+                  "estimate"
+                ],
+                "type": "string"
+              },
+              "maximum": {
+                "$ref": "#/$defs/money"
+              }
+            },
+            "required": [
+              "kind",
+              "amount",
+              "maximum"
+            ],
+            "type": "object"
+          },
+          "quote_id": {
+            "description": "Identifies one quoted option. Opaque: callers must not parse it, and it never encodes which backend served the ride.",
+            "pattern": "^qt_[a-z2-7]{26}$",
+            "type": "string"
+          },
+          "timestamp": {
+            "description": "A date and time in Request for Comments 3339 form with an explicit offset, for example 2026-10-12T15:00:00-07:00.",
+            "format": "date-time",
+            "maxLength": 40,
+            "type": "string"
+          },
+          "tracking": {
+            "additionalProperties": false,
+            "description": "How to follow the ride. Call status_call with the booking_id no more often than every poll_interval_seconds. share_url, when present, is a sirven-relayed page and never a ride service's own link.",
+            "properties": {
+              "poll_interval_seconds": {
+                "maximum": 3600,
+                "minimum": 5,
+                "type": "integer"
+              },
+              "share_url": {
+                "maxLength": 500,
+                "pattern": "^https://",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "status_call": {
+                "const": "get_ride",
+                "type": "string"
+              },
+              "vehicle_description": {
+                "maxLength": 200,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "status_call",
+              "poll_interval_seconds",
+              "share_url",
+              "vehicle_description"
+            ],
+            "type": "object"
+          },
+          "vehicle_class": {
+            "description": "A service-neutral vehicle category.",
+            "enum": [
+              "standard",
+              "comfort",
+              "large",
+              "premium",
+              "accessible",
+              "autonomous",
+              "shared"
+            ],
+            "type": "string"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "already_cancelled": {
+            "description": "True when the booking was cancelled by an earlier call; the result is that earlier cancellation, unchanged.",
+            "type": "boolean"
+          },
+          "booking": {
+            "$ref": "#/$defs/booking"
+          },
+          "contract_version": {
+            "$ref": "#/$defs/contract_version"
+          }
+        },
+        "required": [
+          "contract_version",
+          "booking",
+          "already_cancelled"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "idempotentHint": true,
+        "readOnlyHint": true
+      },
+      "description": "Read a booking's current status, tracking details, and final charge.",
+      "inputSchema": {
+        "$defs": {
+          "booking_id": {
+            "description": "Identifies one booking. Opaque, like quote_id.",
+            "pattern": "^bk_[a-z2-7]{26}$",
+            "type": "string"
+          },
+          "contract_version": {
+            "description": "Semantic version of the contract. Requests may send a bare major (\"1\") or a full version; responses always carry the full version the gateway speaks.",
+            "maxLength": 32,
+            "pattern": "^[0-9]+(\\.[0-9]+\\.[0-9]+)?$",
+            "type": "string"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "booking_id": {
+            "$ref": "#/$defs/booking_id"
+          },
+          "contract_version": {
+            "$ref": "#/$defs/contract_version"
+          }
+        },
+        "required": [
+          "booking_id"
+        ],
+        "type": "object"
+      },
+      "name": "get_ride",
+      "outputSchema": {
+        "$defs": {
+          "booking": {
+            "additionalProperties": false,
+            "properties": {
+              "booking_id": {
+                "$ref": "#/$defs/booking_id"
+              },
+              "cancellation_policy": {
+                "$ref": "#/$defs/cancellation_policy"
+              },
+              "charge_terms": {
+                "$ref": "#/$defs/charge_terms"
+              },
+              "confirm_by": {
+                "description": "For requested bookings: if not confirmed by this time the booking moves to failed and nothing is charged. null once confirmed.",
+                "format": "date-time",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "created_at": {
+                "$ref": "#/$defs/timestamp"
+              },
+              "destination": {
+                "$ref": "#/$defs/place"
+              },
+              "estimated_dropoff_at": {
+                "$ref": "#/$defs/timestamp"
+              },
+              "estimated_pickup_at": {
+                "$ref": "#/$defs/timestamp"
+              },
+              "final_charge": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/$defs/final_charge"
+                  }
+                ]
+              },
+              "fulfillment": {
+                "$ref": "#/$defs/fulfillment"
+              },
+              "origin": {
+                "$ref": "#/$defs/place"
+              },
+              "price": {
+                "$ref": "#/$defs/price"
+              },
+              "provider": {
+                "maxLength": 60,
+                "minLength": 1,
+                "type": "string"
+              },
+              "quote_id": {
+                "$ref": "#/$defs/quote_id"
+              },
+              "status": {
+                "$ref": "#/$defs/booking_status"
+              },
+              "tracking": {
+                "$ref": "#/$defs/tracking"
+              },
+              "updated_at": {
+                "$ref": "#/$defs/timestamp"
+              },
+              "vehicle_class": {
+                "$ref": "#/$defs/vehicle_class"
+              }
+            },
+            "required": [
+              "booking_id",
+              "quote_id",
+              "status",
+              "provider",
+              "vehicle_class",
+              "origin",
+              "destination",
+              "price",
+              "charge_terms",
+              "fulfillment",
+              "estimated_pickup_at",
+              "estimated_dropoff_at",
+              "confirm_by",
+              "cancellation_policy",
+              "tracking",
+              "final_charge",
+              "created_at",
+              "updated_at"
+            ],
+            "type": "object"
+          },
+          "booking_id": {
+            "description": "Identifies one booking. Opaque, like quote_id.",
+            "pattern": "^bk_[a-z2-7]{26}$",
+            "type": "string"
+          },
+          "booking_status": {
+            "description": "requested: accepted but not yet confirmed by the ride service (human_assisted bookings sit here until confirmed). confirmed: a ride is promised. driver_assigned: a vehicle is on its way. in_progress: the trip started. completed: the trip ended and final_charge is set. cancelled and failed are terminal.",
+            "enum": [
+              "requested",
+              "confirmed",
+              "driver_assigned",
+              "in_progress",
+              "completed",
+              "cancelled",
+              "failed"
+            ],
+            "type": "string"
+          },
+          "cancellation_policy": {
+            "additionalProperties": false,
+            "description": "free_until: cancelling before this time costs nothing. After it, and until the trip starts, cancelling costs fee_after_free_period. Once the trip starts it cannot be cancelled.",
+            "properties": {
+              "fee_after_free_period": {
+                "$ref": "#/$defs/money"
+              },
+              "free_until": {
+                "$ref": "#/$defs/timestamp"
+              }
+            },
+            "required": [
+              "free_until",
+              "fee_after_free_period"
+            ],
+            "type": "object"
+          },
+          "charge_terms": {
+            "additionalProperties": false,
+            "description": "What the money layer needs to hold funds for one ride, and nothing about how it pays. quoted_amount is the expected fare, fare_ceiling the most the fare can be, tip_ceiling the most the tip can be, authorization_cap is fare_ceiling plus tip_ceiling and is the hard limit for a per-booking virtual card. All four share one currency.",
+            "properties": {
+              "authorization_cap": {
+                "$ref": "#/$defs/money"
+              },
+              "currency": {
+                "$ref": "#/$defs/currency"
+              },
+              "fare_ceiling": {
+                "$ref": "#/$defs/money"
+              },
+              "quoted_amount": {
+                "$ref": "#/$defs/money"
+              },
+              "tip_ceiling": {
+                "$ref": "#/$defs/money"
+              }
+            },
+            "required": [
+              "quoted_amount",
+              "fare_ceiling",
+              "tip_ceiling",
+              "authorization_cap",
+              "currency"
+            ],
+            "type": "object"
+          },
+          "contract_version": {
+            "description": "Semantic version of the contract. Requests may send a bare major (\"1\") or a full version; responses always carry the full version the gateway speaks.",
+            "maxLength": 32,
+            "pattern": "^[0-9]+(\\.[0-9]+\\.[0-9]+)?$",
+            "type": "string"
+          },
+          "currency": {
+            "description": "Three-letter currency code, uppercase, for example USD.",
+            "pattern": "^[A-Z]{3}$",
+            "type": "string"
+          },
+          "final_charge": {
+            "additionalProperties": false,
+            "description": "Set once status is completed or cancelled. total never exceeds the booking's authorization_cap.",
+            "properties": {
+              "amount_to_release": {
+                "$ref": "#/$defs/money",
+                "description": "authorization_cap minus total: what the money layer should release from its hold."
+              },
+              "cancellation_fee": {
+                "$ref": "#/$defs/money"
+              },
+              "fare": {
+                "$ref": "#/$defs/money"
+              },
+              "tip": {
+                "$ref": "#/$defs/money"
+              },
+              "total": {
+                "$ref": "#/$defs/money"
+              }
+            },
+            "required": [
+              "fare",
+              "tip",
+              "cancellation_fee",
+              "total",
+              "amount_to_release"
+            ],
+            "type": "object"
+          },
+          "fulfillment": {
+            "additionalProperties": false,
+            "description": "How the booking is carried out. automated means software books the ride. human_assisted means a person on the sirven concierge team books it on the rider's behalf; disclosure is then a plain sentence the agent must show the person before they approve the booking.",
+            "properties": {
+              "disclosure": {
+                "maxLength": 400,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "method": {
+                "enum": [
+                  "automated",
+                  "human_assisted"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "method",
+              "disclosure"
+            ],
+            "type": "object"
+          },
+          "money": {
+            "additionalProperties": false,
+            "description": "An amount in the currency's smallest unit (cents for USD), so 2350 with USD is 23.50 dollars. Never a floating point number.",
+            "properties": {
+              "amount_minor": {
+                "maximum": 100000000,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "currency": {
+                "$ref": "#/$defs/currency"
+              }
+            },
+            "required": [
+              "amount_minor",
+              "currency"
+            ],
+            "type": "object"
+          },
+          "place": {
+            "additionalProperties": false,
+            "anyOf": [
+              {
+                "required": [
+                  "address"
+                ]
+              },
+              {
+                "required": [
+                  "coordinates"
+                ]
+              }
+            ],
+            "description": "A pickup or drop-off point. Give an address, coordinates, or both; when both are present the coordinates win.",
+            "properties": {
+              "address": {
+                "maxLength": 300,
+                "minLength": 1,
+                "type": "string"
+              },
+              "coordinates": {
+                "additionalProperties": false,
+                "properties": {
+                  "latitude": {
+                    "maximum": 90,
+                    "minimum": -90,
+                    "type": "number"
+                  },
+                  "longitude": {
+                    "maximum": 180,
+                    "minimum": -180,
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "latitude",
+                  "longitude"
+                ],
+                "type": "object"
+              },
+              "label": {
+                "description": "A human name for the place, for example \"barber\". Shown back to the person; never used for routing.",
+                "maxLength": 100,
+                "type": "string"
+              },
+              "pickup_notes": {
+                "maxLength": 300,
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "price": {
+            "additionalProperties": false,
+            "description": "fixed means the fare is guaranteed until the quote expires. estimate means the final fare may land anywhere up to maximum, and never above it.",
+            "properties": {
+              "amount": {
+                "$ref": "#/$defs/money"
+              },
+              "kind": {
+                "enum": [
+                  "fixed",
+                  "estimate"
+                ],
+                "type": "string"
+              },
+              "maximum": {
+                "$ref": "#/$defs/money"
+              }
+            },
+            "required": [
+              "kind",
+              "amount",
+              "maximum"
+            ],
+            "type": "object"
+          },
+          "quote_id": {
+            "description": "Identifies one quoted option. Opaque: callers must not parse it, and it never encodes which backend served the ride.",
+            "pattern": "^qt_[a-z2-7]{26}$",
+            "type": "string"
+          },
+          "timestamp": {
+            "description": "A date and time in Request for Comments 3339 form with an explicit offset, for example 2026-10-12T15:00:00-07:00.",
+            "format": "date-time",
+            "maxLength": 40,
+            "type": "string"
+          },
+          "tracking": {
+            "additionalProperties": false,
+            "description": "How to follow the ride. Call status_call with the booking_id no more often than every poll_interval_seconds. share_url, when present, is a sirven-relayed page and never a ride service's own link.",
+            "properties": {
+              "poll_interval_seconds": {
+                "maximum": 3600,
+                "minimum": 5,
+                "type": "integer"
+              },
+              "share_url": {
+                "maxLength": 500,
+                "pattern": "^https://",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "status_call": {
+                "const": "get_ride",
+                "type": "string"
+              },
+              "vehicle_description": {
+                "maxLength": 200,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "status_call",
+              "poll_interval_seconds",
+              "share_url",
+              "vehicle_description"
+            ],
+            "type": "object"
+          },
+          "vehicle_class": {
+            "description": "A service-neutral vehicle category.",
+            "enum": [
+              "standard",
+              "comfort",
+              "large",
+              "premium",
+              "accessible",
+              "autonomous",
+              "shared"
+            ],
+            "type": "string"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "booking": {
+            "$ref": "#/$defs/booking"
+          },
+          "contract_version": {
+            "$ref": "#/$defs/contract_version"
+          }
+        },
+        "required": [
+          "contract_version",
+          "booking"
+        ],
+        "type": "object"
+      }
+    }
+  ],
+  "x-contract-version": "1.0.0",
+  "x-error-schema": {
+    "$defs": {
+      "booking": {
+        "additionalProperties": false,
+        "properties": {
+          "booking_id": {
+            "$ref": "#/$defs/booking_id"
+          },
+          "cancellation_policy": {
+            "$ref": "#/$defs/cancellation_policy"
+          },
+          "charge_terms": {
+            "$ref": "#/$defs/charge_terms"
+          },
+          "confirm_by": {
+            "description": "For requested bookings: if not confirmed by this time the booking moves to failed and nothing is charged. null once confirmed.",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "$ref": "#/$defs/timestamp"
+          },
+          "destination": {
+            "$ref": "#/$defs/place"
+          },
+          "estimated_dropoff_at": {
+            "$ref": "#/$defs/timestamp"
+          },
+          "estimated_pickup_at": {
+            "$ref": "#/$defs/timestamp"
+          },
+          "final_charge": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/$defs/final_charge"
+              }
+            ]
+          },
+          "fulfillment": {
+            "$ref": "#/$defs/fulfillment"
+          },
+          "origin": {
+            "$ref": "#/$defs/place"
+          },
+          "price": {
+            "$ref": "#/$defs/price"
+          },
+          "provider": {
+            "maxLength": 60,
+            "minLength": 1,
+            "type": "string"
+          },
+          "quote_id": {
+            "$ref": "#/$defs/quote_id"
+          },
+          "status": {
+            "$ref": "#/$defs/booking_status"
+          },
+          "tracking": {
+            "$ref": "#/$defs/tracking"
+          },
+          "updated_at": {
+            "$ref": "#/$defs/timestamp"
+          },
+          "vehicle_class": {
+            "$ref": "#/$defs/vehicle_class"
+          }
+        },
+        "required": [
+          "booking_id",
+          "quote_id",
+          "status",
+          "provider",
+          "vehicle_class",
+          "origin",
+          "destination",
+          "price",
+          "charge_terms",
+          "fulfillment",
+          "estimated_pickup_at",
+          "estimated_dropoff_at",
+          "confirm_by",
+          "cancellation_policy",
+          "tracking",
+          "final_charge",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "booking_id": {
+        "description": "Identifies one booking. Opaque, like quote_id.",
+        "pattern": "^bk_[a-z2-7]{26}$",
+        "type": "string"
+      },
+      "booking_status": {
+        "description": "requested: accepted but not yet confirmed by the ride service (human_assisted bookings sit here until confirmed). confirmed: a ride is promised. driver_assigned: a vehicle is on its way. in_progress: the trip started. completed: the trip ended and final_charge is set. cancelled and failed are terminal.",
+        "enum": [
+          "requested",
+          "confirmed",
+          "driver_assigned",
+          "in_progress",
+          "completed",
+          "cancelled",
+          "failed"
+        ],
+        "type": "string"
+      },
+      "cancellation_policy": {
+        "additionalProperties": false,
+        "description": "free_until: cancelling before this time costs nothing. After it, and until the trip starts, cancelling costs fee_after_free_period. Once the trip starts it cannot be cancelled.",
+        "properties": {
+          "fee_after_free_period": {
+            "$ref": "#/$defs/money"
+          },
+          "free_until": {
+            "$ref": "#/$defs/timestamp"
+          }
+        },
+        "required": [
+          "free_until",
+          "fee_after_free_period"
+        ],
+        "type": "object"
+      },
+      "charge_terms": {
+        "additionalProperties": false,
+        "description": "What the money layer needs to hold funds for one ride, and nothing about how it pays. quoted_amount is the expected fare, fare_ceiling the most the fare can be, tip_ceiling the most the tip can be, authorization_cap is fare_ceiling plus tip_ceiling and is the hard limit for a per-booking virtual card. All four share one currency.",
+        "properties": {
+          "authorization_cap": {
+            "$ref": "#/$defs/money"
+          },
+          "currency": {
+            "$ref": "#/$defs/currency"
+          },
+          "fare_ceiling": {
+            "$ref": "#/$defs/money"
+          },
+          "quoted_amount": {
+            "$ref": "#/$defs/money"
+          },
+          "tip_ceiling": {
+            "$ref": "#/$defs/money"
+          }
+        },
+        "required": [
+          "quoted_amount",
+          "fare_ceiling",
+          "tip_ceiling",
+          "authorization_cap",
+          "currency"
+        ],
+        "type": "object"
+      },
+      "contract_version": {
+        "description": "Semantic version of the contract. Requests may send a bare major (\"1\") or a full version; responses always carry the full version the gateway speaks.",
+        "maxLength": 32,
+        "pattern": "^[0-9]+(\\.[0-9]+\\.[0-9]+)?$",
+        "type": "string"
+      },
+      "currency": {
+        "description": "Three-letter currency code, uppercase, for example USD.",
+        "pattern": "^[A-Z]{3}$",
+        "type": "string"
+      },
+      "error_code": {
+        "enum": [
+          "invalid_argument",
+          "unsupported_contract_version",
+          "quote_not_found",
+          "quote_expired",
+          "over_budget",
+          "option_not_bookable",
+          "option_unavailable",
+          "price_changed",
+          "idempotency_conflict",
+          "payment_required",
+          "payment_declined",
+          "booking_not_found",
+          "not_cancellable",
+          "no_service",
+          "blocked",
+          "rate_limited",
+          "service_unavailable",
+          "internal_error"
+        ],
+        "type": "string"
+      },
+      "final_charge": {
+        "additionalProperties": false,
+        "description": "Set once status is completed or cancelled. total never exceeds the booking's authorization_cap.",
+        "properties": {
+          "amount_to_release": {
+            "$ref": "#/$defs/money",
+            "description": "authorization_cap minus total: what the money layer should release from its hold."
+          },
+          "cancellation_fee": {
+            "$ref": "#/$defs/money"
+          },
+          "fare": {
+            "$ref": "#/$defs/money"
+          },
+          "tip": {
+            "$ref": "#/$defs/money"
+          },
+          "total": {
+            "$ref": "#/$defs/money"
+          }
+        },
+        "required": [
+          "fare",
+          "tip",
+          "cancellation_fee",
+          "total",
+          "amount_to_release"
+        ],
+        "type": "object"
+      },
+      "fulfillment": {
+        "additionalProperties": false,
+        "description": "How the booking is carried out. automated means software books the ride. human_assisted means a person on the sirven concierge team books it on the rider's behalf; disclosure is then a plain sentence the agent must show the person before they approve the booking.",
+        "properties": {
+          "disclosure": {
+            "maxLength": 400,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "method": {
+            "enum": [
+              "automated",
+              "human_assisted"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "method",
+          "disclosure"
+        ],
+        "type": "object"
+      },
+      "money": {
+        "additionalProperties": false,
+        "description": "An amount in the currency's smallest unit (cents for USD), so 2350 with USD is 23.50 dollars. Never a floating point number.",
+        "properties": {
+          "amount_minor": {
+            "maximum": 100000000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "currency": {
+            "$ref": "#/$defs/currency"
+          }
+        },
+        "required": [
+          "amount_minor",
+          "currency"
+        ],
+        "type": "object"
+      },
+      "place": {
+        "additionalProperties": false,
+        "anyOf": [
+          {
+            "required": [
+              "address"
+            ]
+          },
+          {
+            "required": [
+              "coordinates"
+            ]
+          }
+        ],
+        "description": "A pickup or drop-off point. Give an address, coordinates, or both; when both are present the coordinates win.",
+        "properties": {
+          "address": {
+            "maxLength": 300,
+            "minLength": 1,
+            "type": "string"
+          },
+          "coordinates": {
+            "additionalProperties": false,
+            "properties": {
+              "latitude": {
+                "maximum": 90,
+                "minimum": -90,
+                "type": "number"
+              },
+              "longitude": {
+                "maximum": 180,
+                "minimum": -180,
+                "type": "number"
+              }
+            },
+            "required": [
+              "latitude",
+              "longitude"
+            ],
+            "type": "object"
+          },
+          "label": {
+            "description": "A human name for the place, for example \"barber\". Shown back to the person; never used for routing.",
+            "maxLength": 100,
+            "type": "string"
+          },
+          "pickup_notes": {
+            "maxLength": 300,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "price": {
+        "additionalProperties": false,
+        "description": "fixed means the fare is guaranteed until the quote expires. estimate means the final fare may land anywhere up to maximum, and never above it.",
+        "properties": {
+          "amount": {
+            "$ref": "#/$defs/money"
+          },
+          "kind": {
+            "enum": [
+              "fixed",
+              "estimate"
+            ],
+            "type": "string"
+          },
+          "maximum": {
+            "$ref": "#/$defs/money"
+          }
+        },
+        "required": [
+          "kind",
+          "amount",
+          "maximum"
+        ],
+        "type": "object"
+      },
+      "quote_id": {
+        "description": "Identifies one quoted option. Opaque: callers must not parse it, and it never encodes which backend served the ride.",
+        "pattern": "^qt_[a-z2-7]{26}$",
+        "type": "string"
+      },
+      "timestamp": {
+        "description": "A date and time in Request for Comments 3339 form with an explicit offset, for example 2026-10-12T15:00:00-07:00.",
+        "format": "date-time",
+        "maxLength": 40,
+        "type": "string"
+      },
+      "tracking": {
+        "additionalProperties": false,
+        "description": "How to follow the ride. Call status_call with the booking_id no more often than every poll_interval_seconds. share_url, when present, is a sirven-relayed page and never a ride service's own link.",
+        "properties": {
+          "poll_interval_seconds": {
+            "maximum": 3600,
+            "minimum": 5,
+            "type": "integer"
+          },
+          "share_url": {
+            "maxLength": 500,
+            "pattern": "^https://",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status_call": {
+            "const": "get_ride",
+            "type": "string"
+          },
+          "vehicle_description": {
+            "maxLength": 200,
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "status_call",
+          "poll_interval_seconds",
+          "share_url",
+          "vehicle_description"
+        ],
+        "type": "object"
+      },
+      "vehicle_class": {
+        "description": "A service-neutral vehicle category.",
+        "enum": [
+          "standard",
+          "comfort",
+          "large",
+          "premium",
+          "accessible",
+          "autonomous",
+          "shared"
+        ],
+        "type": "string"
+      }
+    },
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "contract_version": {
+        "$ref": "#/$defs/contract_version"
+      },
+      "error": {
+        "additionalProperties": false,
+        "properties": {
+          "booking": {
+            "description": "For not_cancellable: the booking as it stands.",
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/$defs/booking"
+              }
+            ]
+          },
+          "code": {
+            "$ref": "#/$defs/error_code"
+          },
+          "field": {
+            "description": "For invalid_argument: a slash-separated path to the offending argument, for example /departure_window/latest.",
+            "maxLength": 200,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "message": {
+            "description": "A plain sentence for a person. Written by the gateway, never passed through from a backend.",
+            "maxLength": 400,
+            "type": "string"
+          },
+          "retry_after_seconds": {
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "retryable": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "retryable",
+          "retry_after_seconds",
+          "field"
+        ],
+        "type": "object"
+      }
+    },
+    "required": [
+      "contract_version",
+      "error"
+    ],
+    "type": "object"
+  }
+}
