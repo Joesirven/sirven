@@ -30,26 +30,69 @@ agent  --HTTP, bearer token-->  sirven phone serve (127.0.0.1 only)
   you tapped Trust on the phone. sirven checks that the record exists and never reads it out,
   stores it, or logs it. The phone's serial number never appears in any output either.
 - **Driving.** WebDriverAgent (an open source test runner from the Appium project) runs on the
-  phone and accepts commands over HTTP. sirven reaches it through the USB multiplexer directly,
-  so no separate port forwarder is needed. `SIRVEN_WEBDRIVERAGENT_URL` points sirven at a
+  phone and accepts commands over HTTP. At run time no full Xcode is open. Two light processes
+  start it: `pymobiledevice3 remote start-tunnel --native` makes the tunnel to the phone, and
+  `pymobiledevice3 developer dvt xcuitest` launches the runner through that tunnel. `sirven phone
+  start` runs both and restarts whichever one stops. sirven reaches the runner through the USB
+  multiplexer directly, so no separate port forwarder is needed. `SIRVEN_WEBDRIVERAGENT_URL` points sirven at a
   forwarder you already run instead, and is refused unless it is loopback HTTP.
 - **No analytics.** sirven sends nothing anywhere. (iPhone-use itself ships anonymous
   analytics that are on by default; none of that code is here.)
 
 ## Setup, once
 
-`sirven phone setup --team TEAM --bundle BUNDLE` prints the plan. sirven never runs it for you,
-because it signs software with your Apple account.
+`sirven phone setup` prints the plan. sirven never runs it for you, because it signs software with
+your Apple account. `--team TEAM --bundle BUNDLE` are needed only for route B, the Xcode route.
 
 1. On the phone: plug it in, unlock it, tap Trust.
 2. On the phone: Settings > Privacy & Security > Developer Mode, on, then restart.
-3. On the Mac: full Xcode, signed into your Apple account.
-4. Clone WebDriverAgent at the commit iPhone-use pins, and build its runner for your phone
-   with `xcodebuild ... test`, using your own development team and a bundle name you own.
-5. On the phone, the first time: trust your developer certificate (Settings > General, the
-   device management page), and turn on the user interface automation switch under
-   Settings > Developer.
-6. Keep that `xcodebuild` running, then `sirven phone status`.
+3. On the Mac: install the pymobiledevice3 tool once with the Python tool installer, uv (needs
+   Python 3.12 or newer, and no administrator password): `uv tool install pymobiledevice3==11.28.2`.
+4. On the Mac: sign and install the runner, with ONE of the two routes below, not both. The
+   signature expires: a free Apple account signature lasts 7 days and must be redone weekly; a
+   paid Apple developer membership lasts a year. This applies to both routes.
+   - **Route A, EXPERIMENTAL and not yet proven on a real phone.** xtool, a command-line tool,
+     signs the runner with your Apple account and installs it. Install it with
+     `brew install xtool-org/tap/xtool` (its app may ask to move into your Applications folder;
+     allow it). Download the pinned runner, `WebDriverAgentRunner-Runner.zip` from the v16.14.0
+     release, and check it:
+
+     ```
+     mkdir -p ~/.sirven/WebDriverAgent && (cd ~/.sirven/WebDriverAgent && curl -fL -o runner.zip https://github.com/appium/WebDriverAgent/releases/download/v16.14.0/WebDriverAgentRunner-Runner.zip && echo '6f7758f72d348d2c35c3fd134fa76a941bba0c447de04b2e9d065682f31fc47f  runner.zip' | shasum -a 256 -c - && unzip -o runner.zip)
+     ```
+
+     If shasum reports FAILED, the download is not the release: stop. Nothing is unzipped.
+     Then `xtool auth login` (xtool asks for your Apple account sign-in; sirven never sees it), and
+     `xtool install ~/.sirven/WebDriverAgent/WebDriverAgentRunner-Runner.app`. Known limits: a
+     free Apple account signs for 7 days at a time, xtool uses Apple interfaces that are not
+     public, and whether the test bundle inside the runner signs correctly is not verified yet.
+     xtool rewrites the runner's bundle identifier, so on the phone the runner is not under
+     `com.facebook.WebDriverAgentRunner.xctrunner`. xtool prints the identifier it installed it
+     under, which begins `XTL-` and ends with `com.facebook.WebDriverAgentRunner.xctrunner`. To find
+     it again: stop `sirven phone start`, run `pymobiledevice3 remote start-tunnel --native` in one
+     terminal and note the address and port it prints, then run `pymobiledevice3 apps list --rsd
+     ADDRESS PORT` in another and look for WebDriverAgentRunner.
+     The evidence is in `docs/research/xtool-lighter-phone-path.md`.
+   - **Route B, the fallback: full Xcode.** Used only for this step, never at run time. It builds
+     WebDriverAgent from source at the commit iPhone-use pins, and does not use the download above.
+     Clone it into `~/.sirven/WebDriverAgent-source`, then run `xcodebuild ... test` there with
+     your own development team and a bundle name you own, and press Ctrl-C once the test starts on
+     the phone. Route B's signature expires on the same schedule as route A: 7 days on a free
+     Apple account, a year on a paid membership.
+5. On the phone, the first time: trust your developer certificate (Settings > General, the device
+   management page), and turn on the user interface automation switch under Settings > Developer.
+6. Run `SIRVEN_PHONE_RUNNER_BUNDLE=<runner identifier> sirven phone start` and leave it running.
+   For route B the runner identifier is the bundle name you gave setup, with `.xctrunner` added.
+   For route A it is the identifier xtool printed, from step 4.
+   Each time the tunnel starts, sirven mounts the developer disk image on the phone itself
+   (`pymobiledevice3 mounter auto-mount`), because a phone restart unmounts it. If the mount
+   fails, the start stops and prints the mounter's last lines.
+7. From another terminal, `sirven phone status`.
+
+| Command | What it does |
+|---|---|
+| `SIRVEN_PHONE_RUNNER_BUNDLE=<runner identifier> sirven phone start` | Starts the tunnel and the launcher and keeps both running. When one stops it is started again after 1 second, then 2, 4, and so on up to 30 seconds; a process that stays up for a minute starts over from 1 second. When the tunnel stops, or the launcher fails three times in a row without staying up, both start again with the tunnel's new address, and the developer disk image is mounted again first. If that mount fails, the start stops with the mounter's last lines. A stopped process's last lines are printed. Ctrl-C or closing the terminal stops both. A second start is refused while one is running, and leftover processes from an earlier run block a new start until you stop them. |
+| `sirven phone status` | Also says whether the tunnel and the launcher are running, or not running. |
 
 ## Consent: opt in per session, owner only
 
@@ -235,9 +278,15 @@ case is his decision.
   route; and (`tests/unit/test_phone_ride.sh`) quoting and booking a ride with both live
   approvals, a refused hold, a decline on the phone, a price that rose, cancelling, and the
   payment prompt never touched.
-- **Not yet verified against a real iPhone.** To do it: plug in and trust a phone, run the setup
-  plan, then `sirven phone status`, `sirven phone allow`, `sirven phone serve`, and from another
-  terminal `GET /screen` and a `POST /tap` on something harmless, then `sirven phone log`.
+- Verified with fake processes only (`tests/unit/test_phone_runner.sh`, `tests/phone/`): the
+  supervisor starts the tunnel and the launcher, reads the tunnel's address from its output,
+  restarts the launcher with a new address after the tunnel restarts, waits longer after each
+  failure up to the cap, and stops both cleanly; `sirven phone status` reads the runner file.
+- **Not yet verified against a real iPhone.** The real tunnel, the real runner, and the xtool route
+  have not run on hardware. To do it: plug in and trust a phone, run the setup plan, then
+  `sirven phone start` in one terminal, `sirven phone status`, `sirven phone allow`,
+  `sirven phone serve`, and from another terminal `GET /screen` and a `POST /tap` on something
+  harmless, then `sirven phone log`.
 
 ## Credit
 

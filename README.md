@@ -5,7 +5,9 @@ Secure access levels for your personal agent. Install it, own it, no hosted midd
 - [docs/WALKTHROUGH.md](docs/WALKTHROUGH.md): install in three steps
 - [docs/PERMISSIONS.md](docs/PERMISSIONS.md): the access levels and what each one allows
 - [docs/phone-interface.md](docs/phone-interface.md): let your agent drive your own plugged-in
-  iPhone, opt in per session, every action logged in plain words
+  iPhone, opt in per session, every action logged in plain words. At run time it needs no full
+  Xcode, only a sign and install of the test runner on the phone. A free Apple account signature
+  lasts 7 days and must be redone weekly; a paid Apple developer membership lasts a year
 - [docs/COMPONENTS.md](docs/COMPONENTS.md): optional components, added with `sirven add`, such as
   `sirven add crm` for Twenty, a self-hosted customer relationship manager. sirven never needs one
 - [docs/peer-routing.md](docs/peer-routing.md): how attestation, site review, the policy engine,

@@ -309,6 +309,12 @@ test_setup_only_prints_and_checks_its_inputs() {
   assert_contains "$CAPTURED_STDOUT" "DEVELOPMENT_TEAM=ABCDE12345"
 }
 
+test_setup_prints_the_xtool_route_without_team_or_bundle() {
+  assert_status 0 phone setup
+  assert_contains "$CAPTURED_STDOUT" "route A"
+  assert_contains "$CAPTURED_STDOUT" "XTL-"
+}
+
 test_unknown_phone_commands_are_usage_errors() {
   assert_status 64 phone
   assert_status 64 phone teleport
