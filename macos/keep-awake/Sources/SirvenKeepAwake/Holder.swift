@@ -6,11 +6,18 @@ import Foundation
 ///   3. release it the moment that stops being true, including when the queue drains
 ///   4. ask the helper for lid-closed operation only while holding and only if the user turned it on
 /// it never holds an assertion without work to point to: the assertion's details name every task.
+/// on battery below 20 percent it releases the hold, so a bag with the lid closed cannot run the battery flat.
 public final class KeepAwakeHolder {
+    /// the battery level below which the hold is released while the Mac runs on battery.
+    public static let lowBatteryPercent = 20
+    /// while lid-closed operation is wanted, the helper is asked again this often (see setLidClosed).
+    static let resendInterval: TimeInterval = 15
+
     private let store: KeepAwakeStore
     private let power: PowerAssertionBackend
     private let liveness: ProcessLiveness
     private let helper: LidClosedHelper?
+    private let batteries: PowerSourceBackend
     private let now: () -> Date
     private let process: Int32
 
@@ -20,14 +27,17 @@ public final class KeepAwakeHolder {
     public private(set) var liveWork: [WorkItem] = []
     private var details = ""
     private var lidClosedProblem: String?
+    private var lastAsked: Date?
 
     public init(store: KeepAwakeStore, power: PowerAssertionBackend = SystemPowerAssertions(),
                 liveness: ProcessLiveness = KernelProcessLiveness(), helper: LidClosedHelper? = nil,
+                batteries: PowerSourceBackend = SystemPowerSource(),
                 now: @escaping () -> Date = Date.init, process: Int32 = getpid()) {
         self.store = store
         self.power = power
         self.liveness = liveness
         self.helper = helper
+        self.batteries = batteries
         self.now = now
         self.process = process
     }
@@ -62,11 +72,23 @@ public final class KeepAwakeHolder {
             }
         }
         liveWork = live
-        let held = settings.enabled ? live.filter { $0.releasedAt == nil } : []
+        let battery = batteries.current()
+        // a battery whose level cannot be read is not treated as low: the limit applies only to a known level.
+        let lowBattery = battery.onBattery && (battery.percent ?? Self.lowBatteryPercent) < Self.lowBatteryPercent
+        let unreleased = live.filter { $0.releasedAt == nil }
+        let held = settings.enabled && !lowBattery ? unreleased : []
 
         if held.isEmpty {
-            let why = live.isEmpty ? "the work queue drained"
-                : settings.enabled ? "the user released the hold" : "the user turned keep-awake off"
+            let why: String
+            if live.isEmpty {
+                why = "the work queue drained"
+            } else if !settings.enabled {
+                why = "the user turned keep-awake off"
+            } else if lowBattery && !unreleased.isEmpty {
+                why = "the Mac is on battery at \(battery.percent ?? 0) percent, below \(Self.lowBatteryPercent) percent"
+            } else {
+                why = "the user released the hold"
+            }
             releaseAssertion(why: why)
         } else {
             let wanted = Self.describe(held)
@@ -109,20 +131,26 @@ public final class KeepAwakeHolder {
 
     private func setLidClosed(_ wanted: Bool) {
         if !wanted { lidClosedProblem = nil }
-        guard wanted != lidClosedActive else { return }
+        let time = now()
+        // while it is wanted, ask again every resendInterval: the helper forgets a connection that
+        // dropped, and a helper restarted by launchd starts with the setting reverted.
+        let due = lastAsked.map { time.timeIntervalSince($0) >= Self.resendInterval } ?? true
+        guard wanted != lidClosedActive || (wanted && due) else { return }
         guard let helper else {
             if wanted { lidClosedProblem = "lid-closed operation needs the helper, which ships in the signed sirven app" }
             return
         }
         do {
             try helper.setSleepDisabled(wanted)
+            if wanted != lidClosedActive { store.log(wanted ? "lid-closed-on" : "lid-closed-off") }
             lidClosedActive = wanted
+            lastAsked = time
             lidClosedProblem = nil
-            store.log(wanted ? "lid-closed-on" : "lid-closed-off")
         } catch {
             lidClosedProblem = "\(error)"
-            // if turning it off failed, the helper still reverts when this process's connection drops.
-            if !wanted { lidClosedActive = false }
+            // when the helper refuses, the state is false, and the next pass asks again.
+            lidClosedActive = false
+            lastAsked = nil
             store.log("lid-closed-failed", ["error": "\(error)"])
         }
     }

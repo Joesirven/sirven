@@ -12,6 +12,7 @@ usage:
   sirven awake release        release the hold now; the work keeps running
   sirven awake on | off       the keep-awake switch (on by default)
   sirven awake lid on | off   keep awake with the lid closed too (off by default)
+  sirven awake helper unregister   remove the privileged helper's registration (reverts lid-closed first)
   sirven awake about
 
 begin records work in flight and holds the Mac awake until end, until the owner process
@@ -216,7 +217,7 @@ func describeHelper(_ state: HelperState) -> String {
 
 func status(_ arguments: [String]) {
     let helper = ServiceManagementHelper()
-    let report = client.status(helper: helper)
+    let report = client.status(helper: helper, sleepSetting: PmsetSleepSetting())
     if arguments == ["--json"] {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
@@ -239,6 +240,11 @@ func status(_ arguments: [String]) {
         say("holding: no. the Mac sleeps as it normally would")
     }
     if let problem = report.lidClosedProblem { say("lid-closed problem: \(problem)") }
+    switch report.systemSleepDisabled {
+    case .some(true): say("system sleep-disabled setting: on (read from pmset now)")
+    case .some(false): say("system sleep-disabled setting: off (read from pmset now)")
+    case .none: say("system sleep-disabled setting: unknown, pmset did not answer")
+    }
     if report.work.isEmpty {
         say("work in flight: none")
     } else {
@@ -279,6 +285,21 @@ func lid(_ arguments: [String]) {
     }
 }
 
+/// remove the helper's registration. the lid-closed setting is reverted first, through the helper
+/// itself, so the Mac sleeps as usual afterwards. only the registration this copy of sirven made is touched.
+func helperCommand(_ arguments: [String]) {
+    guard arguments == ["unregister"] else { usageError("helper takes only unregister") }
+    let helper = ServiceManagementHelper()
+    // a helper that is not allowed yet cannot be asked to revert; there is nothing on for it to revert.
+    if helper.state == .enabled { try? helper.setSleepDisabled(false) }
+    do {
+        try helper.unregister()
+        say("the helper is unregistered. lid-closed operation is off; the Mac sleeps as usual.")
+    } catch {
+        fail("\(error)")
+    }
+}
+
 var arguments = Array(CommandLine.arguments.dropFirst())
 let command = arguments.isEmpty ? "" : arguments.removeFirst()
 switch command {
@@ -295,6 +316,7 @@ case "on":
     say("keep-awake is on: the Mac stays awake while your agent has work in flight.")
 case "off": client.setEnabled(false); say("keep-awake is off: the Mac sleeps as usual, even with work in flight.")
 case "lid": lid(arguments)
+case "helper": helperCommand(arguments)
 case "hold": hold()
 case "about": say(KeepAwakeIdentity.about)
 case "-h", "--help", "help": say(usage)

@@ -31,13 +31,21 @@ final class FakeHelper: LidClosedHelper {
     var sleepDisabled = false
     var calls: [Bool] = []
     var registered = 0
+    var unregistered = 0
     var fail = false
     func register() throws -> HelperState { registered += 1; return state }
+    func unregister() throws { unregistered += 1 }
     func setSleepDisabled(_ disabled: Bool) throws {
         calls.append(disabled)
         if fail { throw KeepAwakeError.helper("refused") }
         sleepDisabled = disabled
     }
+}
+
+/// a battery the test sets by hand, so the holder never reads the real one.
+final class FakeBattery: PowerSourceBackend {
+    var status = PowerSourceStatus(onBattery: false, percent: nil)
+    func current() -> PowerSourceStatus { status }
 }
 
 final class LifecycleTests: XCTestCase {
@@ -46,6 +54,7 @@ final class LifecycleTests: XCTestCase {
     var power: FakePower!
     var processes: FakeProcesses!
     var helper: FakeHelper!
+    var batteries: FakeBattery!
     var clock = Date(timeIntervalSince1970: 1_800_000_000)
     var client: KeepAwakeClient!
     var holder: KeepAwakeHolder!
@@ -58,8 +67,9 @@ final class LifecycleTests: XCTestCase {
         processes.started = [100: 1.0, 200: 2.0]
         helper = FakeHelper()
         client = KeepAwakeClient(store: store, liveness: processes, now: { [unowned self] in self.clock })
+        batteries = FakeBattery()
         holder = KeepAwakeHolder(store: store, power: power, liveness: processes, helper: helper,
-                                 now: { [unowned self] in self.clock }, process: 4242)
+                                 batteries: batteries, now: { [unowned self] in self.clock }, process: 4242)
     }
 
     override func tearDown() {
@@ -303,5 +313,53 @@ final class LifecycleTests: XCTestCase {
         XCTAssertTrue(status.holding)
         XCTAssertEqual(status.holderProcess, 4242)
         XCTAssertEqual(status.work.first?.holding, true)
+    }
+
+    func testLowBatteryOnBatteryReleasesTheHoldAndChargingResumesIt() throws {
+        try client.begin(task: "inbox", reason: "summarize the inbox", owner: 100)
+        XCTAssertTrue(holder.reconcile().holding)
+        batteries.status = PowerSourceStatus(onBattery: true, percent: 19)
+        XCTAssertFalse(holder.reconcile().holding)
+        XCTAssertTrue(power.active.isEmpty)
+        XCTAssertEqual(store.workItems().map(\.task), ["inbox"], "the work stays listed")
+        XCTAssertNil(store.workItems().first?.releasedAt, "the release came from the battery, not from the user")
+        XCTAssertTrue(events().contains("released"))
+        batteries.status = PowerSourceStatus(onBattery: false, percent: 19)
+        XCTAssertTrue(holder.reconcile().holding, "on the charger again, the hold resumes")
+    }
+
+    func testTwentyPercentOnBatteryStillHolds() throws {
+        try client.begin(task: "inbox", reason: "summarize the inbox", owner: 100)
+        batteries.status = PowerSourceStatus(onBattery: true, percent: 20)
+        XCTAssertTrue(holder.reconcile().holding)
+    }
+
+    func testAnUnreadableBatteryLevelOnBatteryDoesNotRelease() throws {
+        try client.begin(task: "inbox", reason: "summarize the inbox", owner: 100)
+        batteries.status = PowerSourceStatus(onBattery: true, percent: nil)
+        XCTAssertTrue(holder.reconcile().holding)
+    }
+
+    func testTheLidClosedSettingGoesOffWhenTheBatteryReleasesTheHold() throws {
+        client.setLidClosed(true)
+        try client.begin(task: "inbox", reason: "summarize the inbox", owner: 100)
+        XCTAssertTrue(holder.reconcile().lidClosedActive)
+        batteries.status = PowerSourceStatus(onBattery: true, percent: 10)
+        XCTAssertFalse(holder.reconcile().lidClosedActive)
+        XCTAssertEqual(helper.calls, [true, false])
+    }
+
+    func testWantedLidClosedIsAskedAgainEveryFifteenSeconds() throws {
+        client.setLidClosed(true)
+        try client.begin(task: "inbox", reason: "summarize the inbox", owner: 100)
+        _ = holder.reconcile()
+        XCTAssertEqual(helper.calls, [true])
+        clock += 10
+        _ = holder.reconcile()
+        XCTAssertEqual(helper.calls, [true], "not yet 15 seconds since the last ask")
+        clock += 5
+        _ = holder.reconcile()
+        _ = holder.reconcile()
+        XCTAssertEqual(helper.calls, [true, true], "asked again once, however many passes ran in that time")
     }
 }
