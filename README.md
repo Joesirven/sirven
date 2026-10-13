@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/sirven-icon-128.png" alt="sirven" width="128" height="128">
+</p>
+
 # sirven
 
 **Secure access levels for your personal agent.** Give your agent its own account on your machine, pick how much it can touch, see every grant, and take it all back with one command. No hosted middleman: the agent runs as a local user you own.
