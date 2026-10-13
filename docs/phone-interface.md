@@ -85,7 +85,8 @@ your Apple account. `--team TEAM --bundle BUNDLE` are needed only for route B, t
    For route B the runner identifier is the bundle name you gave setup, with `.xctrunner` added.
    For route A it is the identifier xtool printed, from step 4.
    Each time the tunnel starts, sirven mounts the developer disk image on the phone itself
-   (`pymobiledevice3 mounter auto-mount`), because a phone restart unmounts it. If the mount
+   (`pymobiledevice3 mounter auto-mount`), because a phone restart unmounts it. The first mount
+   downloads a disk image from Apple and can take a few minutes. If the mount
    fails at the first start, the start stops and prints the mounter's last lines. If the phone
    restarts while sirven runs, it comes back locked, and a failed mount then makes sirven wait and
    try again, with a growing pause; unlock the phone and it heals on its own.
