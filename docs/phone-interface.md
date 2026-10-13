@@ -56,7 +56,7 @@ because it signs software with your Apple account.
      release, and check it:
 
      ```
-     mkdir -p ~/.sirven/WebDriverAgent && curl -fL -o ~/.sirven/WebDriverAgent/runner.zip https://github.com/appium/WebDriverAgent/releases/download/v16.14.0/WebDriverAgentRunner-Runner.zip && echo '6f7758f72d348d2c35c3fd134fa76a941bba0c447de04b2e9d065682f31fc47f  ~/.sirven/WebDriverAgent/runner.zip' | shasum -a 256 -c - && unzip -o ~/.sirven/WebDriverAgent/runner.zip -d ~/.sirven/WebDriverAgent
+     mkdir -p ~/.sirven/WebDriverAgent && (cd ~/.sirven/WebDriverAgent && curl -fL -o runner.zip https://github.com/appium/WebDriverAgent/releases/download/v16.14.0/WebDriverAgentRunner-Runner.zip && echo '6f7758f72d348d2c35c3fd134fa76a941bba0c447de04b2e9d065682f31fc47f  runner.zip' | shasum -a 256 -c - && unzip -o runner.zip)
      ```
 
      If shasum reports FAILED, the download is not the release: stop. Nothing is unzipped.
