@@ -86,8 +86,10 @@ class RunnerTest(unittest.TestCase):
         os.environ.pop("SIRVEN_USBMUX_SOCKET", None)
         self.tunnel_starts = os.path.join(self.folder, "tunnel-starts")
         self.launches = os.path.join(self.folder, "launches")
+        self.saved_interrupt = signal.signal(signal.SIGINT, signal.default_int_handler)
 
     def tearDown(self):
+        signal.signal(signal.SIGINT, self.saved_interrupt)
         os.environ.clear()
         os.environ.update(self.saved_environment)
         shutil.rmtree(self.folder, ignore_errors=True)
