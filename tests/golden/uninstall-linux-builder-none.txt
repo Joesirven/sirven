@@ -1,6 +1,6 @@
 sirven uninstall plan
   operating system: linux
-  install record: /var/lib/sirven/install-record.tsv, 19 steps this package created
+  install record: /var/lib/sirven/install-record.tsv, 20 steps this package created
   audit log: kept
   prefix: <prefix>
   mode: dry run: nothing will be changed
@@ -40,15 +40,17 @@ undo: audit log
      note: kept, not reversed: remove /var/log/sirven if nothing else is inside. add --remove-audit-log to remove it too.
 
 undo: package directories
-   14. remove /etc/sirven/grants if nothing else is inside (to do)
+   14. remove the pinned copy of this package in /var/lib/sirven/package, if this package made it (to do)
+       $ rm -rf <prefix>/var/lib/sirven/package   # only when it holds PINNED-COPY
+   15. remove /etc/sirven/grants if nothing else is inside (to do)
        $ rmdir <prefix>/etc/sirven/grants   # kept if anything else is inside
-   15. remove /etc/sirven/levels if nothing else is inside (to do)
+   16. remove /etc/sirven/levels if nothing else is inside (to do)
        $ rmdir <prefix>/etc/sirven/levels   # kept if anything else is inside
-   16. remove /etc/sirven if nothing else is inside (to do)
+   17. remove /etc/sirven if nothing else is inside (to do)
        $ rmdir <prefix>/etc/sirven   # kept if anything else is inside
-   17. remove the install record and the state directory /var/lib/sirven (to do)
+   18. remove the install record and the state directory /var/lib/sirven (to do)
        $ rm -f <prefix>/var/lib/sirven/install-record.tsv && rmdir <prefix>/var/lib/sirven
 
-summary: 17 steps. 17 to do, 0 already done, 0 by the owner, 0 plan only.
+summary: 18 steps. 18 to do, 0 already done, 0 by the owner, 0 plan only.
 dry run: nothing was changed. run the same command without --dry-run to apply this plan.
 exit status: 0

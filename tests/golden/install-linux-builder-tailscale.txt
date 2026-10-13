@@ -18,65 +18,68 @@ package directories
        $ mkdir -p <prefix>/etc/sirven/levels && chmod 0755 <prefix>/etc/sirven/levels
     4. create /etc/sirven/grants for grant records (to do)
        $ mkdir -p <prefix>/etc/sirven/grants && chmod 0755 <prefix>/etc/sirven/grants
+    5. keep a pinned copy of this package in /var/lib/sirven/package, so revoke, rollback, and uninstall need no download (to do)
+       # copies install.sh uninstall.sh bin lib levels components project.json; a re-run keeps the copy it already has
+     note: later, without this repository: sudo bash /var/lib/sirven/package/install.sh revoke --all
 
 audit log
-    5. create the audit log directory /var/log/sirven (to do)
+    6. create the audit log directory /var/log/sirven (to do)
        $ mkdir -p <prefix>/var/log/sirven && chmod 0750 <prefix>/var/log/sirven
-    6. write the audit log format (to do)
+    7. write the audit log format (to do)
        # write <prefix>/etc/sirven/audit-format.json (mode 0644): the JSON lines format every entry follows
-    7. create the empty audit log (to do)
+    8. create the empty audit log (to do)
        $ touch <prefix>/var/log/sirven/audit.jsonl && chmod 0640 <prefix>/var/log/sirven/audit.jsonl
-    8. give the audit log directory to the owner, example (to do, recorded not run under --prefix)
+    9. give the audit log directory to the owner, example (to do, recorded not run under --prefix)
        $ chown -R example <prefix>/var/log/sirven
      note: capture comes from a forced-command wrapper on the agent's SSH key: designed, built after alpha.
 
 service user
-    9. create the service user agent, not an administrator (to do, recorded not run under --prefix)
+   10. create the service user agent, not an administrator (to do, recorded not run under --prefix)
        $ useradd --create-home --home-dir <prefix>/home/agent --shell /bin/bash --user-group --comment 'sirven agent' agent
-   10. turn off password login for agent, keys only (to do, recorded not run under --prefix)
+   11. turn off password login for agent, keys only (to do, recorded not run under --prefix)
        $ usermod --password '*' agent
-   11. confirm agent is not in sudo, wheel, or admin (to do, recorded not run under --prefix)
+   12. confirm agent is not in sudo, wheel, or admin (to do, recorded not run under --prefix)
        $ id -nG agent   # must not list sudo, wheel, or admin
-   12. create the SSH folder for agent (to do, recorded not run under --prefix)
+   13. create the SSH folder for agent (to do, recorded not run under --prefix)
        $ install -d -m 0700 -o agent -g agent <prefix>/home/agent/.ssh
-   13. create an empty authorized_keys file (to do, recorded not run under --prefix)
+   14. create an empty authorized_keys file (to do, recorded not run under --prefix)
        $ install -m 0600 -o agent -g agent /dev/null <prefix>/home/agent/.ssh/authorized_keys
-   14. add the public key of your agent client (owner, by hand)
+   15. add the public key of your agent client (owner, by hand)
        append its public key, one line, to /home/agent/.ssh/authorized_keys.
        keys only: no password is ever set, stored, or typed.
 
 access to paths, level builder
      note: builder: reads and writes inside granted paths. builds and tests there, nothing else.
-   15. install the builder level as policy (to do)
+   16. install the builder level as policy (to do)
        $ cp levels/builder.json <prefix>/etc/sirven/levels/builder.json && chmod 0644 <prefix>/etc/sirven/levels/builder.json
-   16. record the grant for agent (to do)
+   17. record the grant for agent (to do)
        # write <prefix>/etc/sirven/grants/agent.json (mode 0644): level builder on the paths below, no expiry, cannot grant further
-   17. let agent pass through /home (to do, recorded not run under --prefix)
+   18. let agent pass through /home (to do, recorded not run under --prefix)
        $ setfacl -m u:agent:x <prefix>/home
-   18. let agent pass through /home/example (to do, recorded not run under --prefix)
+   19. let agent pass through /home/example (to do, recorded not run under --prefix)
        $ setfacl -m u:agent:x <prefix>/home/example
-   19. grant agent rwX on /home/example/project and everything inside (to do, recorded not run under --prefix)
+   20. grant agent rwX on /home/example/project and everything inside (to do, recorded not run under --prefix)
        $ setfacl -R -P -m u:agent:rwX <prefix>/home/example/project
-   20. make new files in /home/example/project inherit the grant (to do, recorded not run under --prefix)
+   21. make new files in /home/example/project inherit the grant (to do, recorded not run under --prefix)
        $ setfacl -R -P -d -m u:agent:rwX <prefix>/home/example/project
 
 transport: tailscale
-   21. write the tailnet policy snippet (to do)
+   22. write the tailnet policy snippet (to do)
        # write <prefix>/etc/sirven/tailscale-policy-snippet.hujson (mode 0644): tag:agent, reachable only from your login, only on port 22
-   22. paste the policy snippet into your tailnet policy (owner, by hand)
+   23. paste the policy snippet into your tailnet policy (owner, by hand)
        tailscale admin console, access controls: merge /etc/sirven/tailscale-policy-snippet.hujson and put your login in place of you@example.com.
-   23. make one tagged auth key, once, in the browser (owner, by hand)
+   24. make one tagged auth key, once, in the browser (owner, by hand)
        tailscale admin console, settings, keys: generate an auth key with tag:agent, pre-approved, not reusable.
        save it as /etc/sirven/tailscale-auth-key, owned by root, mode 0600. this is the only interactive step.
-   24. join the tailnet as a tagged device with that key (plan only)
+   25. join the tailnet as a tagged device with that key (plan only)
        $ tailscale up --auth-key=file:<prefix>/etc/sirven/tailscale-auth-key --advertise-tags=tag:agent
        not yet: tailscale apply is plan output in the alpha cut; it is never run against a real tailnet yet
-   25. remove the used auth key from disk (plan only)
+   26. remove the used auth key from disk (plan only)
        $ rm -f <prefix>/etc/sirven/tailscale-auth-key
        not yet: tailscale apply is plan output in the alpha cut; it is never run against a real tailnet yet
      note: the agent client connects with: ssh agent@<this machine's tailnet name>. tailscale ssh stays off; the machine's own SSH server and keys are used.
 
-summary: 25 steps. 20 to do, 0 already done, 3 by the owner, 2 plan only.
+summary: 26 steps. 21 to do, 0 already done, 3 by the owner, 2 plan only.
 dry run: nothing was changed. run the same command without --dry-run to apply this plan.
 applying would stop before any change: the plan has plan-only steps the alpha cut does not apply yet.
 to undo later: ./install.sh revoke --all --dry-run, or ./uninstall.sh --dry-run

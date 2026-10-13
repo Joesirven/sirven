@@ -18,21 +18,24 @@ package directories
        $ mkdir -p <prefix>/etc/sirven/levels && chmod 0755 <prefix>/etc/sirven/levels
     4. create /etc/sirven/grants for grant records (to do)
        $ mkdir -p <prefix>/etc/sirven/grants && chmod 0755 <prefix>/etc/sirven/grants
+    5. keep a pinned copy of this package in /var/lib/sirven/package, so revoke, rollback, and uninstall need no download (to do)
+       # copies install.sh uninstall.sh bin lib levels components project.json; a re-run keeps the copy it already has
+     note: later, without this repository: sudo bash /var/lib/sirven/package/install.sh revoke --all
 
 audit log
-    5. create the audit log directory /var/log/sirven (to do)
+    6. create the audit log directory /var/log/sirven (to do)
        $ mkdir -p <prefix>/var/log/sirven && chmod 0750 <prefix>/var/log/sirven
-    6. write the audit log format (to do)
+    7. write the audit log format (to do)
        # write <prefix>/etc/sirven/audit-format.json (mode 0644): the JSON lines format every entry follows
-    7. create the empty audit log (to do)
+    8. create the empty audit log (to do)
        $ touch <prefix>/var/log/sirven/audit.jsonl && chmod 0640 <prefix>/var/log/sirven/audit.jsonl
-    8. give the audit log directory to the owner, example (to do, recorded not run under --prefix)
+    9. give the audit log directory to the owner, example (to do, recorded not run under --prefix)
        $ chown -R example <prefix>/var/log/sirven
      note: capture comes from a forced-command wrapper on the agent's SSH key: designed, built after alpha.
 
 service user
      note: dscl, not sysadminctl -addUser: that one wants a password, and this account never has one.
-    9. create the service user agent, hidden, not an administrator (plan only)
+   10. create the service user agent, hidden, not an administrator (plan only)
        $ dscl . -create /Users/agent
        $ dscl . -create /Users/agent UserShell /bin/zsh
        $ dscl . -create /Users/agent RealName 'sirven agent'
@@ -43,50 +46,50 @@ service user
        $ dscl . -create /Users/agent IsHidden 1
        $ createhomedir -c -u agent
        not yet: macos account creation is plan output in the alpha cut; apply needs a run in a macos virtual machine
-   10. confirm agent is not in the admin group (plan only)
+   11. confirm agent is not in the admin group (plan only)
        $ dseditgroup -o checkmember -m agent admin   # must answer no
        not yet: macos account creation is plan output in the alpha cut; apply needs a run in a macos virtual machine
-   11. create the SSH folder and an empty authorized_keys file (plan only)
+   12. create the SSH folder and an empty authorized_keys file (plan only)
        $ install -d -m 0700 -o agent -g staff <prefix>/Users/agent/.ssh
        $ install -m 0600 -o agent -g staff /dev/null <prefix>/Users/agent/.ssh/authorized_keys
        not yet: macos account creation is plan output in the alpha cut; apply needs a run in a macos virtual machine
-   12. allow agent in remote login (owner, by hand)
+   13. allow agent in remote login (owner, by hand)
        system settings, general, sharing, remote login: if it lists allowed users, add agent.
-   13. add the public key of your agent client (owner, by hand)
+   14. add the public key of your agent client (owner, by hand)
        append its public key, one line, to /Users/agent/.ssh/authorized_keys.
        keys only: no password is ever set, stored, or typed.
 
 access to paths, level operator
      note: operator: builder, plus restarts the services and reads the logs the owner lists. never root.
-   14. install the operator level as policy (to do)
+   15. install the operator level as policy (to do)
        $ cp levels/operator.json <prefix>/etc/sirven/levels/operator.json && chmod 0644 <prefix>/etc/sirven/levels/operator.json
      note: macos keeps Desktop, Documents, and Downloads behind privacy prompts a service user cannot answer, so those are refused.
-   15. record the grant for agent (to do)
+   16. record the grant for agent (to do)
        # write <prefix>/etc/sirven/grants/agent.json (mode 0644): level operator on the paths below, no expiry, cannot grant further
-   16. let agent pass through /Users (plan only)
+   17. let agent pass through /Users (plan only)
        $ /bin/chmod +a 'agent allow search' <prefix>/Users
        not yet: macos access control lists are plan output in the alpha cut; apply needs a run in a macos virtual machine
-   17. let agent pass through /Users/example (plan only)
+   18. let agent pass through /Users/example (plan only)
        $ /bin/chmod +a 'agent allow search' <prefix>/Users/example
        not yet: macos access control lists are plan output in the alpha cut; apply needs a run in a macos virtual machine
-   18. let agent pass through /Users/example/code (plan only)
+   19. let agent pass through /Users/example/code (plan only)
        $ /bin/chmod +a 'agent allow search' <prefix>/Users/example/code
        not yet: macos access control lists are plan output in the alpha cut; apply needs a run in a macos virtual machine
-   19. grant agent file rights on files in /Users/example/code/site (plan only)
+   20. grant agent file rights on files in /Users/example/code/site (plan only)
        $ /usr/bin/find <prefix>/Users/example/code/site -type f -exec /bin/chmod +a 'agent allow read,write,append,readattr,writeattr,readextattr,writeextattr,readsecurity' {} +
        not yet: macos access control lists are plan output in the alpha cut; apply needs a run in a macos virtual machine
-   20. grant agent folder rights on /Users/example/code/site and folders inside, inherited by new files (plan only)
+   21. grant agent folder rights on /Users/example/code/site and folders inside, inherited by new files (plan only)
        $ /usr/bin/find <prefix>/Users/example/code/site -type d -exec /bin/chmod +a 'agent allow list,search,add_file,add_subdirectory,delete_child,readattr,writeattr,readextattr,writeextattr,readsecurity,file_inherit,directory_inherit' {} +
        not yet: macos access control lists are plan output in the alpha cut; apply needs a run in a macos virtual machine
 
 transport: cloudflare tunnel
      note: replace agent.example.com with a hostname in your own zone.
-   21. authorize this machine for your zone, once, in the browser (owner, by hand)
+   22. authorize this machine for your zone, once, in the browser (owner, by hand)
        run: cloudflared tunnel login
-   22. create the tunnel (plan only)
+   23. create the tunnel (plan only)
        $ cloudflared tunnel create --credentials-file <prefix>/etc/sirven/cloudflared-credentials.json sirven-agent
        not yet: the cloudflare tunnel path is documented in the alpha cut; its plan and apply come later
-   23. write the tunnel configuration (plan only)
+   24. write the tunnel configuration (plan only)
        $ cat > <prefix>/etc/sirven/cloudflared.yml <<'END'
          tunnel: sirven-agent
          credentials-file: /etc/sirven/cloudflared-credentials.json
@@ -96,19 +99,19 @@ transport: cloudflare tunnel
            - service: http_status:404
          END
        not yet: the cloudflare tunnel path is documented in the alpha cut; its plan and apply come later
-   24. point the hostname at the tunnel (plan only)
+   25. point the hostname at the tunnel (plan only)
        $ cloudflared tunnel route dns sirven-agent agent.example.com
        not yet: the cloudflare tunnel path is documented in the alpha cut; its plan and apply come later
-   25. put cloudflare access in front, with a service token (owner, by hand)
+   26. put cloudflare access in front, with a service token (owner, by hand)
        cloudflare dashboard, access, applications: add agent.example.com as a self-hosted application.
        policy action: service auth, allowing only a new service token for your agent client.
        do not add email code login or any other login method.
-   26. run the tunnel as a system service (plan only)
+   27. run the tunnel as a system service (plan only)
        $ cloudflared --config <prefix>/etc/sirven/cloudflared.yml service install
        not yet: the cloudflare tunnel path is documented in the alpha cut; its plan and apply come later
      note: the agent client connects with: ssh -o ProxyCommand='cloudflared access ssh --hostname %h --service-token-id <token> --service-token-secret <secret>' agent@agent.example.com
 
-summary: 26 steps. 10 to do, 0 already done, 4 by the owner, 12 plan only.
+summary: 27 steps. 11 to do, 0 already done, 4 by the owner, 12 plan only.
 dry run: nothing was changed. run the same command without --dry-run to apply this plan.
 applying would stop before any change: the plan has plan-only steps the alpha cut does not apply yet.
 to undo later: ./install.sh revoke --all --dry-run, or ./uninstall.sh --dry-run

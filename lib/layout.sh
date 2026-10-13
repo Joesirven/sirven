@@ -65,8 +65,46 @@ layout_write_file() {
   plan_undo "remove $2" "[ ! -e $destination ]" "rm -f $destination"
 }
 
+# the pinned copy of this package: the files the installer, the uninstaller, and sirven run from.
+# it lives under the state directory, so revoke, rollback, and uninstall work after the
+# repository or the download is gone. the marker names the release the copy came from.
+LAYOUT_PACKAGE_FILES="install.sh uninstall.sh bin lib levels components project.json"
+LAYOUT_PACKAGE_MARKER="PINNED-COPY"
+
+layout_package_copy() {
+  printf '%s/package' "$STATE_DIR"
+}
+
+# layout_keep_package SOURCE DESTINATION: copy the package files into DESTINATION, replacing a
+# partial copy. the marker records the release from bootstrap/sirven-bootstrap.sh, or unpinned
+# when the installer ran from a repository checkout.
+layout_keep_package() {
+  local source="$1" destination="$2" item
+  case "$destination" in
+    */package) ;;
+    *) printf 'error: refusing to keep a copy of this package at %s\n' "$destination" >&2; return 1 ;;
+  esac
+  rm -rf "$destination"
+  mkdir -p "$destination"
+  for item in $LAYOUT_PACKAGE_FILES; do
+    cp -R "$source/$item" "$destination/"
+  done
+  printf 'tag=%s\nsha256=%s\n' "${SIRVEN_PACKAGE_TAG:-unpinned}" "${SIRVEN_PACKAGE_SHA256:-unpinned}" \
+    > "$destination/$LAYOUT_PACKAGE_MARKER"
+}
+
+# layout_remove_package_copy PATH: remove the copy only when this package made it, so a folder
+# with the same name that is not ours is kept.
+layout_remove_package_copy() {
+  if [ ! -f "$1/$LAYOUT_PACKAGE_MARKER" ]; then
+    printf '       kept %s: it is not a copy this package made\n' "$1"
+    return 0
+  fi
+  rm -rf "$1"
+}
+
 plan_layout() {
-  local state record simulation
+  local state record simulation copy
   state="$(rooted "$STATE_DIR")"
   record="$(rooted "$(layout_record_file)")"
   simulation="$(rooted "$(layout_simulation_log)")"
@@ -81,4 +119,12 @@ plan_layout() {
   layout_directory "$CONFIG_DIR" 0755 "create the policy directory $CONFIG_DIR"
   layout_directory "$CONFIG_DIR/levels" 0755 "create $CONFIG_DIR/levels for the level in force"
   layout_directory "$CONFIG_DIR/grants" 0755 "create $CONFIG_DIR/grants for grant records"
+  copy="$(rooted "$(layout_package_copy)")"
+  plan_step run "keep a pinned copy of this package in $(layout_package_copy), so revoke, rollback, and uninstall need no download" \
+    "[ -f $copy/$LAYOUT_PACKAGE_MARKER ]" \
+    "layout_keep_package $(shell_quote "$ROOT_DIR") $copy" \
+    "# copies $LAYOUT_PACKAGE_FILES; a re-run keeps the copy it already has"
+  plan_undo "remove the pinned copy of this package in $(layout_package_copy), if this package made it" \
+    "[ ! -e $copy ]" "layout_remove_package_copy $copy" "rm -rf $copy   # only when it holds $LAYOUT_PACKAGE_MARKER"
+  plan_note "later, without this repository: sudo bash $(layout_package_copy)/install.sh revoke --all"
 }

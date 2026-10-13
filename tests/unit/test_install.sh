@@ -181,3 +181,50 @@ test_plan_never_mentions_passwords_being_set() {
   assert_not_contains "$CAPTURED_STDOUT" "sysadminctl -addUser"
   assert_contains "$CAPTURED_STDOUT" "usermod --password '*' agent"
 }
+
+test_apply_keeps_a_pinned_copy_that_revoke_runs_from() {
+  local root="$TEST_TMP/root" copy
+  copy="$root/var/lib/sirven/package"
+  export SIRVEN_PACKAGE_TAG=v0.2.0 SIRVEN_PACKAGE_SHA256=abc123
+  assert_status 0 install_sh --prefix "$root" --transport none
+  unset SIRVEN_PACKAGE_TAG SIRVEN_PACKAGE_SHA256
+  assert_file_exists "$copy/install.sh"
+  assert_file_exists "$copy/uninstall.sh"
+  assert_file_exists "$copy/lib/layout.sh"
+  assert_file_exists "$copy/levels/observer.json"
+  assert_no_file "$copy/tests"
+  assert_contains "$(cat "$copy/PINNED-COPY")" "tag=v0.2.0"
+  assert_contains "$(cat "$copy/PINNED-COPY")" "sha256=abc123"
+  assert_status 0 env SIRVEN_OS_OVERRIDE=linux SIRVEN_TAILSCALE=none SIRVEN_BB=none \
+    "$BASH" "$copy/install.sh" revoke --all --dry-run --prefix "$root"
+  assert_contains "$CAPTURED_STDOUT" "dry run: nothing was changed."
+}
+
+test_a_checkout_install_records_the_copy_as_unpinned() {
+  local root="$TEST_TMP/root"
+  assert_status 0 install_sh --prefix "$root" --transport none
+  assert_contains "$(cat "$root/var/lib/sirven/package/PINNED-COPY")" "tag=unpinned"
+}
+
+test_rerun_keeps_the_copy_it_has() {
+  local root="$TEST_TMP/root" copy
+  copy="$root/var/lib/sirven/package"
+  assert_status 0 install_sh --prefix "$root" --transport none
+  printf 'marker\n' > "$copy/keep-me"
+  assert_status 0 install_sh --prefix "$root" --transport none
+  assert_contains "$CAPTURED_STDOUT" "applied 0 steps"
+  assert_file_exists "$copy/keep-me"
+}
+
+test_a_copy_path_outside_the_state_directory_is_refused() {
+  local source="$TEST_TMP/source"
+  . "$REPO_DIR/lib/common.sh"
+  . "$REPO_DIR/lib/layout.sh"
+  mkdir -p "$source"
+  for item in install.sh uninstall.sh bin lib levels components project.json; do
+    cp -R "$REPO_DIR/$item" "$source/"
+  done
+  capture layout_keep_package "$source" "$TEST_TMP/not-a-package-copy"
+  assert_eq 1 "$CAPTURED_STATUS"
+  assert_contains "$CAPTURED_STDERR" "refusing to keep a copy"
+}
