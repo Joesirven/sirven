@@ -266,7 +266,7 @@ test_a_download_cut_off_in_its_last_line_runs_nothing() {
   done
 }
 
-# process_gone PID: true once PID has exited, waiting up to three seconds for it.
+# process_gone PROCESS_NUMBER: true once that process has exited, waiting up to three seconds for it.
 process_gone() {
   local waited=0
   while kill -0 "$1" 2>/dev/null; do
