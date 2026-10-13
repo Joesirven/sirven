@@ -248,13 +248,13 @@ test_a_failed_copy_leaves_no_package_folder_and_no_marker() {
   . "$REPO_DIR/lib/common.sh"
   . "$REPO_DIR/lib/layout.sh"
   mkdir -p "$source"
-  for item in install.sh uninstall.sh bin lib levels project.json; do
+  for item in install.sh uninstall.sh bin levels project.json components; do
     cp -R "$REPO_DIR/$item" "$source/"
   done
   mkdir -p "$root/var/lib/sirven"
   capture layout_keep_package "$source" "$root/var/lib/sirven/package"
-  assert_eq 1 "$CAPTURED_STATUS" "a source without components/ is an error"
-  assert_contains "$CAPTURED_STDERR" "the package has no components to keep"
+  assert_eq 1 "$CAPTURED_STATUS" "a source without lib/ is an error"
+  assert_contains "$CAPTURED_STDERR" "the package has no lib to keep"
   assert_no_file "$root/var/lib/sirven/package"
   assert_no_file "$root/var/lib/sirven/package.new"
 }
@@ -268,7 +268,7 @@ test_a_failed_copy_keeps_the_old_copy_it_was_replacing() {
   assert_status 0 install_sh --prefix "$root" --transport none
   source="$TEST_TMP/source"
   mkdir -p "$source"
-  for item in install.sh uninstall.sh bin lib levels project.json; do
+  for item in install.sh uninstall.sh bin levels project.json; do
     cp -R "$REPO_DIR/$item" "$source/"
   done
   capture layout_keep_package "$source" "$copy"

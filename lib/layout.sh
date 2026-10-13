@@ -68,7 +68,9 @@ layout_write_file() {
 # the pinned copy of this package: the files the installer, the uninstaller, and sirven run from.
 # it lives under the state directory, so revoke, rollback, and uninstall work after the
 # repository or the download is gone. the marker names the release the copy came from.
-LAYOUT_PACKAGE_FILES="install.sh uninstall.sh bin lib levels components project.json"
+LAYOUT_PACKAGE_FILES="install.sh uninstall.sh bin lib levels project.json"
+# components is optional: a core-only copy of this package has no components folder, and needs none.
+LAYOUT_PACKAGE_OPTIONAL_FILES="components"
 LAYOUT_PACKAGE_MARKER="PINNED-COPY"
 
 layout_package_copy() {
@@ -91,10 +93,14 @@ layout_package_current() {
     grep -qxF "tag=$tag" "$destination/$LAYOUT_PACKAGE_MARKER" 2>/dev/null || return 1
     grep -qxF "sha256=$checksum" "$destination/$LAYOUT_PACKAGE_MARKER" 2>/dev/null || return 1
   fi
-  for item in $LAYOUT_PACKAGE_FILES; do
-    [ -e "$destination/$item" ] || return 1
-    if [ "$tag" = unpinned ]; then
-      diff -rq -x __pycache__ "$source/$item" "$destination/$item" >/dev/null 2>&1 || return 1
+  for item in $LAYOUT_PACKAGE_FILES $LAYOUT_PACKAGE_OPTIONAL_FILES; do
+    if [ -e "$source/$item" ]; then
+      [ -e "$destination/$item" ] || return 1
+      if [ "$tag" = unpinned ]; then
+        diff -rq -x __pycache__ "$source/$item" "$destination/$item" >/dev/null 2>&1 || return 1
+      fi
+    else
+      [ ! -e "$destination/$item" ] || return 1
     fi
   done
 }
@@ -108,10 +114,18 @@ layout_stage_package() {
     [ -e "$source/$item" ] || { printf 'error: the package has no %s to keep\n' "$item" >&2; return 1; }
     cp -R "$source/$item" "$staging/" || { printf 'error: could not copy %s\n' "$item" >&2; return 1; }
   done
+  for item in $LAYOUT_PACKAGE_OPTIONAL_FILES; do
+    if [ -e "$source/$item" ]; then
+      cp -R "$source/$item" "$staging/" || { printf 'error: could not copy %s\n' "$item" >&2; return 1; }
+    fi
+  done
   find "$staging" -name __pycache__ -type d -prune -exec rm -rf {} + || return 1
   chmod -R go-w "$staging" || return 1
   for item in $LAYOUT_PACKAGE_FILES; do
     [ -e "$staging/$item" ] || return 1
+  done
+  for item in $LAYOUT_PACKAGE_OPTIONAL_FILES; do
+    if [ -e "$source/$item" ]; then [ -e "$staging/$item" ] || return 1; fi
   done
   printf 'tag=%s\nsha256=%s\n' "${SIRVEN_PACKAGE_TAG:-unpinned}" "${SIRVEN_PACKAGE_SHA256:-unpinned}" \
     > "$staging/$LAYOUT_PACKAGE_MARKER" || return 1
@@ -178,7 +192,7 @@ plan_layout() {
     plan_step run "keep a pinned copy of this package in $(layout_package_copy), so revoke, rollback, and uninstall need no download" \
       "layout_package_current $copy $(shell_quote "$tag") $(shell_quote "$checksum") $(shell_quote "$ROOT_DIR")" \
       "layout_keep_package $(shell_quote "$ROOT_DIR") $copy" \
-      "# copies $LAYOUT_PACKAGE_FILES into a new folder, then moves it into place; a copy of another release is replaced"
+      "# copies $LAYOUT_PACKAGE_FILES, and $LAYOUT_PACKAGE_OPTIONAL_FILES when present, into a new folder, then moves it into place"
     plan_undo "remove the pinned copy of this package in $(layout_package_copy), if this package made it" \
       "[ ! -e $copy ]" "layout_remove_package_copy $copy" "rm -rf $copy   # only when it holds $LAYOUT_PACKAGE_MARKER"
   fi
