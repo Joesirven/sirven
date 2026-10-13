@@ -247,3 +247,83 @@ so the installer is stopped before its folder is deleted.
 6. `make test` and `make lint`: see the table above.
 
 CHANGES REQUIRED, reviewed at 3381525 (the last product commit on this branch; this report is committed on top of it).
+
+## Re-review of the fixes (tip d5ec263)
+
+Reviewed: commits 9a9c94e, 23de433, 2d6897d, d5ec263 on branch
+`sir-49-sir-50-sir-51-pin-the-bootstrap-keep-a-lo-thr_phgpsm8d7h`, in a scratch worktree of d5ec263 and
+scratch copies of it. Parent decision applied: the pin targets a `git archive` tarball uploaded as a
+GitHub release asset, and `--tarball` is gone. Bash for every run: `/bin/bash` 3.2.57. The real installer
+was not run; installer runs used `--prefix` fake roots or `--dry-run`.
+
+### Command results
+
+| Command | Result |
+| --- | --- |
+| `make test` | exit 2, 409 passed, 3 failed: the same three known failures (`test_install_started_by_sh_says_to_use_bash`, `test_enter_twice_accepts_the_shown_defaults`, `test_input_that_ends_takes_the_defaults`). Outside the sandbox. |
+| `make lint` | exit 0, `bash -n` on 57 files; `shellcheck` is still not installed, so it was skipped. |
+
+### The three must-fix items: all resolved
+
+**Must fix 1 (partial copy marked complete, installer deleting itself): resolved.**
+- Source missing `uninstall.sh`: the step fails ("the package has no uninstall.sh to keep"), the old copy and its marker stay (`tag=v0.3.0` before and after), and `package.new` is cleaned up.
+- Source with an unreadable `lib/phone_map.py` (a `cp` that fails midway): "could not copy lib", the step fails, the old copy stays; on a fresh root no `package` folder exists at all.
+- Install run from the copy with the marker present: the plan prints "this package runs from its pinned copy ... already in place", 51 files before and after, marker unchanged. With the marker deleted: the copy keeps its other files (50 of 51; it is not repaired, but nothing is destroyed). The plan omits the copy step in this case (`plan_layout`), which is the behavior asked for.
+- Uninstall run from the copy, for real: exit 0, the copy removes itself and `/var/lib` is left empty.
+- The copy has no group or other write bits, and the `__pycache__` folders are excluded.
+
+**Must fix 2 (copy never refreshed): resolved.**
+- Same release again: "already done", applied 0 steps.
+- New release (`v0.2.0` then `v0.3.0`): "to do", the copy is rebuilt, the stale file is gone, the marker reads `tag=v0.3.0`.
+- Checkout installs: an edit to `lib/layout.sh` or `bin/sirven` in the source is detected (`diff -rq`) and the copy is rebuilt; an unchanged checkout is skipped.
+- The new test `test_the_copy_from_a_newer_release_undoes_an_older_install` covers the reason the refresh matters.
+
+**Must fix 3 (cut-off pipe drops the arguments): resolved.** Truncation sweep over every prefix of the
+pinned bootstrap (5962 bytes), piped to `bash -s -- --dry-run --level observer`: only the complete script
+(with and without its final newline) ran the installer, both with the full arguments. With no arguments,
+the four prefixes that run it are the complete script and the cut at `main`, which is identical to the
+full line. Arguments with spaces and an empty argument arrive intact.
+
+### Should-fix items from the first review
+
+- **Documentation promised a revoke that is refused: resolved.** `docs/BOOTSTRAP.md` now says revoke from the copy is not available in this alpha (dry run only, exit 3 when applied) and tells the reader to revoke by uninstalling. `lib/layout.sh` note and `docs/WALKTHROUGH.md` match.
+- **Archive stability and `--tarball`: resolved by the parent decision.** I ran `release.sh v0.2.0` in a scratch clone with an annotated tag: it built the archive twice, wrote exactly the two pin lines (diff: 2 insertions, 2 deletions), the pinned checksum equals `shasum -a 256` of `dist/release/sirven-v0.2.0.tar.gz`, `dist/` is ignored by git, and the printed upload command names the file with the exact basename the bootstrap downloads (`sirven-TAG.tar.gz`). A missing tag exits 1, `main` exits 1, `--tarball` and no arguments print usage (64). Round trip: that pinned bootstrap, piped to `bash -s -- --dry-run`, with a fake `curl` serving the built asset, verified the checksum, unpacked, and ran the real `install.sh` through its preflight (its later Tailscale conflict is this machine's own state, not the bootstrap). A test (`test_the_bootstrap_and_the_release_step_agree_on_the_repository_and_the_asset`) now ties the two files together.
+- **Test gaps: mostly resolved.** I mutated copies of the tree and ran the relevant test files:
+  - checksum compared after `tar -x`: now fails `test_the_checksum_is_checked_before_the_archive_is_unpacked`
+  - `--proto/--tlsv1.2/--proto-redir` removed, and separately the timeouts removed: both fail `test_the_download_uses_https_only_with_timeouts`
+  - argument guard removed: fails `test_a_download_cut_off_in_its_last_line_runs_nothing`
+  - TERM and HUP trap removed: fails `test_stopping_the_bootstrap_stops_its_installer_and_removes_the_folder`
+  - cleanup trap removed: fails two tests
+  - run-from-copy handling removed from the plan: fails `test_the_installer_run_from_its_copy_never_deletes_it`
+  - skip check reverted to "marker exists": fails two tests
+  
+  Two mutations still pass, see New should fix 2.
+- **Documentation for Macs: resolved** (WALKTHROUGH and BOOTSTRAP now say a Mac does not apply an install in this alpha, and the copy is created on Linux only).
+- **Direct kill leaves the installer running: partly resolved.** See New should fix 1.
+
+### New findings introduced by the fixes
+
+**New should fix 1. Every process the installer starts now ignores Ctrl-C (`bootstrap/sirven-bootstrap.sh`, the `bash "$installer" ... &` line).**
+A non-interactive shell starts background commands with SIGINT ignored, and children inherit "ignored". Reproduced: a fixture installer that prints its child's SIGINT disposition printed `1` (ignored) when run through the new bootstrap, and the default handler when run in the foreground. Consequences: the installer shell itself is stopped correctly (Ctrl-C on a terminal exits 130, TERM exits 143, the temp folder is removed, and the installer does not read the terminal wrongly: a prompt answered through `/dev/tty` works from the background, exit status 7 passes through). But a step in flight when the signal arrives, such as a `python3` run or a long `tailscale` or `useradd` call, no longer receives the interrupt and runs to completion on its own, after the installer shell that would record its undo is gone. Reproduced with a direct TERM: the installer shell died, its child `sleep` survived, reparented to process 1. Before this fix a Ctrl-C reached those children. The window is one step, and a Mac only dry-runs today, so I rank it should fix and not must fix, but it is cheap: in `stop_installer`, also stop the installer's descendants before the installer itself (for example a small recursive `pgrep -P` walk, then `kill`), and add a test whose fixture starts a background child and asserts it is gone. Update the sentence in `docs/BOOTSTRAP.md` ("the installer is stopped too") to say "and its running steps".
+
+**New should fix 2. Two tests are blind to the properties they are named for.**
+- `test_a_failed_copy_leaves_no_package_folder_and_no_marker` induces its failure by removing `lib/` from the source, which the new up-front `[ -e ]` check catches. Mutation: replace the required-item `cp ... || { ...; return 1; }` (`lib/layout.sh:115`) with `cp ... 2>/dev/null`: 45 passed, 0 failed. The behavior is correct today (reproduced above with an unreadable file), but nothing protects it. Add a test with an unreadable file inside `lib/` (skip when the tests run as root).
+- `test_the_kept_copy_has_no_group_or_other_write_bits` installs from a checkout whose files are already 0644, so removing `chmod -R go-w "$staging"` passes (45 passed). Make the source file group-writable first (`chmod g+w`) and assert it is not in the copy.
+- The copy-from-copy guard inside `layout_keep_package` (defense in depth behind the plan-level handling) has no direct test: removing it passes. Call `layout_keep_package` with the copy as source.
+
+### Nice to have, new
+
+- `lib/layout.sh:132-135`: `rm -rf "$destination"` then `mv "$staging" "$destination"` leaves a moment with no copy; `mv destination destination.old`, `mv staging destination`, `rm -rf destination.old` keeps one at all times. Also, a `package.new` left by a killed install makes uninstall keep `/var/lib/sirven` ("it holds files this package did not create"); reproduced. Have uninstall's undo remove `package.new`, or accept it because the next install run removes it.
+- `bootstrap/release.sh`: `--verify-tag` only proves the tag exists on GitHub, not that it is the commit the local tag points to. Compare `git ls-remote origin "refs/tags/$tag^{}"` with `git rev-parse "$tag^{commit}"` before building, and say so in the printed steps.
+- `shellcheck` is still not installed here; run the repository's `make lint` where it is before merging.
+
+### Regression hunt, items that held
+
+- Staged rename: failure paths clean up `package.new`; the old copy survives a failed refresh; `mv` is a same-folder rename.
+- Argument guard: no effect on a normal run, an empty argument list, or arguments with spaces; fails closed on every truncation.
+- Signal handling: TERM and HUP exit 143, Ctrl-C on a real terminal (run through a pseudo-terminal) exits 130, the temp folder is always removed, the installer's exit status is returned, and interactive questions still work from the background installer.
+- Bootstrap download flags, timeouts and the stricter pin checks behave as documented; a pin of `a` followed by 63 `z` is now refused before any download.
+
+### Verdict
+
+**APPROVE**, at tip `d5ec263`. Remaining must-fix items: none. Recommended before merge (small): New should fix 1 (descendants of the installer survive a stop) and the two blind tests in New should fix 2. This re-review is committed on top of `aedf880`.
