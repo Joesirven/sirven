@@ -538,6 +538,8 @@ def show_last_output(children):
     for child in children:
         if child is not None:
             for line in child.lines()[-LAST_OUTPUT_LINES:]:
+                if line.lstrip().startswith("Identifier:"):
+                    continue
                 print("  | %s" % line, flush=True)
 
 

@@ -243,6 +243,17 @@ class RunnerTest(unittest.TestCase):
         printed = self.run_until_interrupt(supervisor, 0.5)
         self.assertIn("  | the runner is not installed on the phone", printed)
 
+    def test_the_device_identifier_is_never_printed_as_last_output(self):
+        class Finished:
+            def lines(self):
+                return REAL_TUNNEL_LINES
+
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            phone_bridge.show_last_output([Finished()])
+        self.assertNotIn("00008110-000A1B2C3D4E5F60", output.getvalue())
+        self.assertIn("  | RSD Address: fd35:4e2b:1c8f::1", output.getvalue())
+
     def test_a_dead_tunnel_restarts_the_tunnel_and_the_launcher_with_the_new_address(self):
         supervisor = self.supervisor(tunnel_lifetime=0.3, launcher_lifetime=300)
         printed = self.run_until_interrupt(supervisor, 1.5)
