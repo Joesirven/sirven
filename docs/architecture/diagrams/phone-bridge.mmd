@@ -1,0 +1,28 @@
+flowchart LR
+  %% iPhone bridge and consent gates
+  owner(("Owner"))
+  subgraph g_gate["gate"]
+  consent{{"sirven phone allow (session)"}}
+  hold{{"money hold (approve or deny)"}}
+  pay{{"phone's own Face ID or Apple Pay"}}
+  end
+  subgraph g_core["core"]
+  bridge["lib/phone_bridge.py"]
+  crawler["lib/phone_crawler.py"]
+  wda["WebDriverAgent"]
+  end
+  subgraph g_data["data"]
+  map[("lib/phone_map.py")]
+  audit[("actions.jsonl")]
+  end
+  phone[/"plugged-in iPhone (cable)"/]
+  owner -->|typed yes| consent
+  consent -->|unlock| bridge
+  bridge --> crawler
+  crawler -->|once a day| map
+  bridge --> wda
+  wda -->|cable only| phone
+  bridge -->|money-bearing tap| hold
+  hold -->|approve or deny| owner
+  bridge -.->|wait, read only| pay
+  bridge -->|plain words| audit

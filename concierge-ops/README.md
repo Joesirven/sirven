@@ -1,5 +1,39 @@
 # Human-concierge operations, San Francisco
 
+<!-- architecture:begin concierge-ops -->
+
+## Architecture: concierge-ops
+
+concierge-ops/ is operations documentation plus one queue tool. The ride demo is the only runnable code that exercises the pattern today. Three gate items hold shipping.
+
+![concierge-ops](../docs/architecture/rendered/concierge-ops.svg)
+
+Diagram source, generated from `docs/architecture/graph.mjs`:
+
+```mermaid
+flowchart LR
+  %% concierge-ops
+  subgraph g_doc["doc"]
+  hiring["hiring-packet.md"]
+  pay["pay-model.md"]
+  queue["queue-design.md"]
+  monitoring["monitoring.md"]
+  trust["trust-and-safety.md"]
+  end
+  tool["concierge-ops/tools/concierge_queue.py"]
+  roster[("concierge-ops/tools/roster.example.json")]
+  demo["ride demo exercises it"]
+  gate{{"ship gate (three items)"}}
+  hiring --> roster
+  pay --> roster
+  queue --> tool
+  monitoring -->|service levels| gate
+  trust -->|safety protocol| gate
+  tool -->|parallel booking| demo
+```
+
+<!-- architecture:end concierge-ops -->
+
 Operations for the human-concierge layer: the people who book rides a personal agent cannot
 book on its own, Waymo first. San Francisco only (Jose's decision of October 11, 2026). Jose
 does all hiring; this folder is the preparation. Nothing here has been posted, sent, or

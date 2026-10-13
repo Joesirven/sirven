@@ -1,0 +1,15 @@
+flowchart LR
+  %% sirven awake, keep the Mac awake while work is in flight
+  agent(("Personal agent"))
+  cli["sirven awake"]
+  daemon["keep-awake daemon"]
+  subgraph g_system["system"]
+  assertion[/"macOS power assertion"/]
+  helper[/"signed helper (lid closed only)"/]
+  end
+  lease{{"12 hour lease"}}
+  agent -->|begin task| cli
+  cli --> daemon
+  daemon -->|hold| assertion
+  daemon -.->|ask once| helper
+  daemon -->|renew| lease

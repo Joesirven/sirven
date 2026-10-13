@@ -1,0 +1,19 @@
+flowchart LR
+  %% Runtime seam and policy decisions
+  client["lib/sirven_runtime/client.py"]
+  subgraph g_core["core"]
+  seam["lib/sirven_runtime/seam.py"]
+  server["lib/sirven_runtime/server.py"]
+  policy["lib/policy_engine.py"]
+  end
+  subgraph g_data["data"]
+  grants[("compiled grants")]
+  log[("lib/sirven_runtime/decision_log.py")]
+  end
+  fetch["lib/sirven_runtime/fetch.py"]
+  client -->|request| seam
+  seam --> server
+  server -->|decide| policy
+  policy -->|read| grants
+  policy -->|write| log
+  server -->|if allowed| fetch

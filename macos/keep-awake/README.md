@@ -1,5 +1,35 @@
 # keep-awake, for developers
 
+<!-- architecture:begin keep-awake -->
+
+## Architecture: sirven awake, keep the Mac awake while work is in flight
+
+Every hold names its work. The helper's one setting is turned on only while sirven holds the Mac awake, and off when the queue drains.
+
+![sirven awake, keep the Mac awake while work is in flight](../../docs/architecture/rendered/keep-awake.svg)
+
+Diagram source, generated from `docs/architecture/graph.mjs`:
+
+```mermaid
+flowchart LR
+  %% sirven awake, keep the Mac awake while work is in flight
+  agent(("Personal agent"))
+  cli["sirven awake"]
+  daemon["keep-awake daemon"]
+  subgraph g_system["system"]
+  assertion[/"macOS power assertion"/]
+  helper[/"signed helper (lid closed only)"/]
+  end
+  lease{{"12 hour lease"}}
+  agent -->|begin task| cli
+  cli --> daemon
+  daemon -->|hold| assertion
+  daemon -.->|ask once| helper
+  daemon -->|renew| lease
+```
+
+<!-- architecture:end keep-awake -->
+
 The program behind `sirven awake`, and the library the menu bar app links. For what it does and
 the helper's one-time approval, read the "Keep my Mac awake for my agent" section of the
 [top-level README](../../README.md). Inspired by Sleepless by itskoosh (MIT).

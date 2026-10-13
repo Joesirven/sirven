@@ -1,0 +1,21 @@
+flowchart LR
+  %% Plan-first installer
+  install["install.sh"]
+  subgraph g_check["check"]
+  preflight["lib/preflight.sh"]
+  questions["lib/questions.sh"]
+  end
+  plan["lib/plan.sh"]
+  review(("owner reviews plan"))
+  subgraph g_apply["apply"]
+  adopt["lib/adopt.sh"]
+  layout["lib/layout.sh"]
+  components["lib/components.sh"]
+  end
+  install --> preflight
+  preflight --> questions
+  questions -->|write plan| plan
+  plan --> review
+  review -->|approve| adopt
+  adopt --> layout
+  layout --> components

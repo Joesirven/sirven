@@ -1,5 +1,41 @@
 # Ride connector and the iPhone ride backend
 
+<!-- architecture:begin ride-demo -->
+
+## Architecture: ride-to-the-barber demo
+
+The demo replaces the ride partner backend with the plugged-in phone path. The policy engine still asks every question.
+
+![ride-to-the-barber demo](../../docs/architecture/rendered/ride-demo.svg)
+
+Diagram source, generated from `docs/architecture/graph.mjs`:
+
+```mermaid
+flowchart LR
+  %% ride-to-the-barber demo
+  subgraph g_person["person"]
+  owner(("Owner"))
+  agent(("Personal agent"))
+  end
+  subgraph g_core["core"]
+  contract["connectors/ride contract"]
+  policy["lib/policy_engine.py"]
+  end
+  phone["phone path"]
+  subgraph g_data["data"]
+  card[("booking card")]
+  audit[("lib/audit.sh")]
+  end
+  owner -->|take me to the barber| agent
+  agent -->|ride request| contract
+  contract -->|decide| policy
+  policy -->|allowed| phone
+  phone -->|write| card
+  contract -->|log| audit
+```
+
+<!-- architecture:end ride-demo -->
+
 `ride_connector/` is the sirven ride connector: the contract gateway an agent talks to
 (`docs/ride-connector-contract.md`, `schemas/v1/`). It serves `quote_ride`, `book_ride`,
 `cancel_ride`, and `get_ride`, mints every identifier, ranks and flags options, and validates

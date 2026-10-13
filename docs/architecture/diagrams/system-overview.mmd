@@ -1,0 +1,29 @@
+flowchart LR
+  %% System overview
+  subgraph g_person["person"]
+  owner(("Owner"))
+  agent(("Personal agent"))
+  end
+  subgraph g_core["core"]
+  runtime["lib/sirven_runtime"]
+  policy["lib/policy_engine.py"]
+  levels["levels/"]
+  audit["lib/audit.sh"]
+  kill["lib/kill_switch.sh"]
+  end
+  subgraph g_edge["edge"]
+  phone["lib/phone_bridge.py"]
+  connectors["connectors/ride"]
+  concierge["concierge-ops"]
+  end
+  tailscale["lib/tailscale.sh"]
+  owner -->|chat| agent
+  agent -->|request| runtime
+  runtime -->|ask| policy
+  policy -->|read grant| levels
+  policy -->|log| audit
+  runtime --> phone
+  runtime --> connectors
+  runtime --> concierge
+  runtime --> tailscale
+  owner -->|stop| kill
