@@ -476,6 +476,7 @@ OUTPUT_JOIN_SECONDS = 2
 LAUNCHER_FAILURES_BEFORE_TUNNEL_RESTART = 3
 LAST_OUTPUT_LINES = 5
 MOUNT_SECONDS = 180
+RETRYABLE_MOUNT_REFUSALS = ("image_not_mounted", "image_timeout")
 
 
 def tunnel_endpoint(lines):
@@ -783,7 +784,16 @@ class RunnerSupervisor:
         except Refusal as refusal:
             print("the tunnel did not come back: %s. trying again" % refusal.said, flush=True)
             return
-        self._mount_image()
+        try:
+            self._mount_image()
+        except Refusal as refusal:
+            if refusal.result not in RETRYABLE_MOUNT_REFUSALS:
+                raise
+            self.tunnel.stop(self.stop_seconds)
+            self.tunnel = None
+            print("the developer disk image did not mount after the tunnel restart: %s. the phone may be locked: "
+                  "unlock it and keep it plugged in. trying again" % refusal.said, flush=True)
+            return
         try:
             self.launcher = self._start_launcher()
         except Refusal as refusal:
@@ -1530,7 +1540,10 @@ def command_setup(team, bundle):
                         "the runner identifier is %s.xctrunner for the Xcode route, or the XTL- identifier for route A"
                         % bundle_text),
         (None, "every tunnel start, sirven mounts the developer disk image on the phone itself (pymobiledevice3 "
-               "mounter auto-mount), because a phone restart unmounts it. if the mount fails, the start stops and says why"),
+               "mounter auto-mount), because a phone restart unmounts it. the first mount downloads a disk image from "
+               "Apple and can take a few minutes. if the mount fails at the first start, the start "
+               "stops and says why. if the phone restarts while sirven runs, it comes back locked: unlock it, and sirven "
+               "retries the mount on its own"),
         ("on this Mac", "in another terminal: sirven phone status (the tunnel and the launcher should say running)"),
     ]
     print("WebDriverAgent setup plan. sirven only prints this; you run each step yourself.")

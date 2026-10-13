@@ -80,7 +80,7 @@ with open(log, "a") as handle:
     handle.write("mount %s %s\\n" % (sys.argv[3], sys.argv[4]))
 if mode == "already":
     print("the developer disk image is already mounted", flush=True)
-elif mode == "fail" or (mode == "fail-after-first" and earlier):
+elif mode == "fail" or (mode == "fail-after-first" and earlier) or (mode == "fail-second" and earlier == 1):
     print("DeveloperDiskImage.dmg was not found for this iOS version", flush=True)
     sys.exit(1)
 """
@@ -338,15 +338,20 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual(len(self.read_lines(self.mounts)), 1, "the mount must not be retried in a loop")
         self.assertEqual(self.read_lines(self.launches), [], "the launcher must not start without a mounted image")
 
-    def test_a_tunnel_restart_mounts_the_image_again_and_a_failed_mount_stops_the_runner(self):
+    def test_a_failed_mount_during_a_tunnel_restart_is_retried_and_the_runner_keeps_running(self):
         supervisor = self.supervisor(tunnel_lifetime=0.3, build_mounter=self.fake_mounter("fail-after-first"))
-        guard = threading.Timer(5, lambda: os.kill(os.getpid(), signal.SIGINT))
-        guard.start()
-        self.addCleanup(guard.cancel)
-        with self.assertRaises(phone_bridge.Refusal) as caught:
-            supervisor.run()
-        self.assertEqual(caught.exception.result, "image_not_mounted")
-        self.assertEqual(len(self.read_lines(self.mounts)), 2, "the image is mounted at the first start and at the restart")
+        printed = self.run_until_interrupt(supervisor, 1.5)
+        self.assertGreaterEqual(len(self.read_lines(self.mounts)), 3, "the restart must keep trying the mount")
+        self.assertIn("the phone may be locked: unlock it and keep it plugged in. trying again", printed)
+
+    def test_a_mount_that_fails_during_a_restart_then_succeeds_brings_the_runner_back(self):
+        supervisor = self.supervisor(tunnel_lifetime=0.3, build_mounter=self.fake_mounter("fail-second"))
+        printed = self.run_until_interrupt(supervisor, 1.5)
+        mounts = self.read_lines(self.mounts)
+        self.assertGreaterEqual(len(mounts), 3)
+        self.assertIn("the phone may be locked: unlock it and keep it plugged in. trying again", printed)
+        self.assertIn("the tunnel and the launcher are running again", printed)
+        self.assertGreaterEqual(len(self.read_lines(self.launches)), 2, "the launcher starts after the mount recovers")
 
     def test_a_dead_tunnel_restarts_the_tunnel_and_the_launcher_with_the_new_address(self):
         supervisor = self.supervisor(tunnel_lifetime=0.3, launcher_lifetime=300)
