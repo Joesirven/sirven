@@ -245,6 +245,15 @@ class RunnerTest(unittest.TestCase):
         printed = self.run_until_interrupt(supervisor, 0.5)
         self.assertIn("  | the runner is not installed on the phone", printed)
 
+    def test_a_tunnel_restart_for_any_reason_resets_the_quick_failure_count(self):
+        supervisor = self.supervisor()
+        supervisor.quick_failures = 2
+        with mock.patch.object(supervisor, "_start_tunnel"), \
+                mock.patch.object(supervisor, "_start_launcher", return_value=None), \
+                mock.patch.object(supervisor, "_record"), contextlib.redirect_stdout(io.StringIO()):
+            supervisor._restart_tunnel("the tunnel to the phone stopped")
+        self.assertEqual(supervisor.quick_failures, 0)
+
     def test_the_device_identifier_is_never_printed_as_last_output(self):
         class Finished:
             def lines(self):

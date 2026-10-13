@@ -689,7 +689,6 @@ class RunnerSupervisor:
             self.quick_failures = 0
         self.quick_failures += 1
         if self.quick_failures >= LAUNCHER_FAILURES_BEFORE_TUNNEL_RESTART:
-            self.quick_failures = 0
             self._restart_tunnel("the launcher failed %d times in a row without staying up; the tunnel may be "
                                  "holding a stale address, so the tunnel and the launcher start again"
                                  % LAUNCHER_FAILURES_BEFORE_TUNNEL_RESTART)
@@ -735,6 +734,7 @@ class RunnerSupervisor:
         return Child(self.build_launcher(self.bundle, *self.endpoint), self.clock)
 
     def _restart_tunnel(self, why):
+        self.quick_failures = 0
         uptime = self.tunnel.uptime() if self.tunnel is not None else 0
         stopped = (self.launcher, self.tunnel)
         for child in stopped:
