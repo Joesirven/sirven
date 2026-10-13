@@ -292,14 +292,29 @@ test_the_installer_run_from_its_copy_never_deletes_it() {
 }
 
 test_the_kept_copy_has_no_group_or_other_write_bits() {
-  local root="$TEST_TMP/root" copy mode
+  local root="$TEST_TMP/root" source copy mode
   copy="$root/var/lib/sirven/package"
-  export SIRVEN_PACKAGE_TAG=v0.2.0 SIRVEN_PACKAGE_SHA256=abc123
-  assert_status 0 install_sh --prefix "$root" --transport none
+  . "$REPO_DIR/lib/common.sh"
+  . "$REPO_DIR/lib/layout.sh"
+  mkdir -p "$root/var/lib/sirven" "$TEST_TMP/source"
+  source="$TEST_TMP/source"
+  for item in install.sh uninstall.sh bin lib levels project.json; do
+    cp -R "$REPO_DIR/$item" "$source/"
+  done
+  # the source is writable by others, as a checkout in a shared folder can be: the copy must not be
+  chmod 666 "$source/lib/layout.sh"
+  chmod 777 "$source/bin"
+  # a permissive umask would keep the group and other write bits, so only the explicit chmod removes them
+  umask 000
+  assert_status 0 layout_keep_package "$source" "$copy"
   # shellcheck disable=SC2012
   mode="$(ls -l "$copy/lib/layout.sh" | cut -c1-10)"
-  assert_eq "-" "$(printf '%s' "$mode" | cut -c6)" "group write"
-  assert_eq "-" "$(printf '%s' "$mode" | cut -c9)" "other write"
+  assert_eq "-" "$(printf '%s' "$mode" | cut -c6)" "group write on the kept file"
+  assert_eq "-" "$(printf '%s' "$mode" | cut -c9)" "other write on the kept file"
+  # shellcheck disable=SC2012
+  mode="$(ls -ld "$copy/bin" | cut -c1-10)"
+  assert_eq "-" "$(printf '%s' "$mode" | cut -c6)" "group write on the kept folder"
+  assert_eq "-" "$(printf '%s' "$mode" | cut -c9)" "other write on the kept folder"
 }
 
 test_a_copy_path_outside_the_state_directory_is_refused() {
