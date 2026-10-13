@@ -114,3 +114,43 @@ Reviewed `git diff d7cdf01 6eaa62d` (lib/phone_bridge.py, docs/phone-interface.m
 All must-fix and should-fix findings from the first review are resolved in the code. Two new should-fix items remain, both small and both reproduced: R1 (the device identifier is printed by the new last-output lines) and R2 (the documented checksum command uses a quoted tilde and always fails). Neither is a security hole or a hang, so there is no remaining must-fix item.
 
 **APPROVE**, on the condition that R1 and R2 are fixed before the real-phone run is documented as done (R1 is a one-line filter plus a test, R2 is a one-line document change).
+
+## Merge-condition check at 159f899
+
+Reviewed `git diff 9f9f0c0 159f899` (commits 031a67b, de5429f, 159f899) in a scratch worktree. Read only: I ran `pymobiledevice3 mounter auto-mount --help` and `apps list --help` and read the installed 11.28.2 source, and I did not contact the phone.
+
+| Condition | Result |
+|---|---|
+| M1: mount the developer disk image | **PASS** |
+| M2: route A runner identifier, setup without `--team` and `--bundle` | **PASS** |
+| M3: seven-day re-signing text | **PASS** |
+
+Runner tests in the foreground: `python3 -B -m unittest tests.phone.test_phone_runner` exits 0 (32 tests, OK, 12.6 seconds). I did not re-run `make test` or `make lint` for this check; the diff adds only Python, document and one shell test case (`test_setup_prints_the_xtool_route_without_team_or_bundle`).
+
+### M1: PASS
+
+- **Command and options.** `mounter_argv` is `pymobiledevice3 mounter auto-mount --rsd ADDRESS PORT`. The installed help lists `auto-mount` with `--xcode`, `--version` and the device option `--rsd HOST PORT`; no other option is needed.
+- **"Already mounted" is detected reliably.** In 11.28.2, `auto_mount_developer` raises `AlreadyMountedError` when `is_image_mounted("Developer")` is true (`services/mobile_image_mounter.py` lines 559 to 560), and the `auto-mount` command catches it and exits 0 (`cli/mounter.py` lines 199 to 203). Its own help says an already mounted image "succeeds -- scripts can run this unconditionally". sirven keys off the exit status only (`returncode != 0`), so it does not depend on any wording. The version is pinned in setup, so this holds for the pinned version; a different version should be rechecked.
+- **Timeout.** Yes: `MOUNT_SECONDS = 180`, passed to `subprocess.run(..., timeout=)`, which kills the child on expiry; a `TimeoutExpired` becomes the refusal `image_timeout`. An interrupt during the mount also kills the child (`subprocess.run` does this itself), so no mounter is orphaned by Ctrl-C.
+- **Refusal style.** `image_timeout` and `image_not_mounted` use the file's `Refusal(result, said, 503)` pattern like `tunnel_no_address`; the message says what to do (keep the phone plugged in and unlocked, start again) and includes the mounter's last 5 lines, filtered through the same `shown_line` that hides the `Identifier:` line (R1 stays fixed; `show_last_output` now shares the filter). `FileNotFoundError` reuses `MISSING_TOOL` (still the odd status argument `1`, finding 8, unchanged).
+- **Tests.** Four new tests with a fake mounter: mounted with the tunnel's address at start, already mounted counts as success, a failed mount refuses once without a retry loop and without starting the launcher, and a mount after a tunnel restart (with a failure on the second mount). They have a five second guard so a regression cannot hang. The existing restart test was adjusted to patch `_mount_image`.
+- **Docs and setup text agree** (document step 6 and the command table, setup plan last entry): the mount happens on every tunnel start because a phone restart unmounts it, and a failure stops the start.
+
+Remaining notes, none blocking:
+1. **A failed mount during a restart ends the whole supervisor** (`_restart_tunnel` calls `_mount_image` outside its `try`, and the refusal leaves `run`). It is deliberate, tested and documented, and it avoids a silent loop. But a phone that is replugged and still locked, or a slow first download, ends a supervisor that was otherwise self-healing. Consider treating a mount refusal during a restart like "the tunnel did not come back": print it and retry with the backoff, and keep the hard stop only for the first start. Nice to have.
+2. **The first mount downloads an image.** pymobiledevice3 fetches the image from its own repository and has Apple sign the personalization (noted in the acceptance review), and 180 seconds can be short on a slow link. Neither the document nor the setup plan says that the first start downloads anything, or that a repeat start continues. Add one sentence. Nice to have.
+3. A hard kill during the mount leaves the short-lived mounter running; it is not recorded in `runner.json`. Negligible.
+
+### M2: PASS
+
+- `command_setup` accepts `None` for both `--team` and `--bundle`, still validates them when given, and prints placeholders (`<your ten character Apple team identifier>`, `<a bundle name you own>`) in route B only. The usage line and the document say the options are needed only for route B. `python3 lib/phone_bridge.py setup` with no options prints the plan with exit 0 (checked), and `tests/unit/test_phone.sh` plus a Python test cover it.
+- Route A text says xtool rewrites the identifier, that it begins `XTL-` and ends `com.facebook.WebDriverAgentRunner.xctrunner` (matches the acceptance review's reading of xtool's source), and gives a way to find it again: `pymobiledevice3 remote start-tunnel --native`, then `pymobiledevice3 apps list --rsd ADDRESS PORT`. `apps list` exists in 11.28.2 and takes the same device options. The refusal in `command_start` now covers both routes. The `XTL-` form passes the identifier check (letters, digits, dot, hyphen).
+- The route A identifier format itself is still unproven on a real phone (the whole route is labelled experimental), so the real-phone test remains the proof.
+
+### M3: PASS
+
+The seven-day text appears in four places and agrees: README (free account lasts 7 days and is redone weekly, paid membership lasts a year), `docs/phone-interface.md` step 4 (both routes) and the route B bullet, the route A known limits, and the setup plan step 4. No place still says "one-time" for signing; the README now says "a sign and install", not "a one-time sign and install". The paid-membership figure of a year is Apple's rule and was not tested here.
+
+### Result
+
+**PASS** on M1, M2 and M3. No must-fix and no should-fix item arises from these three commits; notes 1 and 2 under M1 are nice to have. The overall verdict from the re-review stands: **APPROVE**, with the real-phone test still to come.
