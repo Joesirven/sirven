@@ -48,7 +48,9 @@ your Apple account. `--team TEAM --bundle BUNDLE` are needed only for route B, t
 2. On the phone: Settings > Privacy & Security > Developer Mode, on, then restart.
 3. On the Mac: install the pymobiledevice3 tool once with the Python tool installer, uv (needs
    Python 3.12 or newer, and no administrator password): `uv tool install pymobiledevice3==11.28.2`.
-4. On the Mac: sign and install the runner once, with ONE of the two routes below, not both.
+4. On the Mac: sign and install the runner, with ONE of the two routes below, not both. The
+   signature expires: a free Apple account signature lasts 7 days and must be redone weekly; a
+   paid Apple developer membership lasts a year. This applies to both routes.
    - **Route A, EXPERIMENTAL and not yet proven on a real phone.** xtool, a command-line tool,
      signs the runner with your Apple account and installs it. Install it with
      `brew install xtool-org/tap/xtool` (its app may ask to move into your Applications folder;
@@ -75,7 +77,8 @@ your Apple account. `--team TEAM --bundle BUNDLE` are needed only for route B, t
      WebDriverAgent from source at the commit iPhone-use pins, and does not use the download above.
      Clone it into `~/.sirven/WebDriverAgent-source`, then run `xcodebuild ... test` there with
      your own development team and a bundle name you own, and press Ctrl-C once the test starts on
-     the phone.
+     the phone. Route B's signature expires on the same schedule as route A: 7 days on a free
+     Apple account, a year on a paid membership.
 5. On the phone, the first time: trust your developer certificate (Settings > General, the device
    management page), and turn on the user interface automation switch under Settings > Developer.
 6. Run `SIRVEN_PHONE_RUNNER_BUNDLE=<runner identifier> sirven phone start` and leave it running.

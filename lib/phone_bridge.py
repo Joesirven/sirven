@@ -1499,7 +1499,9 @@ def command_setup(team, bundle):
         ("on the phone", "Settings > Privacy & Security > Developer Mode: on, then restart the phone"),
         ("on this Mac", "uv tool install pymobiledevice3==%s, with the Python tool installer, uv "
                         "(needs Python 3.12 or newer; no administrator password)" % PYMOBILEDEVICE3_VERSION),
-        ("on this Mac", "sign and install the runner once, with ONE of these two routes, not both:"),
+        ("on this Mac", "sign and install the runner, with ONE of these two routes, not both. the signature expires: "
+                        "a free Apple account signature lasts 7 days and must be redone weekly; a paid Apple developer "
+                        "membership lasts a year. this applies to both routes:"),
         (None, "route A, EXPERIMENTAL and not yet proven on a real phone: xtool signs the runner with your Apple "
                "account. first download the pinned runner:"),
         (None, "mkdir -p %s && curl -fL -o %s/runner.zip %s && echo '%s  %s/runner.zip' | shasum -a 256 -c - "
