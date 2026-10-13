@@ -1,21 +1,49 @@
 #!/usr/bin/env bash
-# build a development app bundle that carries sirven-keep-awake and its privileged helper, laid
-# out the way SMAppService expects. it builds and signs; it never registers the helper.
+# build the app bundle that carries sirven-keep-awake and its privileged helper, laid out the way
+# SMAppService expects. it builds and signs; it never registers the helper.
 #
-#   macos/keep-awake/scripts/build-app.sh [output folder]     (default: macos/keep-awake/.build/app)
+#   SIRVEN_TEAM_IDENTIFIER=<team> SIRVEN_SIGNING_IDENTITY="<certificate name>" \
+#     macos/keep-awake/scripts/build-app.sh [output folder]     (default: macos/keep-awake/.build/app)
 #
-# SIRVEN_SIGNING_IDENTITY names an Apple signing certificate for apps sold outside the App Store, in the keychain. without it
-# the bundle is signed ad hoc, which is enough to inspect the layout but not to register the helper:
-# the system only runs a registered daemon from a properly signed app.
+# SIRVEN_TEAM_IDENTIFIER is the ten-character identifier of the Apple developer team that signs the
+# app. find it with: security find-identity -v -p codesigning (the value in parentheses). it is
+# written into the helper's executable and into nothing else; the helper refuses every connection
+# without it, and this script refuses to build without it.
+#
+# SIRVEN_SIGNING_IDENTITY names the signing certificate in the keychain. ad hoc signing ("-") has no
+# team, so the helper could never be registered with it, and the script refuses it too.
 set -euo pipefail
 
 PACKAGE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 OUTPUT="${1:-$PACKAGE_DIR/.build/app}"
-IDENTITY="${SIRVEN_SIGNING_IDENTITY:--}"
+TEAM="${SIRVEN_TEAM_IDENTIFIER:-}"
+IDENTITY="${SIRVEN_SIGNING_IDENTITY:-}"
 APP="$OUTPUT/Sirven.app"
+
+[ -n "$TEAM" ] || { echo "SIRVEN_TEAM_IDENTIFIER is not set: the helper would refuse every connection. see the top of this script." >&2; exit 1; }
+[[ "$TEAM" =~ ^[A-Z0-9]{10}$ ]] || { echo "SIRVEN_TEAM_IDENTIFIER must be ten capital letters and digits" >&2; exit 1; }
+[ -n "$IDENTITY" ] && [ "$IDENTITY" != "-" ] || { echo "SIRVEN_SIGNING_IDENTITY must name a certificate in the keychain; ad hoc signing has no team" >&2; exit 1; }
+
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
 
 swift build --package-path "$PACKAGE_DIR" -c release
 BUILT="$(swift build --package-path "$PACKAGE_DIR" -c release --show-bin-path)"
+
+# the helper is linked again alone, with the team identifier in an Info.plist section of its own
+# executable. the section is part of the signed binary, so the value cannot be changed afterwards.
+cat >"$WORK/helper-info.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleIdentifier</key><string>xyz.sirven.keep-awake-helper</string>
+	<key>SirvenTeamIdentifier</key><string>$TEAM</string>
+</dict>
+</plist>
+PLIST
+swift build --package-path "$PACKAGE_DIR" -c release --product sirven-keep-awake-helper \
+  -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker "$WORK/helper-info.plist"
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Library/LaunchDaemons"
@@ -28,4 +56,11 @@ codesign --force --options runtime --identifier xyz.sirven.keep-awake-helper --s
   "$APP/Contents/MacOS/sirven-keep-awake-helper"
 codesign --force --options runtime --sign "$IDENTITY" "$APP"
 codesign --verify --deep --strict "$APP"
-echo "built $APP (signed with: $IDENTITY)"
+
+# the two checks that the helper will accept the app: the embedded value is there, and the
+# signature is by the same team. a mismatch means the helper would refuse the app, so stop here.
+HELPER="$APP/Contents/MacOS/sirven-keep-awake-helper"
+grep -a -q "<string>$TEAM</string>" "$HELPER" || { echo "the helper does not carry team $TEAM; refusing to continue" >&2; exit 1; }
+SIGNED_TEAM="$(codesign -dv --verbose=2 "$HELPER" 2>&1 | sed -n 's/^TeamIdentifier=//p' || true)"
+[ "$SIGNED_TEAM" = "$TEAM" ] || { echo "the helper is signed by team '${SIGNED_TEAM:-none}', not $TEAM; refusing to continue" >&2; exit 1; }
+echo "built $APP (team $TEAM, signed with: $IDENTITY)"
