@@ -52,7 +52,7 @@ Confirm the plan and the installer applies it: it creates the service user (this
 
 ## connect your agent
 
-Point your agent or muse at the new service user: each runtime gets its own login for that account. The installer never copies your personal credentials across. After that, your agent works inside the level you granted. The audit log already records the install and every grant change; live per-session and per-command logging ships after alpha through the forced-command wrapper (designed, not built yet).
+Point your agent or muse at the new service user: each runtime gets its own login for that account. The installer never copies your personal credentials across. After that, your agent works inside the level you granted. The audit log already records the install and every grant change; live per-session and per-command logging ships through the forced-command wrapper (designed, not built yet).
 
 ## check it any time
 
@@ -71,9 +71,9 @@ sudo bash install.sh revoke --all
 
 The kill switch. Revokes every grant in one shot.
 
-## honest alpha notes
+## known limitations, not built yet
 
-- Today the audit log covers the install record and grant changes. Once the forced-command wrapper lands after alpha, "every session and command you send is logged" becomes the accurate claim. Kernel-level auditing of everything the agent's processes do is designed, not built.
+- Today the audit log covers the install record and grant changes. Once the forced-command wrapper lands, "every session and command you send is logged" becomes the accurate claim. Kernel-level auditing of everything the agent's processes do is designed, not built.
 - macOS protects Desktop, Documents, and Downloads behind privacy prompts that a service account cannot answer. Grant paths outside those folders for now.
 - Tests so far prove plans, not effects. Real user creation is verified in throwaway environments only.
 - Friend invite (a friend's agent on your machine) ships last: read-only by default, with mandatory expiry.

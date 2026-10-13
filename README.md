@@ -1,6 +1,49 @@
 # sirven
 
-Secure access levels for your personal agent. Install it, own it, no hosted middleman.
+**Secure access levels for your personal agent.** Give your agent its own account on your machine, pick how much it can touch, see every grant, and take it all back with one command. No hosted middleman: the agent runs as a local user you own.
+
+```mermaid
+flowchart LR
+    you([You]) -->|pick a level and a folder| sirven[sirven installer]
+    sirven -->|creates| acct[Agent account<br/>a local service user]
+    sirven -->|writes| audit[(Audit record<br/>install and grant changes)]
+    agent([Your agent<br/>any runtime]) -->|logs in as| acct
+    acct -->|observer: read<br/>builder: read and write| folder[/The one folder you granted/]
+    you -.->|sirven grant inspect<br/>sirven grant rollback<br/>install.sh revoke --all| acct
+```
+
+## What you get
+
+| | |
+|---|---|
+| **Its own account** | The agent works as a dedicated local user. Your personal credentials are never copied across. |
+| **Three access levels** | `observer` reads the folder you grant, `builder` reads and writes it, `operator` is `builder` today, with owner-listed service restarts and log reads designed. None of them ever gets root or `sudo`. |
+| **Nothing granted by default** | A folder is granted only when you name it. System folders, your whole home folder, and credential folders such as `.ssh` are refused. |
+| **A way back** | `sirven grant inspect` shows what is in force. `sirven grant rollback` reverses the last change. `sudo bash install.sh revoke --all` revokes everything. |
+| **Plans before changes** | The installer prints its full plan first, and `--dry-run` changes nothing. |
+| **Works with what you run** | Already have an agent? sirven adopts what it finds (Tailscale, bb, an earlier run) and does not replace it. |
+
+## Quick start
+
+```bash
+git clone https://github.com/Joesirven/sirven.git
+cd sirven
+bash install.sh --dry-run        # read the plan first; this changes nothing
+sudo bash install.sh             # answer two questions: level, folder
+bash bin/sirven grant inspect    # see exactly what the agent can touch
+```
+
+Today the installer applies its plan only inside a Linux container run as root. On any other
+machine it refuses before changing anything, and `--dry-run` still shows the full plan. With the
+npm package (`npm install -g @joesirven/sirven`), `sirven` is on your path directly.
+
+Full walkthrough: [docs/WALKTHROUGH.md](docs/WALKTHROUGH.md).
+
+## What it does not do yet
+
+Stated plainly so you can trust the rest. Applying the plan to a regular Linux or macOS machine is not verified yet, so there the installer stops before any change: use `--dry-run`, or `--prefix` to apply into a fake root. The audit log covers the install and every grant change. Per-session and per-command logging goes through a forced-command wrapper that is designed and not built yet. Kernel-level auditing is designed and not built. The `operator` level's service restarts and log reads are designed and not built.
+
+## Read more
 
 - [docs/WALKTHROUGH.md](docs/WALKTHROUGH.md): install in three steps
 - [docs/PERMISSIONS.md](docs/PERMISSIONS.md): the access levels and what each one allows
