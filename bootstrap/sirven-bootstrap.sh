@@ -43,11 +43,32 @@ fail() {
   exit 1
 }
 
-# stop_installer STATUS: a signal stops the installer before its folder is deleted, so it never
-# keeps running from a folder that no longer exists.
+# process_tree PID: print PID and every process started under it, at any depth. a background command
+# in a non-interactive shell ignores interrupts, so a stop has to reach its children by number.
+process_tree() {
+  local child
+  printf "%s\n" "$1"
+  for child in $(ps -A -o pid= -o ppid= | awk -v parent="$1" '$2 == parent { print $1 }'); do
+    process_tree "$child"
+  done
+}
+
+# stop_installer STATUS: stop the installer and every process it started, then exit with STATUS. the
+# installer's running steps, such as python3 or useradd, must not finish after the installer that would
+# record them is gone. TERM first, a short grace period, then KILL for anything still alive.
 stop_installer() {
+  local pids pid waited=0 alive
   if [ -n "$SIRVEN_BOOTSTRAP_CHILD" ]; then
-    kill "$SIRVEN_BOOTSTRAP_CHILD" 2>/dev/null || true
+    pids="$(process_tree "$SIRVEN_BOOTSTRAP_CHILD")"
+    for pid in $pids; do kill -TERM "$pid" 2>/dev/null || true; done
+    while [ "$waited" -lt 30 ]; do
+      alive=""
+      for pid in $pids; do kill -0 "$pid" 2>/dev/null && alive=yes; done
+      [ -z "$alive" ] && break
+      sleep 0.1
+      waited=$((waited + 1))
+    done
+    for pid in $pids; do kill -KILL "$pid" 2>/dev/null || true; done
     wait "$SIRVEN_BOOTSTRAP_CHILD" 2>/dev/null || true
   fi
   exit "$1"

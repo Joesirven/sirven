@@ -17,8 +17,9 @@ On a mismatch it stops, says what it expected and what it downloaded, and runs n
 download also runs nothing. A script with no release pinned refuses to download at all.
 
 If the download is cut off partway, the script runs nothing and says so. If the script itself is
-stopped while the installer runs (a signal from a terminal or from `kill`), the installer is stopped
-too, before the folder is deleted.
+stopped while the installer runs (a signal from a terminal or from `kill`), the installer and every
+process it started, such as a running python3 or useradd step, are stopped too, before the folder is
+deleted.
 
 The script is `bootstrap/sirven-bootstrap.sh`. Read it before you run it.
 

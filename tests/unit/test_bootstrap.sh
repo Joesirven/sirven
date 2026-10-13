@@ -29,7 +29,12 @@ echo "fixture installer: $*"
 echo "package tag: ${SIRVEN_PACKAGE_TAG:-unset}"
 if [ -n "${FIXTURE_PIDFILE:-}" ]; then
   echo "$$" > "$FIXTURE_PIDFILE"
-  exec sleep 30
+  sleep 60 &
+  echo "$!" > "$FIXTURE_PIDFILE.child"
+  wait
+fi
+if [ -n "${FIXTURE_EXIT:-}" ]; then
+  exit "$FIXTURE_EXIT"
 fi
 FIXTURE
   tar -czf "$FIXTURE_ARCHIVE" -C "$TEST_TMP/fixture-release" sirven-v0.2.0
@@ -261,31 +266,67 @@ test_a_download_cut_off_in_its_last_line_runs_nothing() {
   done
 }
 
-# stopping the bootstrap stops the installer it started, before the folder the installer runs from is deleted.
-test_stopping_the_bootstrap_stops_its_installer_and_removes_the_folder() {
-  make_fake_curl
-  make_fixture_release
-  local file sum pid_file installer_pid status=0 waited=0
-  sum="$(bootstrap_sha256 "$FIXTURE_ARCHIVE")"
-  file="$(pinned_bootstrap signal.sh "v0.2.0" "$sum")"
-  mkdir -p "$TEST_TMP/tmp"
-  pid_file="$TEST_TMP/installer.pid"
-  env PATH="$TEST_TMP/bin:$PATH" FAKE_CURL_LOG="$TEST_TMP/curl.log" FAKE_CURL_FIXTURE="$FIXTURE_ARCHIVE" \
-    TMPDIR="$TEST_TMP/tmp" FIXTURE_PIDFILE="$pid_file" bash "$file" --dry-run < /dev/null > "$TEST_TMP/signal.out" 2>&1 &
-  local boot=$!
-  while [ ! -s "$pid_file" ] && [ "$waited" -lt 100 ]; do
+# process_gone PID: true once PID has exited, waiting up to three seconds for it.
+process_gone() {
+  local waited=0
+  while kill -0 "$1" 2>/dev/null; do
+    [ "$waited" -lt 30 ] || return 1
     sleep 0.1
     waited=$((waited + 1))
   done
-  assert_file_exists "$pid_file"
+}
+
+# stop_bootstrap_during_install SIGNAL STATUS: start a bootstrap whose installer starts a long-running
+# child, send SIGNAL to the bootstrap alone, and check that it exits with STATUS, that the installer and
+# its child are both gone, and that the folder it used is removed. job control makes the background
+# bootstrap a process group of its own, so SIGINT is not ignored the way a plain background job's is.
+stop_bootstrap_during_install() {
+  local signal="$1" expected="$2" file sum pid_file installer_pid child_pid status=0 waited=0 boot
+  make_fake_curl
+  make_fixture_release
+  sum="$(bootstrap_sha256 "$FIXTURE_ARCHIVE")"
+  file="$(pinned_bootstrap "stop-$signal.sh" "v0.2.0" "$sum")"
+  mkdir -p "$TEST_TMP/tmp"
+  pid_file="$TEST_TMP/installer-$signal.pid"
+  set -m
+  env PATH="$TEST_TMP/bin:$PATH" FAKE_CURL_LOG="$TEST_TMP/curl.log" FAKE_CURL_FIXTURE="$FIXTURE_ARCHIVE" \
+    TMPDIR="$TEST_TMP/tmp" FIXTURE_PIDFILE="$pid_file" bash "$file" --dry-run < /dev/null > "$TEST_TMP/stop-$signal.out" 2>&1 &
+  boot=$!
+  set +m
+  while [ ! -s "$pid_file.child" ] && [ "$waited" -lt 100 ]; do
+    sleep 0.1
+    waited=$((waited + 1))
+  done
+  assert_file_exists "$pid_file.child"
   installer_pid="$(cat "$pid_file")"
-  kill -TERM "$boot"
+  child_pid="$(cat "$pid_file.child")"
+  kill "-$signal" "$boot"
   wait "$boot" 2>/dev/null || status=$?
-  assert_eq 143 "$status" "a terminated bootstrap exits as terminated"
-  if kill -0 "$installer_pid" 2>/dev/null; then
-    fail "the installer $installer_pid is still running after the bootstrap was stopped"
-  fi
+  assert_eq "$expected" "$status" "a bootstrap stopped by SIG$signal exits with $expected"
+  process_gone "$installer_pid" || fail "the installer $installer_pid is still running after SIG$signal"
+  process_gone "$child_pid" || fail "the installer's child $child_pid is still running after SIG$signal"
   assert_eq "" "$(ls -A "$TEST_TMP/tmp")" "the folder is removed once the installer is stopped"
+}
+
+test_interrupting_the_bootstrap_stops_the_installer_and_its_children() {
+  stop_bootstrap_during_install INT 130
+}
+
+test_terminating_the_bootstrap_stops_the_installer_and_its_children() {
+  stop_bootstrap_during_install TERM 143
+}
+
+test_the_installers_own_exit_status_passes_through() {
+  make_fake_curl
+  make_fixture_release
+  local file sum
+  sum="$(bootstrap_sha256 "$FIXTURE_ARCHIVE")"
+  file="$(pinned_bootstrap exit-status.sh "v0.2.0" "$sum")"
+  mkdir -p "$TEST_TMP/tmp"
+  capture env PATH="$TEST_TMP/bin:$PATH" FAKE_CURL_LOG="$TEST_TMP/curl.log" FAKE_CURL_FIXTURE="$FIXTURE_ARCHIVE" \
+    TMPDIR="$TEST_TMP/tmp" FIXTURE_EXIT=7 bash "$file" --dry-run
+  assert_eq 7 "$CAPTURED_STATUS" "the installer's exit status is the bootstrap's"
+  assert_eq "" "$(ls -A "$TEST_TMP/tmp")" "the folder is removed after the installer exits"
 }
 
 # the release step, run on a throwaway repository with a tag and an install.sh. the archive it builds
