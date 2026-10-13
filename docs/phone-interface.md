@@ -41,8 +41,8 @@ agent  --HTTP, bearer token-->  sirven phone serve (127.0.0.1 only)
 
 ## Setup, once
 
-`sirven phone setup --team TEAM --bundle BUNDLE` prints the plan. sirven never runs it for you,
-because it signs software with your Apple account.
+`sirven phone setup` prints the plan. sirven never runs it for you, because it signs software with
+your Apple account. `--team TEAM --bundle BUNDLE` are needed only for route B, the Xcode route.
 
 1. On the phone: plug it in, unlock it, tap Trust.
 2. On the phone: Settings > Privacy & Security > Developer Mode, on, then restart.
@@ -64,6 +64,12 @@ because it signs software with your Apple account.
      `xtool install ~/.sirven/WebDriverAgent/WebDriverAgentRunner-Runner.app`. Known limits: a
      free Apple account signs for 7 days at a time, xtool uses Apple interfaces that are not
      public, and whether the test bundle inside the runner signs correctly is not verified yet.
+     xtool rewrites the runner's bundle identifier, so on the phone the runner is not under
+     `com.facebook.WebDriverAgentRunner.xctrunner`. xtool prints the identifier it installed it
+     under, which begins `XTL-` and ends with `com.facebook.WebDriverAgentRunner.xctrunner`. To find
+     it again: stop `sirven phone start`, run `pymobiledevice3 remote start-tunnel --native` in one
+     terminal and note the address and port it prints, then run `pymobiledevice3 apps list --rsd
+     ADDRESS PORT` in another and look for WebDriverAgentRunner.
      The evidence is in `docs/research/xtool-lighter-phone-path.md`.
    - **Route B, the fallback: full Xcode.** Used only for this step, never at run time. It builds
      WebDriverAgent from source at the commit iPhone-use pins, and does not use the download above.
@@ -72,8 +78,9 @@ because it signs software with your Apple account.
      the phone.
 5. On the phone, the first time: trust your developer certificate (Settings > General, the device
    management page), and turn on the user interface automation switch under Settings > Developer.
-6. Run `SIRVEN_PHONE_RUNNER_BUNDLE=BUNDLE.xctrunner sirven phone start` and leave it running.
-   The runner identifier is the bundle name you gave setup, with `.xctrunner` added.
+6. Run `SIRVEN_PHONE_RUNNER_BUNDLE=<runner identifier> sirven phone start` and leave it running.
+   For route B the runner identifier is the bundle name you gave setup, with `.xctrunner` added.
+   For route A it is the identifier xtool printed, from step 4.
    Each time the tunnel starts, sirven mounts the developer disk image on the phone itself
    (`pymobiledevice3 mounter auto-mount`), because a phone restart unmounts it. If the mount
    fails, the start stops and prints the mounter's last lines.
@@ -81,7 +88,7 @@ because it signs software with your Apple account.
 
 | Command | What it does |
 |---|---|
-| `SIRVEN_PHONE_RUNNER_BUNDLE=BUNDLE.xctrunner sirven phone start` | Starts the tunnel and the launcher and keeps both running. When one stops it is started again after 1 second, then 2, 4, and so on up to 30 seconds; a process that stays up for a minute starts over from 1 second. When the tunnel stops, or the launcher fails three times in a row without staying up, both start again with the tunnel's new address, and the developer disk image is mounted again first. If that mount fails, the start stops with the mounter's last lines. A stopped process's last lines are printed. Ctrl-C or closing the terminal stops both. A second start is refused while one is running, and leftover processes from an earlier run block a new start until you stop them. |
+| `SIRVEN_PHONE_RUNNER_BUNDLE=<runner identifier> sirven phone start` | Starts the tunnel and the launcher and keeps both running. When one stops it is started again after 1 second, then 2, 4, and so on up to 30 seconds; a process that stays up for a minute starts over from 1 second. When the tunnel stops, or the launcher fails three times in a row without staying up, both start again with the tunnel's new address, and the developer disk image is mounted again first. If that mount fails, the start stops with the mounter's last lines. A stopped process's last lines are printed. Ctrl-C or closing the terminal stops both. A second start is refused while one is running, and leftover processes from an earlier run block a new start until you stop them. |
 | `sirven phone status` | Also says whether the tunnel and the launcher are running, or not running. |
 
 ## Consent: opt in per session, owner only

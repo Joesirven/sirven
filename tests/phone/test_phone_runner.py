@@ -491,6 +491,15 @@ class RunnerTest(unittest.TestCase):
         self.assertIn("shasum -a 256 -c -", text)
         self.assertNotIn("Xcode > Settings", text)
 
+    def test_setup_prints_the_xtool_route_without_team_or_bundle(self):
+        with contextlib.redirect_stdout(io.StringIO()) as printed:
+            phone_bridge.command_setup(None, None)
+        text = printed.getvalue()
+        self.assertLess(text.index("route A"), text.index("route B"))
+        self.assertIn("XTL- and ends with com.facebook.WebDriverAgentRunner.xctrunner", text)
+        self.assertIn("pymobiledevice3 apps list --rsd ADDRESS PORT", text)
+        self.assertIn("SIRVEN_PHONE_RUNNER_BUNDLE=<runner identifier>", text)
+
     def test_start_is_listed_in_the_help(self):
         with contextlib.redirect_stdout(io.StringIO()) as printed:
             self.assertEqual(phone_bridge.main(["--help"]), 0)

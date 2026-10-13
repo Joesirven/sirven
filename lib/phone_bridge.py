@@ -13,8 +13,9 @@ multi-phone device-farm tier from the scope, which stays deferred.
 subcommands (bin/sirven phone passes its arguments here)
 
   detect                 is an iPhone plugged in, and has it trusted this Mac
-  setup --team TEAM --bundle BUNDLE
-                         print the WebDriverAgent setup plan. it only prints; the owner runs it
+  setup [--team TEAM] [--bundle BUNDLE]
+                         print the WebDriverAgent setup plan. it only prints; the owner runs it.
+                         the team and bundle are needed only for the Xcode route
   allow [--minutes N] [--allow-submit]
                          the owner opens a phone session. asks for a typed yes on a terminal
   stop                   the owner ends the phone session now
@@ -817,9 +818,9 @@ class RunnerSupervisor:
 def command_start():
     bundle = os.environ.get(RUNNER_BUNDLE_VARIABLE, "")
     if not re.fullmatch(r"[A-Za-z0-9.-]+", bundle):
-        fail("set %s to the runner's bundle identifier: the bundle name you gave sirven phone setup with --bundle, "
-             "with .xctrunner added, for example com.yourname.WebDriverAgentRunner.xctrunner" % RUNNER_BUNDLE_VARIABLE,
-             64)
+        fail("set %s to the runner's bundle identifier: for the Xcode route, the bundle name you gave sirven phone "
+             "setup with --bundle and .xctrunner added; for the xtool route, the XTL- identifier xtool printed "
+             "(sirven phone setup says how to find it again)" % RUNNER_BUNDLE_VARIABLE, 64)
     RunnerSupervisor(bundle).run()
 
 
@@ -1481,15 +1482,16 @@ def command_log(as_json):
 
 
 def command_setup(team, bundle):
-    if not team or not re.fullmatch(r"[A-Z0-9]{10}", team):
+    if team is not None and not re.fullmatch(r"[A-Z0-9]{10}", team):
         fail("--team needs your ten character Apple team identifier, shown on the membership page of your Apple "
              "developer account", 64)
-    if not bundle or not re.fullmatch(r"[A-Za-z0-9.-]+", bundle):
+    if bundle is not None and not re.fullmatch(r"[A-Za-z0-9.-]+", bundle):
         fail("--bundle needs a bundle name you own, like com.yourname.WebDriverAgentRunner", 64)
     home = os.path.join(os.path.expanduser("~"), ".sirven")
     runner_folder = os.path.join(home, "WebDriverAgent")
     source_folder = os.path.join(home, "WebDriverAgent-source")
-    runner_identifier = bundle + ".xctrunner"
+    team_text = team or "<your ten character Apple team identifier>"
+    bundle_text = bundle or "<a bundle name you own>"
     archive = "https://github.com/appium/WebDriverAgent/releases/download/%s/WebDriverAgentRunner-Runner.zip" \
         % WEBDRIVERAGENT_RELEASE
     steps = [
@@ -1506,6 +1508,11 @@ def command_setup(team, bundle):
                   runner_folder, runner_folder)),
         (None, "if shasum reports FAILED, stop: the download is not the release, and nothing was unzipped. "
                "otherwise follow route A in docs/phone-interface.md (xtool install, and what it can and cannot do yet)"),
+        (None, "route A: xtool rewrites the runner's identifier. it prints the identifier it installed the runner "
+               "under, which begins XTL- and ends with com.facebook.WebDriverAgentRunner.xctrunner. use exactly that "
+               "identifier below. to find it again later: stop sirven phone start, run pymobiledevice3 remote "
+               "start-tunnel --native in one terminal and note the address and port it prints, then run "
+               "pymobiledevice3 apps list --rsd ADDRESS PORT in another and look for WebDriverAgentRunner"),
         (None, "route B, the fallback: full Xcode, used only for this step and never at run time. it builds "
                "from source and does not use the download above:"),
         (None, "git clone %s %s && git -C %s checkout %s" % (WEBDRIVERAGENT_REPOSITORY, source_folder,
@@ -1513,11 +1520,13 @@ def command_setup(team, bundle):
         (None, "xcodebuild -project %s/WebDriverAgent.xcodeproj -scheme WebDriverAgentRunner "
                "-destination 'platform=iOS,name=<your phone>' -allowProvisioningUpdates DEVELOPMENT_TEAM=%s "
                "CODE_SIGN_STYLE=Automatic PRODUCT_BUNDLE_IDENTIFIER=%s test, then press Ctrl-C once the test "
-               "starts on the phone" % (source_folder, team, bundle)),
+               "starts on the phone" % (source_folder, team_text, bundle_text)),
         ("on the phone", "the first time: Settings > General, the device management page, "
                          "trust your developer certificate"),
         ("on the phone", "Settings > Developer: turn on the user interface automation switch"),
-        ("on this Mac", "SIRVEN_PHONE_RUNNER_BUNDLE=%s sirven phone start, and leave it running" % runner_identifier),
+        ("on this Mac", "SIRVEN_PHONE_RUNNER_BUNDLE=<runner identifier> sirven phone start, and leave it running. "
+                        "the runner identifier is %s.xctrunner for the Xcode route, or the XTL- identifier for route A"
+                        % bundle_text),
         (None, "every tunnel start, sirven mounts the developer disk image on the phone itself (pymobiledevice3 "
                "mounter auto-mount), because a phone restart unmounts it. if the mount fails, the start stops and says why"),
         ("on this Mac", "in another terminal: sirven phone status (the tunnel and the launcher should say running)"),
