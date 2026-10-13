@@ -206,14 +206,100 @@ test_a_checkout_install_records_the_copy_as_unpinned() {
   assert_contains "$(cat "$root/var/lib/sirven/package/PINNED-COPY")" "tag=unpinned"
 }
 
-test_rerun_keeps_the_copy_it_has() {
+test_rerun_from_the_same_release_leaves_the_copy_alone() {
   local root="$TEST_TMP/root" copy
   copy="$root/var/lib/sirven/package"
+  export SIRVEN_PACKAGE_TAG=v0.2.0 SIRVEN_PACKAGE_SHA256=abc123
   assert_status 0 install_sh --prefix "$root" --transport none
   printf 'marker\n' > "$copy/keep-me"
   assert_status 0 install_sh --prefix "$root" --transport none
   assert_contains "$CAPTURED_STDOUT" "applied 0 steps"
   assert_file_exists "$copy/keep-me"
+}
+
+test_rerun_from_a_new_release_replaces_the_copy() {
+  local root="$TEST_TMP/root" copy
+  copy="$root/var/lib/sirven/package"
+  export SIRVEN_PACKAGE_TAG=v0.2.0 SIRVEN_PACKAGE_SHA256=old
+  assert_status 0 install_sh --prefix "$root" --transport none
+  printf 'marker\n' > "$copy/keep-me"
+  export SIRVEN_PACKAGE_TAG=v0.3.0 SIRVEN_PACKAGE_SHA256=new
+  assert_status 0 install_sh --prefix "$root" --transport none
+  assert_contains "$CAPTURED_STDOUT" "applied 1 steps"
+  assert_contains "$(cat "$copy/PINNED-COPY")" "tag=v0.3.0"
+  assert_contains "$(cat "$copy/PINNED-COPY")" "sha256=new"
+  assert_no_file "$copy/keep-me"
+  assert_file_exists "$copy/lib/layout.sh"
+}
+
+test_a_checkout_rerun_replaces_a_pinned_copy_with_its_own_files() {
+  local root="$TEST_TMP/root" copy
+  copy="$root/var/lib/sirven/package"
+  export SIRVEN_PACKAGE_TAG=v0.2.0 SIRVEN_PACKAGE_SHA256=old
+  assert_status 0 install_sh --prefix "$root" --transport none
+  unset SIRVEN_PACKAGE_TAG SIRVEN_PACKAGE_SHA256
+  assert_status 0 install_sh --prefix "$root" --transport none
+  assert_contains "$(cat "$copy/PINNED-COPY")" "tag=unpinned"
+}
+
+test_a_failed_copy_leaves_no_package_folder_and_no_marker() {
+  local root="$TEST_TMP/root" source
+  source="$TEST_TMP/source"
+  . "$REPO_DIR/lib/common.sh"
+  . "$REPO_DIR/lib/layout.sh"
+  mkdir -p "$source"
+  for item in install.sh uninstall.sh bin lib levels project.json; do
+    cp -R "$REPO_DIR/$item" "$source/"
+  done
+  mkdir -p "$root/var/lib/sirven"
+  capture layout_keep_package "$source" "$root/var/lib/sirven/package"
+  assert_eq 1 "$CAPTURED_STATUS" "a source without components/ is an error"
+  assert_contains "$CAPTURED_STDERR" "the package has no components to keep"
+  assert_no_file "$root/var/lib/sirven/package"
+  assert_no_file "$root/var/lib/sirven/package.new"
+}
+
+test_a_failed_copy_keeps_the_old_copy_it_was_replacing() {
+  local root="$TEST_TMP/root" source copy
+  copy="$root/var/lib/sirven/package"
+  . "$REPO_DIR/lib/common.sh"
+  . "$REPO_DIR/lib/layout.sh"
+  export SIRVEN_PACKAGE_TAG=v0.2.0 SIRVEN_PACKAGE_SHA256=old
+  assert_status 0 install_sh --prefix "$root" --transport none
+  source="$TEST_TMP/source"
+  mkdir -p "$source"
+  for item in install.sh uninstall.sh bin lib levels project.json; do
+    cp -R "$REPO_DIR/$item" "$source/"
+  done
+  capture layout_keep_package "$source" "$copy"
+  assert_eq 1 "$CAPTURED_STATUS"
+  assert_contains "$(cat "$copy/PINNED-COPY")" "tag=v0.2.0"
+  assert_file_exists "$copy/lib/layout.sh"
+}
+
+test_the_installer_run_from_its_copy_never_deletes_it() {
+  local root="$TEST_TMP/root" copy
+  copy="$root/var/lib/sirven/package"
+  export SIRVEN_PACKAGE_TAG=v0.2.0 SIRVEN_PACKAGE_SHA256=abc123
+  assert_status 0 install_sh --prefix "$root" --transport none
+  rm -f "$copy/PINNED-COPY"
+  assert_status 0 env SIRVEN_OS_OVERRIDE=linux SIRVEN_TAILSCALE=none SIRVEN_BB=none \
+    "$BASH" "$copy/install.sh" --prefix "$root" --transport none --owner example --yes
+  assert_contains "$CAPTURED_STDOUT" "runs from its pinned copy"
+  assert_file_exists "$copy/lib/layout.sh"
+  assert_file_exists "$copy/levels/observer.json"
+  assert_file_exists "$copy/install.sh"
+}
+
+test_the_kept_copy_has_no_group_or_other_write_bits() {
+  local root="$TEST_TMP/root" copy mode
+  copy="$root/var/lib/sirven/package"
+  export SIRVEN_PACKAGE_TAG=v0.2.0 SIRVEN_PACKAGE_SHA256=abc123
+  assert_status 0 install_sh --prefix "$root" --transport none
+  # shellcheck disable=SC2012
+  mode="$(ls -l "$copy/lib/layout.sh" | cut -c1-10)"
+  assert_eq "-" "$(printf '%s' "$mode" | cut -c6)" "group write"
+  assert_eq "-" "$(printf '%s' "$mode" | cut -c9)" "other write"
 }
 
 test_a_copy_path_outside_the_state_directory_is_refused() {
@@ -227,4 +313,23 @@ test_a_copy_path_outside_the_state_directory_is_refused() {
   capture layout_keep_package "$source" "$TEST_TMP/not-a-package-copy"
   assert_eq 1 "$CAPTURED_STATUS"
   assert_contains "$CAPTURED_STDERR" "refusing to keep a copy"
+}
+
+test_a_checkout_rerun_is_idempotent_and_refreshes_after_an_edit() {
+  local root="$TEST_TMP/root" copy
+  copy="$root/var/lib/sirven/package"
+  unset SIRVEN_PACKAGE_TAG SIRVEN_PACKAGE_SHA256
+  assert_status 0 install_sh --prefix "$root" --transport none
+  assert_status 0 install_sh --prefix "$root" --transport none
+  assert_contains "$CAPTURED_STDOUT" "applied 0 steps"
+  # the copy is a snapshot: an edit to the source must reach it on the next run, not stay behind
+  cp -R "$REPO_DIR/lib" "$TEST_TMP/lib-copy"
+  printf '# edited\n' >> "$TEST_TMP/lib-copy/layout.sh"
+  mkdir -p "$TEST_TMP/checkout"
+  for item in install.sh uninstall.sh bin levels components project.json; do cp -R "$REPO_DIR/$item" "$TEST_TMP/checkout/"; done
+  cp -R "$TEST_TMP/lib-copy" "$TEST_TMP/checkout/lib"
+  assert_status 0 env SIRVEN_OS_OVERRIDE=linux SIRVEN_TAILSCALE=none SIRVEN_BB=none \
+    "$BASH" "$TEST_TMP/checkout/install.sh" --prefix "$root" --transport none --owner example --yes
+  assert_contains "$CAPTURED_STDOUT" "applied 1 steps"
+  assert_contains "$(cat "$copy/lib/layout.sh")" "# edited"
 }

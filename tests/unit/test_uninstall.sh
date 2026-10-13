@@ -144,3 +144,19 @@ test_a_folder_without_the_marker_is_kept_by_the_undo() {
   assert_contains "$CAPTURED_STDOUT$CAPTURED_STDERR" "kept $folder: it is not a copy this package made"
   assert_file_exists "$folder/file"
 }
+
+test_the_copy_from_a_newer_release_undoes_an_older_install() {
+  local root="$TEST_TMP/root" copy
+  copy="$root/var/lib/sirven/package"
+  export SIRVEN_PACKAGE_TAG=v0.2.0 SIRVEN_PACKAGE_SHA256=old
+  install_sh --prefix "$root" --level builder --path /home/example/project --transport none >/dev/null
+  export SIRVEN_PACKAGE_TAG=v0.3.0 SIRVEN_PACKAGE_SHA256=new
+  assert_status 0 install_sh --prefix "$root" --level builder --path /home/example/project --transport none
+  assert_contains "$(cat "$copy/PINNED-COPY")" "tag=v0.3.0"
+  assert_status 0 env SIRVEN_OS_OVERRIDE=linux "$BASH" "$copy/uninstall.sh" --dry-run --prefix "$root"
+  assert_contains "$CAPTURED_STDOUT" "remove the pinned copy of this package"
+  assert_no_file "$root/var/lib/sirven/install-record.tsv.missing"
+  assert_status 0 env SIRVEN_OS_OVERRIDE=linux "$BASH" "$copy/uninstall.sh" --prefix "$root"
+  assert_no_file "$root/var/lib/sirven"
+  assert_no_file "$root/etc/sirven"
+}

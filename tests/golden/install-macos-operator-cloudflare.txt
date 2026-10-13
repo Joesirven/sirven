@@ -19,7 +19,7 @@ package directories
     4. create /etc/sirven/grants for grant records (to do)
        $ mkdir -p <prefix>/etc/sirven/grants && chmod 0755 <prefix>/etc/sirven/grants
     5. keep a pinned copy of this package in /var/lib/sirven/package, so revoke, rollback, and uninstall need no download (to do)
-       # copies install.sh uninstall.sh bin lib levels components project.json; a re-run keeps the copy it already has
+       # copies install.sh uninstall.sh bin lib levels components project.json into a new folder, then moves it into place; a copy of another release is replaced
      note: later, without this repository: sudo bash /var/lib/sirven/package/install.sh revoke --all
 
 audit log
