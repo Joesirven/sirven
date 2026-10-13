@@ -245,6 +245,26 @@ class RunnerTest(unittest.TestCase):
         printed = self.run_until_interrupt(supervisor, 0.5)
         self.assertIn("  | the runner is not installed on the phone", printed)
 
+    def test_an_interrupt_right_after_a_child_starts_still_stops_that_child(self):
+        started = []
+        real_popen = subprocess.Popen
+
+        def record(*args, **kwargs):
+            process = real_popen(*args, **kwargs)
+            started.append(process)
+            self.addCleanup(lambda: (process.kill(), process.wait()))
+            return process
+
+        sleeping = [sys.executable, "-c", "import time; time.sleep(30)"]
+        fake_threading = mock.Mock(Lock=threading.Lock)
+        fake_threading.Thread.return_value.start.side_effect = KeyboardInterrupt
+        with mock.patch.object(phone_bridge.subprocess, "Popen", side_effect=record), \
+                mock.patch.object(phone_bridge, "threading", fake_threading):
+            with self.assertRaises(KeyboardInterrupt):
+                phone_bridge.Child(sleeping, time.monotonic)
+        self.assertEqual(len(started), 1)
+        self.assertIsNotNone(started[0].poll(), "the child must not keep running after the interrupt")
+
     def test_a_tunnel_restart_for_any_reason_resets_the_quick_failure_count(self):
         supervisor = self.supervisor()
         supervisor.quick_failures = 2

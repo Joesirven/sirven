@@ -552,12 +552,17 @@ class Child:
                                             text=True, errors="replace")
         except FileNotFoundError:
             raise Refusal("missing_tool", MISSING_TOOL, 1)
-        self.clock = clock
-        self.started = clock()
-        self.recent = collections.deque(maxlen=RECENT_LINES)
-        self.lock = threading.Lock()
-        self.reader = threading.Thread(target=self._drain, daemon=True)
-        self.reader.start()
+        try:
+            self.clock = clock
+            self.started = clock()
+            self.recent = collections.deque(maxlen=RECENT_LINES)
+            self.lock = threading.Lock()
+            self.reader = threading.Thread(target=self._drain, daemon=True)
+            self.reader.start()
+        except BaseException:
+            self.process.kill()
+            self.process.wait()
+            raise
 
     def _drain(self):
         for line in self.process.stdout:
