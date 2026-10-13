@@ -333,3 +333,23 @@ test_a_checkout_rerun_is_idempotent_and_refreshes_after_an_edit() {
   assert_contains "$CAPTURED_STDOUT" "applied 1 steps"
   assert_contains "$(cat "$copy/lib/layout.sh")" "# edited"
 }
+
+test_a_required_file_that_cannot_be_copied_fails_the_step_and_leaves_nothing() {
+  local root="$TEST_TMP/root" source
+  source="$TEST_TMP/source"
+  . "$REPO_DIR/lib/common.sh"
+  . "$REPO_DIR/lib/layout.sh"
+  # a root account reads unreadable files, so the failure cannot be made under root
+  [ "$(id -u)" -ne 0 ] || return 0
+  mkdir -p "$source"
+  for item in install.sh uninstall.sh bin lib levels project.json; do
+    cp -R "$REPO_DIR/$item" "$source/"
+  done
+  chmod 000 "$source/lib/layout.sh"
+  mkdir -p "$root/var/lib/sirven"
+  capture layout_keep_package "$source" "$root/var/lib/sirven/package"
+  assert_eq 1 "$CAPTURED_STATUS" "a file that cannot be read is a failed copy, not a finished one"
+  assert_contains "$CAPTURED_STDERR" "could not copy lib"
+  assert_no_file "$root/var/lib/sirven/package"
+  assert_no_file "$root/var/lib/sirven/package.new"
+}
