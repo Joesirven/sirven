@@ -474,6 +474,7 @@ RECENT_LINES = 200
 OUTPUT_JOIN_SECONDS = 2
 LAUNCHER_FAILURES_BEFORE_TUNNEL_RESTART = 3
 LAST_OUTPUT_LINES = 5
+MOUNT_SECONDS = 180
 
 
 def tunnel_endpoint(lines):
@@ -491,6 +492,14 @@ def tunnel_endpoint(lines):
 
 def launcher_argv(bundle, address, port):
     return ["pymobiledevice3", "developer", "dvt", "xcuitest", bundle, "--rsd", address, port]
+
+
+def mounter_argv(address, port):
+    return ["pymobiledevice3", "mounter", "auto-mount", "--rsd", address, port]
+
+
+def shown_line(line):
+    return not line.lstrip().startswith("Identifier:")
 
 
 def process_alive(process_id):
@@ -537,9 +546,7 @@ def interrupt(signum, frame):
 def show_last_output(children):
     for child in children:
         if child is not None:
-            for line in child.lines()[-LAST_OUTPUT_LINES:]:
-                if line.lstrip().startswith("Identifier:"):
-                    continue
+            for line in filter(shown_line, child.lines()[-LAST_OUTPUT_LINES:]):
                 print("  | %s" % line, flush=True)
 
 
@@ -621,6 +628,7 @@ class RunnerSupervisor:
     commands and the timing are arguments, so tests run small fake processes instead."""
 
     def __init__(self, bundle, tunnel_command=TUNNEL_COMMAND, build_launcher=launcher_argv,
+                 build_mounter=mounter_argv, mount_seconds=MOUNT_SECONDS,
                  backoff_start=BACKOFF_START_SECONDS, backoff_cap=BACKOFF_CAP_SECONDS,
                  stable_seconds=STABLE_SECONDS, poll_seconds=POLL_SECONDS,
                  tunnel_wait_seconds=TUNNEL_WAIT_SECONDS, stop_seconds=STOP_SECONDS,
@@ -628,6 +636,8 @@ class RunnerSupervisor:
         self.bundle = bundle
         self.tunnel_command = tunnel_command
         self.build_launcher = build_launcher
+        self.build_mounter = build_mounter
+        self.mount_seconds = mount_seconds
         self.tunnel_backoff = Backoff(backoff_start, backoff_cap, stable_seconds)
         self.launcher_backoff = Backoff(backoff_start, backoff_cap, stable_seconds)
         self.poll_seconds = poll_seconds
@@ -677,6 +687,7 @@ class RunnerSupervisor:
     def start(self):
         self.started = stamp(now())
         self._start_tunnel()
+        self._mount_image()
         self.launcher = self._start_launcher()
         self._record()
         print("the phone runner is up: the tunnel and the launcher are running. Ctrl-C stops both", flush=True)
@@ -735,6 +746,23 @@ class RunnerSupervisor:
                 )
             self.sleep(self.poll_seconds)
 
+    def _mount_image(self):
+        print("mounting the developer disk image on the phone; a phone restart undoes it", flush=True)
+        try:
+            result = subprocess.run(self.build_mounter(*self.endpoint), stdout=subprocess.PIPE,
+                                    stderr=subprocess.STDOUT, text=True, errors="replace",
+                                    timeout=self.mount_seconds)
+        except FileNotFoundError:
+            raise Refusal("missing_tool", MISSING_TOOL, 1)
+        except subprocess.TimeoutExpired:
+            raise Refusal("image_timeout", "the developer disk image did not mount within %d seconds; keep the "
+                          "phone plugged in and unlocked, then start again" % self.mount_seconds, 503)
+        if result.returncode != 0:
+            said = [line for line in result.stdout.splitlines() if shown_line(line)][-LAST_OUTPUT_LINES:]
+            raise Refusal("image_not_mounted", "the developer disk image did not mount on the phone; keep the phone "
+                          "plugged in and unlocked, then start again. the mounter said: %s"
+                          % ("; ".join(said) or "nothing"), 503)
+
     def _start_launcher(self):
         return Child(self.build_launcher(self.bundle, *self.endpoint), self.clock)
 
@@ -751,6 +779,11 @@ class RunnerSupervisor:
         self.sleep(self.tunnel_backoff.next_wait(uptime))
         try:
             self._start_tunnel()
+        except Refusal as refusal:
+            print("the tunnel did not come back: %s. trying again" % refusal.said, flush=True)
+            return
+        self._mount_image()
+        try:
             self.launcher = self._start_launcher()
         except Refusal as refusal:
             print("the tunnel did not come back: %s. trying again" % refusal.said, flush=True)
@@ -1485,6 +1518,8 @@ def command_setup(team, bundle):
                          "trust your developer certificate"),
         ("on the phone", "Settings > Developer: turn on the user interface automation switch"),
         ("on this Mac", "SIRVEN_PHONE_RUNNER_BUNDLE=%s sirven phone start, and leave it running" % runner_identifier),
+        (None, "every tunnel start, sirven mounts the developer disk image on the phone itself (pymobiledevice3 "
+               "mounter auto-mount), because a phone restart unmounts it. if the mount fails, the start stops and says why"),
         ("on this Mac", "in another terminal: sirven phone status (the tunnel and the launcher should say running)"),
     ]
     print("WebDriverAgent setup plan. sirven only prints this; you run each step yourself.")

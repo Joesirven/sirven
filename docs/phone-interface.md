@@ -74,11 +74,14 @@ because it signs software with your Apple account.
    management page), and turn on the user interface automation switch under Settings > Developer.
 6. Run `SIRVEN_PHONE_RUNNER_BUNDLE=BUNDLE.xctrunner sirven phone start` and leave it running.
    The runner identifier is the bundle name you gave setup, with `.xctrunner` added.
+   Each time the tunnel starts, sirven mounts the developer disk image on the phone itself
+   (`pymobiledevice3 mounter auto-mount`), because a phone restart unmounts it. If the mount
+   fails, the start stops and prints the mounter's last lines.
 7. From another terminal, `sirven phone status`.
 
 | Command | What it does |
 |---|---|
-| `SIRVEN_PHONE_RUNNER_BUNDLE=BUNDLE.xctrunner sirven phone start` | Starts the tunnel and the launcher and keeps both running. When one stops it is started again after 1 second, then 2, 4, and so on up to 30 seconds; a process that stays up for a minute starts over from 1 second. When the tunnel stops, or the launcher fails three times in a row without staying up, both start again with the tunnel's new address. A stopped process's last lines are printed. Ctrl-C or closing the terminal stops both. A second start is refused while one is running, and leftover processes from an earlier run block a new start until you stop them. |
+| `SIRVEN_PHONE_RUNNER_BUNDLE=BUNDLE.xctrunner sirven phone start` | Starts the tunnel and the launcher and keeps both running. When one stops it is started again after 1 second, then 2, 4, and so on up to 30 seconds; a process that stays up for a minute starts over from 1 second. When the tunnel stops, or the launcher fails three times in a row without staying up, both start again with the tunnel's new address, and the developer disk image is mounted again first. If that mount fails, the start stops with the mounter's last lines. A stopped process's last lines are printed. Ctrl-C or closing the terminal stops both. A second start is refused while one is running, and leftover processes from an earlier run block a new start until you stop them. |
 | `sirven phone status` | Also says whether the tunnel and the launcher are running, or not running. |
 
 ## Consent: opt in per session, owner only

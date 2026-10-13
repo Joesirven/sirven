@@ -68,6 +68,23 @@ print("RSD Port: 5001", flush=True)
 time.sleep(0.3)
 """
 
+# the fake mounter logs each call; "fail-after-first" fails only once the image was mounted before
+MOUNTER = """
+import sys
+log, mode = sys.argv[1], sys.argv[2]
+try:
+    earlier = len(open(log).read().splitlines())
+except OSError:
+    earlier = 0
+with open(log, "a") as handle:
+    handle.write("mount %s %s\\n" % (sys.argv[3], sys.argv[4]))
+if mode == "already":
+    print("the developer disk image is already mounted", flush=True)
+elif mode == "fail" or (mode == "fail-after-first" and earlier):
+    print("DeveloperDiskImage.dmg was not found for this iOS version", flush=True)
+    sys.exit(1)
+"""
+
 # the fake launcher writes its arguments to a log, then lives for its lifetime
 LAUNCHER = """
 import sys, time
@@ -86,6 +103,7 @@ class RunnerTest(unittest.TestCase):
         os.environ.pop("SIRVEN_USBMUX_SOCKET", None)
         self.tunnel_starts = os.path.join(self.folder, "tunnel-starts")
         self.launches = os.path.join(self.folder, "launches")
+        self.mounts = os.path.join(self.folder, "mounts")
         self.saved_interrupt = signal.signal(signal.SIGINT, signal.default_int_handler)
 
     def tearDown(self):
@@ -115,6 +133,14 @@ class RunnerTest(unittest.TestCase):
 
         return build
 
+    def fake_mounter(self, mode="ok"):
+        log = self.mounts
+
+        def build(address, port):
+            return [sys.executable, "-c", MOUNTER, log, mode, address, port]
+
+        return build
+
     def supervisor(self, tunnel_lifetime=300, launcher_lifetime=300, **overrides):
         options = dict(backoff_start=0.01, backoff_cap=0.04, stable_seconds=60, poll_seconds=0.02,
                        tunnel_wait_seconds=10, stop_seconds=5)
@@ -122,6 +148,7 @@ class RunnerTest(unittest.TestCase):
         if "tunnel_command" not in options:
             options["tunnel_command"] = self.fake_tunnel(tunnel_lifetime)
         options.setdefault("build_launcher", self.fake_launcher(launcher_lifetime))
+        options.setdefault("build_mounter", self.fake_mounter())
         return phone_bridge.RunnerSupervisor(BUNDLE, **options)
 
     def run_until_interrupt(self, supervisor, seconds, before=None, signal_number=signal.SIGINT):
@@ -268,7 +295,7 @@ class RunnerTest(unittest.TestCase):
     def test_a_tunnel_restart_for_any_reason_resets_the_quick_failure_count(self):
         supervisor = self.supervisor()
         supervisor.quick_failures = 2
-        with mock.patch.object(supervisor, "_start_tunnel"), \
+        with mock.patch.object(supervisor, "_start_tunnel"), mock.patch.object(supervisor, "_mount_image"), \
                 mock.patch.object(supervisor, "_start_launcher", return_value=None), \
                 mock.patch.object(supervisor, "_record"), contextlib.redirect_stdout(io.StringIO()):
             supervisor._restart_tunnel("the tunnel to the phone stopped")
@@ -284,6 +311,42 @@ class RunnerTest(unittest.TestCase):
             phone_bridge.show_last_output([Finished()])
         self.assertNotIn("00008110-000A1B2C3D4E5F60", output.getvalue())
         self.assertIn("  | RSD Address: fd35:4e2b:1c8f::1", output.getvalue())
+
+    def test_the_developer_disk_image_is_mounted_with_the_tunnel_address_at_start(self):
+        supervisor = self.supervisor(tunnel_lifetime=300, launcher_lifetime=300)
+        self.run_until_interrupt(supervisor, 0.5)
+        self.assertEqual(self.read_lines(self.mounts)[:1], ["mount 10.0.0.1 5001"])
+        self.assertEqual(len(self.read_lines(self.launches)), 1)
+
+    def test_an_image_that_is_already_mounted_counts_as_mounted(self):
+        supervisor = self.supervisor(tunnel_lifetime=300, launcher_lifetime=300,
+                                     build_mounter=self.fake_mounter("already"))
+        printed = self.run_until_interrupt(supervisor, 0.5)
+        self.assertIn("the phone runner is up", printed)
+        self.assertEqual(len(self.read_lines(self.launches)), 1)
+
+    def test_a_failed_mount_stops_the_runner_with_a_refusal_instead_of_looping(self):
+        supervisor = self.supervisor(tunnel_lifetime=300, build_mounter=self.fake_mounter("fail"))
+        guard = threading.Timer(5, lambda: os.kill(os.getpid(), signal.SIGINT))
+        guard.start()
+        self.addCleanup(guard.cancel)
+        with self.assertRaises(phone_bridge.Refusal) as caught:
+            supervisor.run()
+        self.assertEqual(caught.exception.result, "image_not_mounted")
+        self.assertIn("did not mount on the phone", caught.exception.said)
+        self.assertIn("DeveloperDiskImage.dmg", caught.exception.said)
+        self.assertEqual(len(self.read_lines(self.mounts)), 1, "the mount must not be retried in a loop")
+        self.assertEqual(self.read_lines(self.launches), [], "the launcher must not start without a mounted image")
+
+    def test_a_tunnel_restart_mounts_the_image_again_and_a_failed_mount_stops_the_runner(self):
+        supervisor = self.supervisor(tunnel_lifetime=0.3, build_mounter=self.fake_mounter("fail-after-first"))
+        guard = threading.Timer(5, lambda: os.kill(os.getpid(), signal.SIGINT))
+        guard.start()
+        self.addCleanup(guard.cancel)
+        with self.assertRaises(phone_bridge.Refusal) as caught:
+            supervisor.run()
+        self.assertEqual(caught.exception.result, "image_not_mounted")
+        self.assertEqual(len(self.read_lines(self.mounts)), 2, "the image is mounted at the first start and at the restart")
 
     def test_a_dead_tunnel_restarts_the_tunnel_and_the_launcher_with_the_new_address(self):
         supervisor = self.supervisor(tunnel_lifetime=0.3, launcher_lifetime=300)
