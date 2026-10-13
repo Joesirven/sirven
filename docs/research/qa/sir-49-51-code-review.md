@@ -2,9 +2,11 @@
 
 Reviewed: `git diff origin/main...HEAD` on branch `code-review-pinned-bootstrap-local-copy-python3-thr_s3x48myuig`,
 commits 4125b15 (pinned bootstrap), 612e17a (python3 placeholder guidance), 8e75f72 (kept copy of the
-package), 3381525 (documentation). Reviewed inline by one reviewer with a separate verification pass:
-every finding below was reproduced by running code, not only read. No workflow run was used (the
-capacity tool gave no reading for this machine), and nothing was run as root or against the real Mac.
+package), 3381525 (documentation). Reviewed inline by one reviewer, then a separate verification pass
+that re-ran each claim and re-checked every cited line number with `grep -n`. Each finding says how it was
+established: "reproduced" means a command was run and its output observed; "read" means code reading only.
+No workflow run was used (the capacity tool gave no reading for this machine), and nothing was run as
+root or against the real installer on this Mac.
 
 Bash used for all runs: `/bin/bash` 3.2.57 (macOS default).
 
@@ -23,14 +25,19 @@ must be fixed first: two in the kept copy (SIR-51) and one in the final line of 
 | Bootstrap, pinned fixture, `/bin/bash -s -- --dry-run < file` and `cat file \| bash -s -- --dry-run` | exit 0, installer ran once with the arguments, standard input not a terminal, no temp directory left behind. |
 | Bootstrap, mismatched pin | exit 1, "Nothing was unpacked or run", temp directory removed. |
 | Bootstrap, pin `a` followed by 63 `z` | accepted by the shape check, stopped at the mismatch check (fails closed). |
-| Bootstrap, SIGTERM and SIGHUP to the bootstrap while the installer runs | temp directory removed. SIGINT could not be tested honestly from a background job (a non-interactive shell ignores it there), so Ctrl-C cleanup is unverified. |
-| Truncation sweep, every prefix length of the pinned bootstrap piped to `bash -s -- --dry-run` | 5 of 4360 prefixes ran the installer; see M3. |
+| Bootstrap, SIGTERM and SIGHUP to the bootstrap while the installer runs | temp directory removed (but see the row below about the installer child). SIGINT could not be tested honestly from a background job (a non-interactive shell ignores it there), so Ctrl-C cleanup is unverified. |
+| Truncation sweep, every prefix length of the pinned bootstrap piped to `bash -s -- --dry-run` | 5 of 4360 prefixes ran the installer, 3 of them without the user's arguments; see must fix 3. |
+| Same sweep on a scratch copy with the argument guard from must fix 3 added | 2 of 4593 prefixes ran the installer: the complete script, with and without its final newline, both passing `--dry-run`. The guard works. |
+| Bootstrap, SIGTERM and SIGHUP sent to the bootstrap process alone | the installer child kept running after the temp directory it runs from was deleted; see should fix 5. |
+| Scratch-copy mutation: move the checksum comparison after `tar -x` | `tests/unit/test_bootstrap.sh`: 8 passed, 0 failed. The tests do not notice; see should fix 3. |
+| Scratch-copy mutation: remove `--proto '=https' --tlsv1.2` from `curl` | 8 passed, 0 failed. Not noticed. |
+| Scratch-copy mutation: disable the checksum comparison | 1 failed (`test_mismatched_checksum_runs_nothing`). That check is covered. |
 | `install.sh --dry-run` as macOS with a fake `xcode-select` (exit 2) and a fake placeholder `python3` | stopped with the xcode-select message; the fake `python3` was never run (marker file absent). |
 | `codeload.github.com/.../refs/heads/main` downloaded twice, and the `github.com/.../archive/...` form once | identical bytes (same checksum) in all three. |
 
 ## Must fix
 
-### M1. A failed or partial copy is marked complete, and the installer can delete itself
+### Must fix 1. A failed or partial copy is marked complete, and the installer can delete itself
 
 `lib/layout.sh:81-93` (`layout_keep_package`), run from `lib/plan.sh:407`.
 
@@ -42,9 +49,10 @@ copy.
 
 Reproduced: with `components/` missing from the source, `layout_keep_package` printed
 `cp: ... components: No such file or directory`, returned success, and left a directory holding
-`PINNED-COPY` without `components`. A full disk or an interrupted copy does the same.
+`PINNED-COPY` without `components`. A full disk does the same (read, not reproduced). A killed process
+cannot cause it, because it never reaches the marker write.
 
-Second symptom of the same code: `rm -rf "$destination"` at line 86 runs before the copy. Running the kept
+Second symptom of the same code: `rm -rf "$destination"` at line 87 runs before the copy. Running the kept
 copy's own `install.sh` when its marker is missing (marker deleted by hand, or removed by a damaged copy)
 makes the source and the destination the same folder. Reproduced: the run printed "applied 1 steps" and
 the copy was left holding only `PINNED-COPY`, with every other file deleted.
@@ -57,11 +65,12 @@ Fix, in `layout_keep_package`:
 3. Before the marker, check every name in `LAYOUT_PACKAGE_FILES` exists in the staging folder
    (`[ -e "$staging/$item" ] || return 1`).
 4. Write the marker last into staging, then `rm -rf "$destination" && mv "$staging" "$destination"`.
-5. Make the skip check at line 124 prove completeness too (see M2), not only that the marker exists.
+5. Make the skip check at line 124 prove completeness too (see must fix 2), not only that the marker
+   exists. This is also where a run from the copy itself must be recognized: see the next section.
 6. Add tests: a source missing one item must make the step fail and leave no `package` folder; running
    the installer from the copy must not shrink it.
 
-### M2. A re-run or upgrade keeps the old copy for ever; judged as must fix before release
+### Must fix 2. A re-run or upgrade keeps the old copy for ever; judged as must fix before release
 
 `lib/layout.sh:124` (the check `[ -f $copy/PINNED-COPY ]`) and `docs/BOOTSTRAP.md:80-81`.
 
@@ -76,15 +85,25 @@ exists to undo the install fails to undo it. The copy also stays frozen on the s
 (revoke) of the oldest release ever installed. The existing test `test_rerun_keeps_the_copy_it_has`
 (`tests/unit/test_install.sh`) asserts this behavior as intended; it must change.
 
-Fix: make the check compare identity. Replace the check with a command that succeeds only when the marker
+Fix: make the check compare identity, and handle the run-from-the-copy case explicitly. `plan_layout` is
+reached by every `install` run (`install.sh:214`, inside `build_install_plan`; `revoke` takes
+`plan_kill_switch` instead, so revoke is not affected). So the documented path `sudo bash
+/var/lib/sirven/package/install.sh` builds this step with `ROOT_DIR` equal to the copy. Run from there,
+`SIRVEN_PACKAGE_TAG` is unset, so a naive "marker must equal the current tag" check would read `unpinned`,
+see a mismatch with the stored tag, and try to refresh the copy from itself (a self-delete, or after the
+guard in must fix 1, a hard failure). Required behavior: when `ROOT_DIR` resolves to the copy, the step is
+done (check succeeds); and `install.sh` run from a copy should take its tag and checksum from its own
+marker when `SIRVEN_PACKAGE_TAG` is unset, so that nothing downstream relabels it `unpinned`.
+
+The check, otherwise:  Replace the check with a command that succeeds only when the marker
 holds the current tag and checksum and is not `unpinned`, for example
 `grep -qx "tag=${SIRVEN_PACKAGE_TAG:-unpinned}" marker && grep -qx "sha256=${SIRVEN_PACKAGE_SHA256:-unpinned}" marker`.
 For the `unpinned` (checkout) case, either always refresh, or compare the files with `diff -r`. A refresh
-goes through the staging-and-move path from M1, so a failed refresh keeps the old working copy. Update the
+goes through the staging-and-move path from must fix 1, so a failed refresh keeps the old working copy. Update the
 sentence in `docs/BOOTSTRAP.md` and the comment at `lib/layout.sh:126`, and replace the test with
 "a re-run from a different release replaces the copy", "a re-run from the same release leaves it".
 
-### M3. A pipe cut inside the last line runs the installer without the user's arguments
+### Must fix 3. A pipe cut inside the last line runs the installer without the user's arguments
 
 `bootstrap/sirven-bootstrap.sh:100` (`main ${1+"$@"}`).
 
@@ -106,7 +125,7 @@ a bootstrap truncated at `main ` into `bash -s -- --dry-run` and expects exit 1 
 
 ## Should fix
 
-### S1. The documentation promises a revoke that the installer refuses to apply
+### Should fix 1. The documentation promises a revoke that the installer refuses to apply
 
 `docs/BOOTSTRAP.md:73-77`, `lib/layout.sh:129` (the note "later, without this repository: sudo bash ...
 revoke --all"), `docs/WALKTHROUGH.md:73`.
@@ -117,7 +136,7 @@ does work (exit 0, the copy removes itself). Fix: say in `docs/BOOTSTRAP.md` tha
 in the alpha and uninstall is applied, and keep the `layout.sh:129` note worded as future ("later", as it
 is) but not as a working path.
 
-### S2. The pin depends on GitHub keeping its archive bytes stable, and `release.sh --tarball` can pin bytes GitHub never serves
+### Should fix 2. The pin depends on GitHub keeping its archive bytes stable, and `release.sh --tarball` can pin bytes GitHub never serves
 
 `bootstrap/release.sh:79-86` and `:44-48`, `bootstrap/sirven-bootstrap.sh:77`.
 
@@ -139,33 +158,46 @@ twice and compare, so a non-reproducible archive is caught at release time. Keep
 URL form in one place: they are written out in two files (`release.sh:23,81`, bootstrap line 19, 77) and
 only convention keeps them equal; add a test that extracts both and compares.
 
-### S3. Test gaps: several checks could be removed without a failing test
+### Should fix 3. Test gaps: several checks could be removed without a failing test
 
 `tests/unit/test_bootstrap.sh`, `tests/unit/test_install.sh`.
 
 - No test runs the bootstrap the way users do (`bash -s -- ARGS < file`); every test uses `bash FILE`.
-  So the truncation defect (M3), the standard-input handling and the `</dev/null` behavior are untested.
-- Mismatch test (`test_mismatched_checksum_runs_nothing`) proves the installer did not run, but it would
-  still pass if the checksum were compared after `tar -x`. The claim "checked before anything is
-  unpacked" has no test. Give the fixture a tarball that `tar` cannot read: with the check before the
+  So the truncation defect (must fix 3), the standard-input handling and the `</dev/null` behavior are untested.
+- Mismatch test (`test_mismatched_checksum_runs_nothing`) proves the installer did not run, but it still
+  passes when the checksum is compared after `tar -x` (mutation run: 8 passed). The claim "checked before
+  anything is unpacked" has no test. Give the fixture a tarball that `tar` cannot read: with the check before the
   unpack the error is the mismatch, otherwise it is a tar error.
 - The fake curl ignores its flags, so removing `--proto '=https' --tlsv1.2` (`sirven-bootstrap.sh:51`)
-  breaks nothing. Log the arguments and assert them.
+  breaks nothing (mutation run: 8 passed). Log the arguments and assert them.
 - There is no round trip: `release.sh` pins a fixture, then that pinned file runs against the same
   bytes. That test is the one that catches "release.sh computes a different checksum than the bootstrap".
 - No test for a temp directory left behind after success, mismatch or failed download.
-- SIR-51: no test for a partial copy, copy-from-copy (M1), refresh on a new release (M2, and the current
+- SIR-51: no test for a partial copy, copy-from-copy (must fix 1), refresh on a new release (must fix 2, and the current
   test asserts the opposite), or the mode of the copy.
 - Positive: the SIR-50 tests are sound. The placeholder test fails if the check is removed, because the
   fake `python3` leaves a marker file; the Homebrew and developer-tools-present cases are covered.
 
-### S4. Documentation accuracy for Macs
+### Should fix 4. Documentation accuracy for Macs
 
 `docs/WALKTHROUGH.md:36`. The sentence "the installer stops and asks you to run `xcode-select --install`"
 is true only with `--dry-run` or `--prefix`: on a real Mac without `--dry-run`, `install.sh` stops earlier
-with "applying to a real macos machine is not verified yet" (`lib/plan.sh:322`, called before preflight
-at `install.sh:289-293`). Since a Mac cannot apply at all yet, the kept copy of the package (SIR-51) is
+with "applying to a real macos machine is not verified yet" (`lib/plan.sh:322`, called at `install.sh:300`,
+before preflight at line 303). Since a Mac cannot apply at all yet, the kept copy of the package (SIR-51) is
 never created on a Mac either; say so in `docs/BOOTSTRAP.md` so nobody expects it.
+
+### Should fix 5. A direct kill of the bootstrap leaves the installer running without its files
+
+`bootstrap/sirven-bootstrap.sh:75` (`trap cleanup EXIT`) and line 97 (the `bash "$installer"` call).
+
+Reproduced: after SIGTERM or SIGHUP sent to the bootstrap process alone, the temp directory was removed
+(good) but the installer it had started kept running (`pgrep` still showed its `sleep`), now executing
+out of a deleted folder. A real installer calls `python3 "$ROOT_DIR/lib/..."` later in its apply, so it
+would fail partway through, possibly after changing the machine. A Ctrl-C or a closed terminal signals
+the whole process group, so the child dies too; this matters for a direct `kill` of the bootstrap only,
+which makes it should fix and not must fix. Fix: run the installer in the background with `&` and
+`wait`, remember its process number, and add `trap 'kill "$child" 2>/dev/null; cleanup; exit 143' TERM HUP`
+so the installer is stopped before its folder is deleted.
 
 ## Nice to have
 
@@ -177,15 +209,15 @@ never created on a Mac either; say so in `docs/BOOTSTRAP.md` so nobody expects i
   redirect cannot leave https (the checksum already covers integrity).
 - `release.sh:89`: `grep '/install\.sh$'` matches any depth; match `^[^/]*/install\.sh$`. Line 101 rewrites
   the bootstrap non-atomically (`cat > file`); write to a temp file in the same folder and `mv`.
-- `lib/layout.sh:84`: the guard `*/package` also matches `/package`; check the parent is `$STATE_DIR`.
+- `lib/layout.sh:83-86`: the guard `*/package` also matches `/package`; check the parent is `$STATE_DIR`.
   `cp -R` at line 90 also copies `__pycache__` folders and macOS extended attributes from a developer
   checkout; exclude them, and run `chmod -R go-w "$staging"` explicitly so the mode does not depend on the
   caller's umask. Today the copy is correct: parent `/var/lib/sirven` is mode 0700, copy files are 0644
   and folders 0755, owned by the installing user (root on a real install), so the agent account cannot
   modify the code root will run.
-- `lib/preflight.sh:78-83`: `xcode-select -p` can print a path that no longer exists (a deleted Xcode);
+- `lib/preflight.sh:75`: `xcode-select -p` can print a path that no longer exists (a deleted Xcode);
   then the placeholder is not caught and the later `python3 --version` hits the shim's error. Also test
-  `[ -d "$(xcode-select -p)" ]`. The "about 2 GB" figure at `preflight.sh:88` is not verified; say "a large
+  `[ -d "$(xcode-select -p)" ]`. The "about 2 GB" figure at `preflight.sh:89` is not verified; say "a large
   download" or cite a source.
 - `bin/sirven:150, 433, 469` call `python3` after only `command -v python3`, so on a Mac without the
   developer tools those entry points still open the system dialog. Not reachable until a Mac install can
@@ -201,15 +233,17 @@ never created on a Mac either; say so in `docs/BOOTSTRAP.md` so nobody expects i
    (lines 86-87) and before any execution; the empty pin refuses before any network call (lines 61-62);
    malformed pins refuse; a failed download stops via `|| fail`; `trap cleanup EXIT` is installed right
    after `mktemp` and removed the directory on success, mismatch, TERM and HUP; quoting is correct under
-   `set -u` on bash 3.2 (`${1+"$@"}`, no arrays). The only hole is M3. The unpinned shipped copy exits 1
+   `set -u` on bash 3.2 (`${1+"$@"}`, no arrays). The only hole is must fix 3. The unpinned shipped copy exits 1
    with a clear message and downloads nothing, so deploying it by mistake is a loud, safe outage.
 2. `release.sh` computes the checksum of the same URL form the bootstrap downloads, so it is correct in
    normal use; see S2 for `--tarball` and archive stability. It cannot write a wrong pin silently except
    through `--tarball`, and the awk step refuses unless exactly one of each pin line exists.
 3. SIR-51: location, mode and undo are sound (see Nice to have for the mode detail; uninstall from the
-   copy was run for real and worked, and a folder without the marker is kept). The refresh gap is M2, a
+   copy was run for real and worked, and a folder without the marker is kept). The refresh gap is must fix 2, a
    must fix. Old installs without a copy get one on the next run, because the marker is absent.
 4. SIR-50: detection asks `xcode-select -p` first and never runs the placeholder; verified end to end with
    fakes. The message is clear. Remaining edge cases are in Nice to have.
 5. Tests: see S3.
 6. `make test` and `make lint`: see the table above.
+
+CHANGES REQUIRED, reviewed at 3381525 (the last product commit on this branch; this report is committed on top of it).
