@@ -33,6 +33,10 @@ cd sirven
 
 Or from npm: `npm install -g @joesirven/sirven`, then run the `install.sh` inside the global package folder.
 
+On a Mac without the command line developer tools, the installer stops and asks you to run `xcode-select --install` first: the python3 that macOS ships is a placeholder until they are installed. Wait for that to finish, then run the installer again.
+
+The one-line command at `https://cli.sirven.xyz` installs a pinned release instead, checked against its checksum before anything runs. See [BOOTSTRAP.md](BOOTSTRAP.md).
+
 ## 2. run the installer
 
 ```bash

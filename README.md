@@ -50,6 +50,7 @@ Stated plainly so you can trust the rest. Applying the plan to a regular Linux o
 ## Read more
 
 - [docs/WALKTHROUGH.md](docs/WALKTHROUGH.md): install in three steps
+- [docs/BOOTSTRAP.md](docs/BOOTSTRAP.md): the one-line installer, its pinned release, and the copy kept after install
 - [docs/PERMISSIONS.md](docs/PERMISSIONS.md): the access levels and what each one allows
 - [docs/phone-interface.md](docs/phone-interface.md): let your agent drive your own plugged-in
   iPhone, opt in per session, every action logged in plain words
