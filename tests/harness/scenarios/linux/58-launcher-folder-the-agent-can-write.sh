@@ -21,7 +21,8 @@ check "it gives the kept-copy commands instead" bash -c 'grep -q "sudo bash /var
 check "it does not tell the owner to run the launcher" bash -c '! grep -q "sudo /usr/local/sbin/sirven" <<< "$0"' "$out"
 
 # the agent plants its own launcher, then the owner runs the command install advertised
-runuser -u agent -- bash -c 'printf "#!/bin/sh\ntouch /tmp/ROOT-RAN-LAUNCHER\n" > /usr/local/sbin/sirven; chmod +x /usr/local/sbin/sirven'
+# (it owns the folder, so it can remove a root-owned file there and put its own in its place)
+runuser -u agent -- bash -c 'rm -f /usr/local/sbin/sirven; printf "#!/bin/sh\ntouch /tmp/ROOT-RAN-LAUNCHER\n" > /usr/local/sbin/sirven; chmod +x /usr/local/sbin/sirven'
 advertised="$(grep -o 'sudo [^(]*revoke --all' <<< "$out" | head -1)"
 echo "advertised: $advertised"
 setsid runuser -u agent -- sleep 600 >/dev/null 2>&1 &
