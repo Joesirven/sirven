@@ -202,3 +202,68 @@ assert not h.default_is_leftover(ordinary, owner)
 assert not h.default_is_leftover(None, owner)
 print("ok")')"
 }
+
+test_a_python_without_sqlite3_is_handled_not_a_crash() {
+  assert_eq "ok" "$(SNAPSHOT_PY="$SNAPSHOT_PY" python3 -I -c '
+import importlib.util, os, sys, tempfile
+sys.modules["sqlite3"] = None          # import sqlite3 now raises ImportError, as on a minimal python3
+spec = importlib.util.spec_from_file_location("h", os.environ["SNAPSHOT_PY"])
+h = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(h)
+assert h.sqlite3 is None
+assert h.Failure in h.SNAPSHOT_ERRORS            # the tuple of errors can be evaluated without the module
+folder = tempfile.mkdtemp()
+path = os.path.join(folder, "snap.txt")
+open(path, "w").write("anything")
+messages = []
+class Warnings:
+    def add(self, message): messages.append(message)
+assert h.load_snapshot(path, "/srv/x", True, Warnings()) is None
+assert "no sqlite3 module" in messages[0] and "left where it is" in messages[0], messages
+assert os.path.exists(path)                       # not renamed, not deleted
+print("ok")' 2>&1)"
+}
+
+test_an_unusable_snapshot_is_set_aside_with_a_timestamp_and_never_deleted() {
+  assert_eq "ok" "$(snapshot_python '
+import os, tempfile
+folder = tempfile.mkdtemp()
+path = os.path.join(folder, "snap.txt")
+open(path, "w").write("not a database")
+messages = []
+class Warnings:
+    def add(self, message): messages.append(message)
+assert h.load_snapshot(path, "/srv/x", True, Warnings()) is None
+assert not os.path.exists(path)
+kept = [name for name in os.listdir(folder) if name.startswith("snap.txt.unusable-")]
+assert len(kept) == 1 and open(os.path.join(folder, kept[0])).read() == "not a database", kept
+assert "set aside as" in messages[0] and kept[0] in messages[0], messages
+# a second one the same second gets another name
+open(path, "w").write("again")
+assert h.load_snapshot(path, "/srv/x", True, Warnings()) is None
+assert len([n for n in os.listdir(folder) if n.startswith("snap.txt.unusable-")]) == 2
+print("ok")')"
+}
+
+test_a_locked_snapshot_is_busy_not_damaged() {
+  assert_eq "ok" "$(SIRVEN_SNAPSHOT_WAIT=0.2 snapshot_python '
+import os, sqlite3, tempfile
+folder = tempfile.mkdtemp()
+path = os.path.join(folder, "snap.txt")
+db = sqlite3.connect(path)
+db.execute("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT)")
+db.execute("INSERT INTO meta VALUES (\"format\", \"4\")")
+db.commit()
+db.close()
+holder = sqlite3.connect(path, isolation_level=None)
+holder.execute("BEGIN EXCLUSIVE")
+class Warnings:
+    def add(self, message): raise AssertionError("a busy snapshot must not be warned about as unusable")
+try:
+    h.load_snapshot(path, "/srv/x", True, Warnings())
+    raise AssertionError("expected SnapshotBusy")
+except h.SnapshotBusy as error:
+    assert "left untouched" in str(error)
+assert os.path.exists(path) and [n for n in os.listdir(folder)] == ["snap.txt"]
+print("ok")')"
+}

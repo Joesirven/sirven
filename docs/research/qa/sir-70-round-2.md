@@ -105,3 +105,15 @@ Against 2211d8f: scenario 22 fails 6 assertions, 23 fails 3, 24 fails 5, 25 fail
 | link-swap warning | now covers folders that held a list; a swapped folder with no list is not followed, and not named. Scenarios 07 and 15 give the swapped folder a default list of its own; scenario 07 also swaps a plain folder and checks its target is unchanged. | 07, 15 |
 
 Snapshots written by earlier versions of this package are not read (undo removes the grant's entries and warns, as for a missing snapshot).
+
+# Round 6 (re-review 5 of fa208c7: four should-fix items)
+
+| Item | Change | Test |
+| --- | --- | --- |
+| 1 no sqlite3: install failed at step 19 with the account locked | the Linux preflight imports sqlite3 and refuses with the package to install, before any change (exit 1, as a missing python3) | scenario 28 |
+| 2 `sqlite3.Error` evaluated with sqlite3 None | the tuple of errors is built once (`SNAPSHOT_ERRORS`); a snapshot python3 cannot read is warned about, the grant's entries are removed, the file is left where it is | scenario 28, unit test |
+| 3 corrupt after a valid header | a quick integrity check at open, and lookups that meet a bad page switch to "without the snapshot" mid-walk: warn, audit event, set aside, finish (exit 0) | scenario 29 (6,000-row snapshot, middle pages overwritten), unit test |
+| 4 a locked snapshot fell back and deleted the intact file | `SnapshotBusy` after a bounded wait (`SIRVEN_SNAPSHOT_WAIT`, default 30 s): the step fails (exit 4 from uninstall), file untouched, message says how to go on; the same command then finishes and puts the owner's lists back | scenario 29, unit test |
+| every unusable snapshot | renamed aside as `.unusable-TIMESTAMP` (never deleted) and the new name printed | scenario 29, unit test |
+
+Against fa208c7: scenario 28 fails 8 assertions, scenario 29 fails 14.

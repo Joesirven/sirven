@@ -280,6 +280,18 @@ the kill switch reads it to know what to remove.
   of its own is not followed either, but is not named in the audit log. snapshots written by earlier versions of this
   package (a text format) are not read: undo treats them as missing, removes the grant's entries and warns.
 
+  **a snapshot that cannot be used.** the Linux preflight refuses a python3 without the sqlite3 module before any
+  change (install the python3 standard library package; `python3-minimal` without the recommended packages leaves it
+  out). when a snapshot is checked as it is opened (a quick integrity check of the whole file) and found damaged, in
+  its header or in its middle pages, or goes bad during the walk, undo removes the grant's entries anyway, warns
+  loudly (also as an audit `warning` event), and renames the file aside as `NAME.unusable-TIMESTAMP`, printing the new
+  name; it is never deleted, and it is a sqlite file whose `entries` table holds the lists. what is lost is only the
+  lists the folder had before the grant (an owner's own default list, a mask): they are not put back, and the warning
+  says so. a snapshot that python3 cannot read for lack of the module is left where it is, and the same command works
+  once the module is installed. a snapshot locked by another process is not unusable: undo waits
+  (`SIRVEN_SNAPSHOT_WAIT` seconds, default 30), then fails with the file untouched and says to end that process and
+  run the same command again; nothing is removed, the account stays locked until it does.
+
   **memory.** the walk keeps no path per open folder and no listing for a folder it let go of: a folder is a
   few small values and its own name, the path is built only when something is printed, and a let-go folder is
   listed again (sorted, resuming after the last name read) when it is reopened. problems are counted and only
