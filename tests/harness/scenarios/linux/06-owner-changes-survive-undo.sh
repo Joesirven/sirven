@@ -40,6 +40,7 @@ check "root's chown and chmod stayed (700 neighbor)" bash -c '[ "$(stat -c "%a %
 check "root's chmod 700 on the pass-through parent stayed" bash -c '[ "$(stat -c "%a %U:%G" /srv)" = "700 root:root" ]'
 check "paths the owner did not touch are as they were (644 and 755)" \
   bash -c '[ "$(stat -c %a /srv/work/sub/keep)" = 644 ] && [ "$(stat -c %a /srv/work)" = 755 ] && [ "$(stat -c %a /srv/work/sub)" = 755 ]'
+# a guard for the new walk, not a defect of 66e31fe (setfacl -b reached them): pipes and sockets are never opened
 check "the pipe and the socket kept no entry for the agent" \
   bash -c '! getfacl -n -p /srv/work/pipe /srv/work/sock | grep -Eq "^(default:)?user:[0-9]+:"'
 check "no permission list is left anywhere under /srv" bash -c '[ "$(python3 -I "$0/tests/harness/lib/aclraw.py" /srv | grep -vc " - -$")" = 0 ]' "$SRC"

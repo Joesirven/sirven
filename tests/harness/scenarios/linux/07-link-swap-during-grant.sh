@@ -20,6 +20,8 @@ check "the agent swaps a folder for a link to /opt/victim" \
   runuser -u agent -- sh -c 'mv /srv/work/sub /srv/work/sub.old && ln -s /opt/victim /srv/work/sub'
 
 check_exit "uninstall applies" 0 bash /var/lib/sirven/package/uninstall.sh
+check "the agent's processes are ended and its account expired before the first list is put back" \
+  bash -c 'stop="$(grep -n "end every process of agent and expire" <<< "$0" | head -1 | cut -d: -f1)"; put="$(grep -n "put back the access control lists" <<< "$0" | head -1 | cut -d: -f1)"; [ -n "$stop" ] && [ -n "$put" ] && [ "$stop" -lt "$put" ]' "$LAST_OUTPUT"
 world_unchanged "the link target is exactly as it was: owner, mode, and lists" aclraw_attributes /tmp/victim.before /opt/victim
 check "the link target is still root 700" bash -c '[ "$(stat -c "%a %U:%G" /opt/victim)" = "700 root:root" ]'
 check "the moved folder itself was cleaned (no entry for the agent left)" \
