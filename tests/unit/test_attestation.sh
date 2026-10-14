@@ -76,6 +76,16 @@ test_peer_accepts_then_refuses_a_replay() {
   assert_contains "$CAPTURED_STDOUT" '"reason": "replayed"'
 }
 
+test_peer_verify_removes_a_lock_left_by_a_dead_process() {
+  have_node || return 0
+  setup_roles
+  attest sign --dir "$TEST_TMP/originator" --audience "$(cat "$TEST_TMP/peer/peer-identifier")" --domain shop.example.com --bytes 100 > "$TEST_TMP/envelope.json"
+  : > "$TEST_TMP/peer/verify.lock"
+  touch -t 200001010000 "$TEST_TMP/peer/verify.lock"
+  assert_status 0 attest peer verify --dir "$TEST_TMP/peer" --host shop.example.com --bytes 100 --envelope "$TEST_TMP/envelope.json"
+  assert_no_file "$TEST_TMP/peer/verify.lock"
+}
+
 test_peer_refuses_unsigned_wrong_domain_expired_and_tampered() {
   have_node || return 0
   setup_roles

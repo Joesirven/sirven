@@ -12,12 +12,14 @@ run with: python3 -m unittest discover -s tests/peer_routing
 
 import base64
 import calendar
+import hashlib
 import json
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
@@ -200,6 +202,37 @@ class EndToEnd(unittest.TestCase):
         envelope = self.envelope()
         self.assertEqual(engine.ALLOW_PEER_CARRIER, self.carry(envelope)["action"])
         self.assertEqual("attestation_replayed", self.carry(envelope)["code"])
+
+    def test_a_replay_arriving_during_the_first_verify_is_refused(self):
+        # the first verify holds the peer's verify lock after it has read the nonce memory
+        # (SIRVEN_ATTESTATION_TEST_HOLD_MS). the second verify of the same envelope starts only
+        # once the first is inside that step. with the lock it waits, sees the nonce, and is
+        # refused. without the lock it reads the memory before the first writes it and is accepted.
+        state = tempfile.mkdtemp(dir=self.scratch)
+        peer = os.path.join(state, "peer")
+        domains = os.path.join(state, "registry-domains.txt")
+        shutil.copytree(os.path.join(self.state, "peer"), peer)
+        shutil.copy(os.path.join(self.state, "registry-domains.txt"), domains)
+        data = json.dumps(self.envelope()).encode("utf-8")
+        command = ["node", ATTESTATION_COMMAND, "peer", "verify", "--dir", peer, "--host", RIDES,
+                   "--bytes", str(len(REQUEST)), "--request-digest", hashlib.sha256(REQUEST).hexdigest(),
+                   "--allowlist", domains]
+        clock = dict(os.environ, SIRVEN_ATTESTATION_NOW=str(NOW))
+        first = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                 env=dict(clock, SIRVEN_ATTESTATION_TEST_HOLD_MS="2000"))
+        first.stdin.write(data)
+        first.stdin.close()
+        marker = os.path.join(peer, "verify.paused")
+        deadline = time.time() + 20
+        while not os.path.exists(marker) and time.time() < deadline:
+            time.sleep(0.01)
+        self.assertTrue(os.path.exists(marker), "the first verify never reached its locked step")
+        second = subprocess.run(command, input=data, capture_output=True, env=clock, timeout=60)
+        first_err = first.stderr.read()
+        first.wait(timeout=60)
+        self.assertEqual(0, first.returncode, first_err.decode())
+        self.assertEqual(3, second.returncode, second.stdout.decode())
+        self.assertEqual("replayed", json.loads(second.stdout)["reason"])
 
     def test_an_envelope_with_a_forged_signature_is_refused(self):
         envelope = dict(self.envelope())
