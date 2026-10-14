@@ -55,3 +55,30 @@ exit 0 (the shell linter is not installed, so only syntax was checked).
   agent first, so no path is followed in the grant direction either. What is still by path is read only (probes that
   decide a step is already done).
 - That `usermod --expiredate 1 --lock` stops SSH key logins: the harness runs no SSH server.
+
+# Round 3 (re-review of 1ce7450)
+
+The re-review (`git show 6dfea02:docs/research/qa/sir-70-review.md`, "Re-review" section) found two must-fix items and six
+should-fix items. All are done on this branch; scenarios 16 to 21 are new.
+
+| Item | Change | Scenario |
+| --- | --- | --- |
+| A the agent can block a step down or a rollback | The refusal is exact: another account's (or a named group's) entry with bits outside the current mask, on a path the agent does not own. The agent's and the owner's entries and the group entry are not counted; the grant narrows the group entry and the other named entries to the old mask before it raises the mask, so a re-grant never switches on what an owner's chmod or a narrow mask switched off. No exemption for rollback. The message names `setfacl -x`. | 16 |
+| B a deep tree breaks undo | The walk is iterative, keeps the deepest 48 folders open, reopens through `..` with a device and inode check, raises the soft descriptor limit, caps at 30,000 levels (reported by name), turns every exception into `error:` and a `recovery:` line. The snapshot records name and parent, not whole paths. | 17 |
+| 1 re-run after a crash leaves the account expired | the release step is not done while its marker exists | 18 |
+| 2 a failed run does not say the account is locked | install, rollback and uninstall print that, and how to give the account back | unit tests (a failure mid-grant cannot be made inside the harness container: no way to mount a read-only folder) |
+| 3 one kill pass | `quiesce` repeats until the agent has no process, at most 20 times | 19 |
+| 4 a partial recursive grant judged done | the grant checks read the whole tree (`verify-access`, `verify-default`); the mask is not compared | 18 |
+| 5 repair needs the account | `repair` with the account gone removes what an old undo left, lists it first, `--dry-run` lists only | 20 |
+| 6 in-place upgrade refused | the refusal names `sirven grant repair`, then the old `uninstall.sh`, then install; `sirven grant repair` is new and the whole path is a scenario | 21 |
+
+One deliberate difference from the re-review's wording of A: the group entry is not refused. A mask narrower than the group entry
+is the state an owner's `chmod 600` leaves, and refusing it would block every rollback after such a chmod (a round 1 behaviour the
+re-review accepted). The grant clears the group bits the mask switched off instead, so the group stays shut out. Foreign named
+entries are still refused when they exceed the mask, as the re-review asked.
+
+Against 1ce7450: scenario 16 fails 8 assertions, 17 fails 3, 18 fails 6, 19 fails 1 (it is probabilistic: a forking loop
+survives one kill pass in some runs only), 20 fails 6, 21 fails 3. A randomised comparison of `grant-access` and `grant-default` with
+`setfacl` on 48 random trees (modes, special bits, pipes, five permission sets) matched exactly. Not done from the nice-to-have list:
+the openssh-server image change (so the lock-and-expire claim stays unproven in this harness), the hard-link sysctl warning, and
+the narrower default-list removal.
