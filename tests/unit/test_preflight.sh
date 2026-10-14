@@ -184,6 +184,7 @@ make_placeholder_python() {
 # make_xcode_select EXIT_STATUS: a fake xcode-select; 2 is what it says with no developer tools.
 make_xcode_select() {
   mkdir -p "$TEST_TMP/bin"
+  # shellcheck disable=SC2016 # the $1 is written into the fake xcode-select script, to expand when it runs
   printf '#!/bin/sh\n[ "$1" = -p ] || exit 1\nexit %s\n' "$1" > "$TEST_TMP/bin/xcode-select"
   chmod +x "$TEST_TMP/bin/xcode-select"
 }

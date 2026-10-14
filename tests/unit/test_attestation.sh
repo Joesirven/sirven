@@ -32,7 +32,7 @@ setup_roles() {
 }
 
 file_mode() {
-  if stat -f '%Lp' "$1" >/dev/null 2>&1; then stat -f '%Lp' "$1"; else stat -c '%a' "$1"; fi
+  if stat -c '%a' "$1" >/dev/null 2>&1; then stat -c '%a' "$1"; else stat -f '%Lp' "$1"; fi
 }
 
 test_attestation_library() {

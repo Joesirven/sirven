@@ -21,8 +21,8 @@ set -euo pipefail
 SIRVEN_REPOSITORY="Joesirven/sirven"
 
 # release pin, written by bootstrap/release.sh: the git tag, and the checksum of its archive.
-SIRVEN_PINNED_TAG=""
-SIRVEN_PINNED_SHA256=""
+SIRVEN_PINNED_TAG="v0.1.0"
+SIRVEN_PINNED_SHA256="556ce5fb658c6d6f1e0fa74de39c4d6c4508c61f65ac51dd52c3feda914a2718"
 
 # the arguments as they were given. main checks them again before it runs anything, so a download
 # cut off in its last line can never run the installer with different arguments.
@@ -135,7 +135,11 @@ main() {
   mkdir "$SIRVEN_BOOTSTRAP_DIR/unpacked"
   tar -xzf "$SIRVEN_BOOTSTRAP_DIR/$archive" -C "$SIRVEN_BOOTSTRAP_DIR/unpacked"
   # the archive's one top folder is named after the tag, so it is found rather than guessed.
-  installer="$(ls "$SIRVEN_BOOTSTRAP_DIR"/unpacked/*/install.sh 2>/dev/null | head -n 1 || true)"
+  installer=""
+  for candidate in "$SIRVEN_BOOTSTRAP_DIR"/unpacked/*/install.sh; do
+    # an unmatched pattern stays as the literal text, which does not exist, so it is skipped
+    if [ -e "$candidate" ] || [ -L "$candidate" ]; then installer="$candidate"; break; fi
+  done
   [ -n "$installer" ] && [ -f "$installer" ] || fail "release $SIRVEN_PINNED_TAG does not contain install.sh"
 
   # Standard input is this piped script, so the installer gets none; it asks its questions on

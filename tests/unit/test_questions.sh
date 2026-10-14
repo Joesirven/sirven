@@ -221,6 +221,7 @@ test_revoke_asks_nothing() {
 
 test_defaults_apply_on_a_fake_root() {
   local root="$TEST_TMP/root"
+  # shellcheck disable=SC2016 # the single-quoted script is run by sh -c, where $1..$3 are the arguments passed after it
   capture sh -c 'cd "$1" && SIRVEN_OS_OVERRIDE=linux "$2/install.sh" --yes --prefix "$3" --transport none --owner example' _ "$(project)" "$REPO_DIR" "$root"
   assert_eq 0 "$CAPTURED_STATUS" "exit status: $CAPTURED_STDERR"
   assert_contains "$CAPTURED_STDOUT" "paths: none"

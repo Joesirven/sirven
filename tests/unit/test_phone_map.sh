@@ -136,7 +136,7 @@ test_onboarding_maps_the_ride_apps_and_keeps_nothing_private() {
   assert_status 0 phone onboard
   assert_contains "$CAPTURED_STDOUT" "Uber"
   assert_contains "$CAPTURED_STDOUT" "Lyft"
-  assert_eq 600 "$(stat -f %Lp "$SIRVEN_PHONE_DIR/map.json" 2>/dev/null || stat -c %a "$SIRVEN_PHONE_DIR/map.json")"
+  assert_eq 600 "$(stat -c %a "$SIRVEN_PHONE_DIR/map.json" 2>/dev/null || stat -f %Lp "$SIRVEN_PHONE_DIR/map.json")"
   assert_eq 1 "$(map_value 'm["schema_version"]')"
   assert_eq True "$(map_value '"com.ubercab.UberClient" in m["apps"] and "com.zimride.instant" in m["apps"]')"
   assert_eq True "$(map_value 'len(m["apps"]["com.ubercab.UberClient"]["screens"]) >= 4')"

@@ -28,6 +28,7 @@ load_level() {
     die "the $LEVEL level file breaks the rules; nothing was changed"
   fi
   while IFS='=' read -r key value; do
+    # shellcheck disable=SC2034 # the write_allowed arm sets LEVEL_WRITE_ALLOWED, which the installer reads in install.sh
     case "$key" in
       summary) LEVEL_SUMMARY="$value" ;;
       write_allowed) LEVEL_WRITE_ALLOWED="$value" ;;

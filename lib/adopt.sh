@@ -225,6 +225,7 @@ _adopt_describe_paths() {
 # is asked for an answer the machine already gives.
 adopt_fill_answers() {
   local index=0
+  # shellcheck disable=SC2153 # COMMAND is set by install.sh before this file's functions run
   [ "$COMMAND" = install ] && [ "$ADOPT_GRANT" = active ] || return 0
   [ -z "$LEVEL" ] || [ "$PATHS_GIVEN" = no ] || return 0
   [ -n "$LEVEL" ] || LEVEL="$ADOPT_GRANT_LEVEL"
@@ -326,6 +327,7 @@ adopt_refuse_conflicts() {
   fi
 
   owner="$(_adopt_audit_owner)"
+  # shellcheck disable=SC2153 # OWNER is set by the entry script (install.sh, bin/sirven) before this runs
   wanted="$(shell_quote "$OWNER")"
   if [ -n "$owner" ] && [ "$owner" != "$wanted" ] && [ "$owner" != "$OWNER" ]; then
     _adopt_conflict "the audit log directory $AUDIT_DIR belongs to $owner, and this run would give it to $OWNER." \

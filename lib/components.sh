@@ -89,6 +89,7 @@ components_parse() {
   COMPONENT_REMOVE_DATA=no
   DRY_RUN=no
   PREFIX=""
+  # shellcheck disable=SC2034 # read by lib/audit.sh (audit_entry records the user) and lib/access_control.sh
   SERVICE_USER=agent
   OWNER="${SUDO_USER:-$(id -un)}"
   while [ "$#" -gt 0 ]; do
@@ -201,8 +202,11 @@ components_header() {
 
 components_apply() {
   local status=0 operation="$COMPONENT_ACTION $COMPONENT_NAME"
+  # shellcheck disable=SC2034 # read by lib/plan.sh, which runs each step
   PLAN_STEP_HOOK=audit_step_hook
+  # shellcheck disable=SC2034 # read by lib/audit.sh when it writes the entry
   AUDIT_OPERATION="$operation"
+  # shellcheck disable=SC2034 # read by lib/audit.sh when it writes the entry
   AUDIT_PENDING="$STAGE_DIR/audit-pending.jsonl"
   plan_apply || status=$?
   if [ "$status" -ne 3 ]; then
@@ -231,7 +235,9 @@ components_main() {
   # shellcheck disable=SC1090
   . "$(components_registry)/$COMPONENT_NAME.sh"
 
+  # shellcheck disable=SC2034 # read by lib/plan.sh
   PLAN_PREFIX="$PREFIX"
+  # shellcheck disable=SC2034 # read by lib/plan.sh
   PLAN_OPERATING_SYSTEM="$OPERATING_SYSTEM"
   if [ "$DRY_RUN" = yes ] || [ -n "$PREFIX" ]; then
     strict=no
@@ -254,6 +260,7 @@ components_main() {
   trap 'rm -rf "$STAGE_DIR"' EXIT
   PLAN_SIMULATION_LOG=""
   if [ -n "$PREFIX" ]; then
+    # shellcheck disable=SC2034 # read by lib/plan.sh
     PLAN_SIMULATION_LOG="$PREFIX$(layout_simulation_log)"
   fi
   plan_reset
