@@ -122,7 +122,9 @@ setting that `pmset -a disablesleep` controls. Its rules live in the library (`H
   helper at build time. With no team identifier built in, it refuses every connection. Nothing
   personal is written into the source.
 - `sirven awake status` reads the setting from `pmset`, which needs no privileges, and shows it next
-  to what sirven believes.
+  to what sirven believes. It reports the setting whoever set it. So it can read "on" while
+  lid-closed operation is off, when you set `pmset -a disablesleep 1` yourself; sirven then leaves
+  it alone, because it has no marker for it.
 
 ## The bb watcher
 
