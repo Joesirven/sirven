@@ -338,8 +338,37 @@ the kill switch reads it to know what to remove.
   paths again. it writes its own `grant` entry with the reason `rollback`, so a second rollback
   undoes the first. the removal undoes the grant the same way uninstall does (see exactly what undo changes), so an
   owner's chmod made since the install survives it, and the earlier grant takes a new snapshot. what it grants goes into the install record too.
-- **kill switch.** `install.sh revoke --all` runs the same undo for each folder, with or without a snapshot, and renames the grant record to `<user>.json.revoked`. plan output
-  in the alpha cut.
+- **kill switch.** `sudo bash install.sh revoke --all` cuts the agent off now and keeps every record. on Linux it applies;
+  on macOS it is still plan output. in order: (1) `quiesce` ends every process of the agent and locks and expires its account
+  (the same step a rollback uses), (2) every systemd service that runs as the agent is stopped and disabled, its lingering
+  turned off and its systemd session ended, (3) the shell becomes `/usr/sbin/nologin`, (4) `authorized_keys` and
+  `authorized_keys2` are removed with `lib/kill_switch.py`, (5) every granted folder is put back from its snapshot with the
+  same `restore` the uninstall uses, for the paths in the grant record plus any `--path`, (6) the grant record is renamed
+  `<user>.json.revoked` (an earlier revoked record is kept beside it under a time stamp, never overwritten, and the rename
+  is recorded in the install record so uninstall removes it), (7) the marker `quiesce` wrote is deleted, so no later `release`
+  can unlock the account, and (8) the transport is closed: a tunnel service is uninstalled and an unused Tailscale auth key
+  removed from disk; the tailnet policy and the Cloudflare service token are the owner's, by hand. the install record, the
+  audit log and the agent's home folder are kept.
+
+  the account is cut off in layers, each enough alone: the keys are gone, the account is expired (sshd refuses it even with
+  a key put back, which the harness tests), the password is locked and the shell is `nologin`. the lock comes first and does
+  not depend on anything after it: a grant record that cannot be read, or a path the grant compiler refuses, becomes a step
+  after the keys, so the run fails but the agent is already out.
+
+  **no link is followed.** the agent owns its home folder and its `.ssh` folder, so any name in them can be a link it planted
+  to a file that matters. the keys are not emptied by path (that writes through a link): the home folder and `.ssh` are opened
+  without following a link and the names are removed with `unlinkat`. a `.ssh` that is itself a link is removed as a name. the
+  folders are put back by the descriptor walk described above, which skips links. the harness plants links to root's own
+  `authorized_keys`, to a root-only file and folder, and over `.ssh`, and checks each target keeps its content, owner, mode and lists.
+
+  **idempotent and loud.** every step has a read-only check, so a second run skips what is done and changes nothing. a step
+  that fails stops the run with exit 4, an audit entry `revoke_finished` with `outcome: failed`, and a hint: fix the cause and run
+  `revoke --all` again. the account is not given back (an install or a rollback gives it back; the kill switch never does).
+  `revoke_started` is the first audit entry of a run and `revoke_finished` the last; every step also writes its own entry.
+
+  **after a revoke** the account stays locked, expired and on `nologin`. `sirven grant rollback` is refused (the grant record
+  no longer matches the audit log), so nothing hands the access back. to give the agent access again the owner unlocks the account
+  by hand and installs again.
 - **uninstall.** `uninstall.sh` reverses the install record in reverse order: the snapshots restore
   each folder first, then the service user, then files and folders, which are removed only when
   empty. the audit log stays unless `--remove-audit-log` is given.

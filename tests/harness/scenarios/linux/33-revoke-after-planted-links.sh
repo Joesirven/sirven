@@ -16,8 +16,8 @@ mkdir -p /root/.ssh && echo 'ssh-ed25519 AAAAroot root-key' > /root/.ssh/authori
 echo 'victim file' > /etc/victim-file && chmod 640 /etc/victim-file
 mkdir -p /opt/victim-tree/inner && echo secret > /opt/victim-tree/inner/f && chmod 700 /opt/victim-tree /opt/victim-tree/inner && chmod 600 /opt/victim-tree/inner/f
 mkdir -p /opt/victim-ssh && echo 'ssh-ed25519 AAAAdir dir-key' > /opt/victim-ssh/authorized_keys && chmod 700 /opt/victim-ssh && chmod 600 /opt/victim-ssh/authorized_keys
-victims=(/root/.ssh /etc/victim-file /opt/victim-tree /opt/victim-ssh)
-world_aclraw_attributes "${victims[@]}" > /tmp/victims.before
+victims="/root/.ssh /etc/victim-file /opt/victim-tree /opt/victim-ssh"   # plain names, split on purpose
+world_aclraw_attributes $victims > /tmp/victims.before
 sha256sum /root/.ssh/authorized_keys /etc/victim-file /opt/victim-tree/inner/f /opt/victim-ssh/authorized_keys > /tmp/victims.sums
 sums_same() { sha256sum -c --status /tmp/victims.sums; }
 # the kill switch has really run: only then does "the targets are exactly as they were" mean anything
@@ -47,7 +47,7 @@ check "(2) the agent's entry is off the granted folder and everything real insid
   ! getfacl -R -n -p -P /srv/work 2>/dev/null | grep -Eq "^(default:)?user:[0-9]+:"'
 check "(2) the links in the granted folder were not followed and are still links" bash -c '
   [ -f /etc/sirven/grants/agent.json.revoked ] && [ -L /srv/work/filelink ] && [ -L /srv/work/treelink ] && [ -L /srv/work/sub/innerlink ]'
-world_unchanged_if revoke_ran "(1) (2) the targets keep owner, mode and lists exactly" aclraw_attributes /tmp/victims.before "${victims[@]}"
+world_unchanged_if revoke_ran "(1) (2) the targets keep owner, mode and lists exactly" aclraw_attributes /tmp/victims.before $victims
 check "(1) (2) the targets keep their content" sums_same_after_revoke
 check "(2) no entry of the agent on any target" bash -c '[ -f /etc/sirven/grants/agent.json.revoked ] && ! getfacl -R -n -p -P /opt/victim-tree /etc/victim-file /root/.ssh 2>/dev/null | grep -Eq "^(default:)?user:[0-9]+:"'
 
@@ -59,7 +59,7 @@ revoke_ran() { [ "$(grep -c "\"event\": \"revoke_finished\"" /var/log/sirven/aud
 check_exit "revoke --all applies again" 0 bash install.sh revoke --all --yes --transport none
 check "(3) the .ssh link is gone from the home folder, and the folder it pointed at is untouched" bash -c '
   [ ! -L /home/agent/.ssh ] && [ -s /opt/victim-ssh/authorized_keys ] && grep -q AAAAdir /opt/victim-ssh/authorized_keys'
-world_unchanged_if revoke_ran "(3) the folder keeps owner, mode and lists exactly" aclraw_attributes /tmp/victims.before "${victims[@]}"
+world_unchanged_if revoke_ran "(3) the folder keeps owner, mode and lists exactly" aclraw_attributes /tmp/victims.before $victims
 check "(3) all targets keep their content" sums_same_after_revoke
 
 finish

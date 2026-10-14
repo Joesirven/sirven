@@ -64,7 +64,7 @@ Each workstream lists what it delivers, what it needs first, and its honest stat
 | W2 | Service user | Create or reuse `agent` (Linux `useradd`, macOS `sysadminctl`/`dscl`), no administrator group, locked password, SSH key only | W1 | **Build**, verified by dry run and fake-root tests; real creation only in a throwaway container |
 | W3 | Permission model | Levels as data (`levels/*.json` or similar), grant schema, a compiler from grants to access control list commands | none | **Design doc plus reference data and compiler** |
 | W4 | Audit log | Log format (JSON lines), location owned by the owner, append-only from the agent's point of view, session start and end, every command via a forced-command wrapper | W2, W3 | **Format designed; wrapper built if time allows**, otherwise designed |
-| W5 | Kill switch | `revoke --all`: remove authorized keys, end sessions, lock the user, remove tunnel access, write a final audit entry | W2, W4, W6 | **Designed**; dry-run plan output built with the installer |
+| W5 | Kill switch | `revoke --all`: remove authorized keys, end sessions, lock the user, remove tunnel access, write a final audit entry | W2, W4, W6 | **Built on Linux** (applies in a container, verified by the harness); plan output on macOS |
 | W6 | Transport: Tailscale | Install check, `tailscale up` with an auth key after one interactive login, tagged device, a policy snippet that lets only the owner's devices reach the agent port | W1 | **Build the plan and documentation**; never run against a real tailnet in tests |
 | W7 | Transport: Cloudflare Tunnel | `cloudflared` tunnel plus Cloudflare Access service token in front of SSH | W1 | **Documented second path**, plan output only |
 | W8 | Runtime adapters | Per-runtime setup for the service user: Claude Code, Codex, Pi. Config written into the service user's home, never the owner's | W2 | **Claude Code first**; Codex and Pi stubbed with clear "not yet" errors |
@@ -116,7 +116,7 @@ safely") is W1 → W2 → W3 → W4 → W6 → W8 → W9. Everything else makes 
 | Levels as data and grant-to-access-control-list compiler | ✓ | | |
 | Per-path access control lists on macOS | plan output | apply verification needs a macOS virtual machine | |
 | Audit log format | ✓ (spec) | capture wrapper | kernel-level audit (Linux `auditd`, macOS endpoint security) |
-| Kill switch | plan output | apply | |
+| Kill switch | apply on Linux (container-verified); plan output on macOS | apply on macOS | |
 | Tailscale transport | plan and docs | apply on a real tailnet | |
 | Cloudflare Tunnel transport | docs | plan and apply | |
 | Claude Code adapter | plan | apply | |

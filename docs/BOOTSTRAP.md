@@ -101,9 +101,9 @@ Uninstalling needs no download and no repository:
 sudo bash /var/lib/sirven/package/uninstall.sh
 ```
 
-Revoking access from the copy is not available in this alpha. `install.sh revoke --all` prints its
-plan (`--dry-run`) and exits with status 3 when applied. Until the kill switch applies, revoke by
-uninstalling.
+To cut the agent off now and keep every record, run the kill switch from the copy:
+`sudo bash /var/lib/sirven/package/install.sh revoke --all` (add `--dry-run` to read the plan first).
+It applies on Linux inside a container; on a Mac it is still plan output and exits with status 3 when applied.
 
 A Mac does not yet apply an install in this alpha, so no copy is made on a Mac either. The copy is
 created on Linux, inside the container the installer supports.

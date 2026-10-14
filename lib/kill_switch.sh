@@ -245,5 +245,5 @@ plan_kill_switch() {
   plan_kill_switch_transport
   plan_section "kill switch: finish"
   plan_note "kept on purpose: the install record, the audit log, the revoked grant record, and the home folder of $SERVICE_USER with whatever the agent left in it."
-  plan_note "the account stays locked, expired, and on the $KILL_SWITCH_NOLOGIN shell. to give the agent access again, unlock the account yourself and install again; nothing here is reversed automatically."
+  plan_note "the account stays locked and expired, with its shell turned off. to give the agent access again, unlock the account yourself and install again; nothing here is reversed automatically."
 }

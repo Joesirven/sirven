@@ -28,7 +28,7 @@ package directories
        $ mkdir -p <prefix>/etc/sirven/grants && chmod 0755 <prefix>/etc/sirven/grants
     5. keep a pinned copy of this package in /var/lib/sirven/package, so revoke, rollback, and uninstall need no download (already done)
        # copies install.sh uninstall.sh bin lib levels project.json, and components when present, into a new folder, then moves it into place
-     note: later, without this repository: sudo bash /var/lib/sirven/package/uninstall.sh (revoke by uninstall until the kill switch applies)
+     note: later, without this repository: sudo bash /var/lib/sirven/package/uninstall.sh (to cut the agent off without removing anything: sudo bash /var/lib/sirven/package/install.sh revoke --all)
 
 audit log
     6. create the audit log directory /var/log/sirven (already done)

@@ -10,10 +10,10 @@ kill switch: revoke --all
      note: audit log: revoke_started is written before the first step and revoke_finished last, with the outcome. every step writes its own entry too.
     1. end every process of agent and lock and expire its account, so nothing new starts (to do, recorded not run under --prefix)
        $ kill_switch_quiesce agent <prefix>/var/lib/sirven/agent-quiesce.json
-    2. set the shell of agent to /usr/sbin/nologin (to do, recorded not run under --prefix)
-       $ usermod --shell /usr/sbin/nologin agent
-    3. stop and disable every service that runs as agent, and end its systemd session (to do, recorded not run under --prefix)
+    2. stop and disable every service that runs as agent, and end its systemd session (to do, recorded not run under --prefix)
        $ kill_switch_stop_services agent
+    3. set the shell of agent to /usr/sbin/nologin (to do, recorded not run under --prefix)
+       $ usermod --shell /usr/sbin/nologin agent
     4. remove every authorized key of agent, by name, without following a link (to do, recorded not run under --prefix)
        $ kill_switch_remove_keys <prefix>/home/agent
 
@@ -37,7 +37,7 @@ kill switch: transport
 
 kill switch: finish
      note: kept on purpose: the install record, the audit log, the revoked grant record, and the home folder of agent with whatever the agent left in it.
-     note: the account stays locked, expired, and on the /usr/sbin/nologin shell. to give the agent access again, unlock the account yourself and install again; nothing here is reversed automatically.
+     note: the account stays locked and expired, with its shell turned off. to give the agent access again, unlock the account yourself and install again; nothing here is reversed automatically.
 
 summary: 11 steps. 8 to do, 2 already done, 1 by the owner, 0 plan only.
 dry run: nothing was changed. run the same command without --dry-run to apply this plan.

@@ -186,7 +186,7 @@ plan_access_control_release() {
 # come before these steps, so the refusal is kept in KILL_SWITCH_LATE_FAILURE and becomes a step after them.
 # sets KILL_SWITCH_REVOKE_PATHS, the paths this plan removes, for the audit log.
 plan_access_control_revoke() {
-  local record fragment shown key value path known index status=0 message
+  local record fragment shown key value known index status=0 message
   record="${PREFIX}$(access_control_record_file)"
   fragment="$STAGE_DIR/revoke-fragment.txt"
   KILL_SWITCH_REVOKE_PATHS=()
@@ -211,6 +211,7 @@ plan_access_control_revoke() {
   if [ -f "$record" ]; then
     shown="$(grant_compiler show --record "$record" 2>&1)" || status=$?
     if [ "$status" -ne 0 ]; then
+      # shellcheck disable=SC2034 # read by plan_kill_switch_linux in lib/kill_switch.sh
       KILL_SWITCH_LATE_FAILURE="the grant record $record cannot be read, so the grants it lists were not removed: $(printf '%s' "$shown" | tr '\n' ' ') the account is locked and the keys are gone. repair or move that file aside, name the granted folders with --path, and run revoke --all again."
       plan_note "the grant record $record cannot be read. the lock and the keys come first; a step after them stops the run with the reason."
       return 0
@@ -233,10 +234,15 @@ END
     return 0
   fi
   GRANT_PATHS=()
-  for path in "${KILL_SWITCH_REVOKE_PATHS[@]}"; do GRANT_PATHS[${#GRANT_PATHS[@]}]="$path"; done
+  index=0
+  while [ "$index" -lt "${#KILL_SWITCH_REVOKE_PATHS[@]}" ]; do
+    GRANT_PATHS[${#GRANT_PATHS[@]}]="${KILL_SWITCH_REVOKE_PATHS[index]}"
+    index=$((index + 1))
+  done
   ( _access_control_run_compiler "$fragment" revoke --level "$LEVEL_FILE" --prefix "$PREFIX" ) 2> "$STAGE_DIR/revoke-compiler.error" || status=$?
   if [ "$status" -ne 0 ]; then
     message="$(tr '\n' ' ' < "$STAGE_DIR/revoke-compiler.error")"
+    # shellcheck disable=SC2034 # read by plan_kill_switch_linux in lib/kill_switch.sh
     KILL_SWITCH_LATE_FAILURE="the grant compiler refused the paths to remove: $message the account is locked and the keys are gone. fix the paths and run revoke --all again."
     plan_note "the grant compiler refused the paths to remove. the lock and the keys come first; a step after them stops the run with the reason."
     return 0

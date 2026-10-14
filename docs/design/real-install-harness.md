@@ -69,7 +69,7 @@ docker run --rm --network none -v "$PWD":/src:ro sirven-harness-linux bash -c \
 | Permission lists | `agent` can read `/srv/app`, cannot write it, cannot read `/root`; new files inherit read access through a default list (which has a side effect, section 3) |
 | Records | `/var/lib/sirven/install-record.tsv` (0600 root), pinned copy in `/var/lib/sirven/package`, audit log with a `finished` entry |
 | Re-run | exit 0; "applied 1 steps, skipped 18" (the one step tagged `always`) |
-| `install.sh revoke --all` | exit 3, "not yet", nothing changed (known: SIR-32) |
+| `install.sh revoke --all` | exit 3, "not yet", nothing changed at the time of this first run; applied since SIR-32, see scenarios 03 and 30 to 36 |
 | `uninstall.sh` from the pinned copy | exit 0; user, group, files, directories removed; home folder and audit log kept on purpose |
 | Real apply as an ordinary user | exit 3, "applying needs root"; nothing changed |
 | `--transport tailscale` real apply | exit 3, refused because step 24 (`tailscale up`) is plan only |
@@ -123,7 +123,7 @@ Four kinds, all in `tests/harness/lib/world.sh`:
 1. Exit statuses: `check_exit NAME WANTED COMMAND` (0 applied, 3 refused, 2 stopped by a rule, 4 a step failed).
 2. Effects: ownership, modes, group membership, a login attempt as the agent (`runuser -u agent -- cat ...`), a running process owned by the agent.
 3. Whole-machine diff for "revoke leaves nothing behind": snapshots of files (path, type, owner, mode), accounts (passwd, group, shadow without hashes) and permission lists before and after; the diff must be empty except named, allowed leftovers (the agent's home folder and the audit log, kept by design; the system's own backup copies of account files).
-4. Known defects: `known_defect NAME TASK COMMAND`. Reports `known` while the product fails the assertion; fails the run when it passes. This turns each open task into an acceptance test that is written before the fix. Scenario 03 holds four lines for SIR-32, scenario 02 two for SIR-70, and scenario 01 one for SIR-70. A known defect line must have a matching positive precondition (scenario 03 starts a process as the agent first), or it can "fail" for the wrong reason.
+4. Known defects: `known_defect NAME TASK COMMAND`. Reports `known` while the product fails the assertion; fails the run when it passes. This turns each open task into an acceptance test that is written before the fix. None are open today: the lines for SIR-70 and SIR-32 are plain assertions now (scenario 03 and scenarios 30 to 36 for the kill switch). A known defect line must have a matching positive precondition (scenario 03 starts a process as the agent first), or it can "fail" for the wrong reason. The same holds for a "left it alone" assertion: it passes for a command that did nothing, so the kill switch scenarios pair each with proof that it ran (`world_unchanged_if`).
 
 Output uses the same `ok` / `not ok` lines as `tests/run.sh`, plus `known`.
 

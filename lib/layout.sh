@@ -196,5 +196,5 @@ plan_layout() {
     plan_undo "remove the pinned copy of this package in $(layout_package_copy), if this package made it" \
       "[ ! -e $copy ]" "layout_remove_package_copy $copy" "rm -rf $copy   # only when it holds $LAYOUT_PACKAGE_MARKER"
   fi
-  plan_note "later, without this repository: sudo bash $(layout_package_copy)/uninstall.sh (revoke by uninstall until the kill switch applies)"
+  plan_note "later, without this repository: sudo bash $(layout_package_copy)/uninstall.sh (to cut the agent off without removing anything: sudo bash $(layout_package_copy)/install.sh revoke --all)"
 }
