@@ -290,6 +290,15 @@ func lid(_ arguments: [String]) {
 func helperCommand(_ arguments: [String]) {
     guard arguments == ["unregister"] else { usageError("helper takes only unregister") }
     let helper = ServiceManagementHelper()
+    switch helper.state {
+    case .notFound:
+        fail("this copy is not running from the signed sirven app, so it has no helper registration to remove")
+    case .notRegistered:
+        say("the helper was never registered; there is nothing to remove.")
+        return
+    case .enabled, .requiresApproval:
+        break
+    }
     // a helper that is not allowed yet cannot be asked to revert; there is nothing on for it to revert.
     if helper.state == .enabled { try? helper.setSleepDisabled(false) }
     do {
