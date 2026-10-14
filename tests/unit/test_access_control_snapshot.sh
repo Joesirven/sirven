@@ -96,10 +96,9 @@ print("ok")')"
 
 test_entries_of_an_earlier_grant_come_back_with_a_mask_no_wider_than_before() {
   assert_eq "ok" "$(snapshot_python '
-import base64
 agent, owner = 1002, 1001
 earlier = [(h.USER_OBJ, 6, h.NO_ID), (h.USER, 4, agent), (h.GROUP_OBJ, 0, h.NO_ID), (h.MASK, 4, h.NO_ID), (h.OTHER, 0, h.NO_ID)]
-blob = base64.b64encode(h.build(earlier)).decode()
+blob = h.build(earlier)
 now = [(h.USER_OBJ, 6, h.NO_ID), (h.USER, 6, agent), (h.GROUP_OBJ, 0, h.NO_ID), (h.MASK, 6, h.NO_ID), (h.OTHER, 0, h.NO_ID)]
 back = h.access_without_grant(now, agent, owner, blob)
 assert back == [(h.USER_OBJ, 6, h.NO_ID), (h.USER, 4, agent), (h.GROUP_OBJ, 0, h.NO_ID), (h.MASK, 4, h.NO_ID), (h.OTHER, 0, h.NO_ID)], back
@@ -185,10 +184,9 @@ test_the_recorded_mask_comes_back_when_the_grants_entries_come_off() {
   # bob r-- with mask r--; the grant raised the mask to rw- for the agent. after undo bob must be read only and the
   # mask must be r-- again, not the rw- the grant left.
   assert_eq "ok" "$(snapshot_python '
-import base64
 agent, owner = 1002, 1001
 before = [(h.USER_OBJ, 6, h.NO_ID), (h.USER, 4, 1500), (h.GROUP_OBJ, 4, h.NO_ID), (h.MASK, 4, h.NO_ID), (h.OTHER, 4, h.NO_ID)]
-blob = base64.b64encode(h.build(before)).decode()
+blob = h.build(before)
 now = [(h.USER_OBJ, 6, h.NO_ID), (h.USER, 6, agent), (h.USER, 4, 1500), (h.GROUP_OBJ, 4, h.NO_ID), (h.MASK, 6, h.NO_ID), (h.OTHER, 4, h.NO_ID)]
 assert h.access_without_grant(now, agent, owner, blob) == before
 print("ok")')"

@@ -9,7 +9,9 @@ set -uo pipefail
 cd "$SRC" || exit 2
 
 useradd -m owner
-mkdir -p /srv/work/sub /srv/work/other && echo f > /srv/work/sub/f && chown -R owner:owner /srv/work
+mkdir -p /srv/work/sub /srv/work/other && echo f > /srv/work/sub/f
+setfacl -d -m u::rwx,g::r-x,o::r-x /srv/work/sub   # a list of its own, so the snapshot records it and the swap is named
+chown -R owner:owner /srv/work
 mkdir -p /opt/victim && echo secret > /opt/victim/f && chmod 700 /opt/victim && chmod 600 /opt/victim/f
 world_aclraw_attributes /opt/victim > /tmp/victim.before
 

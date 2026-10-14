@@ -6,7 +6,7 @@
 #
 # each scenario gets a brand new container from one prebuilt image: the repository mounted read
 # only at /src, no network, no privileged mode, no host folder other than the repository, a
-# memory and process cap. the container is removed when the scenario ends. the host's own
+# memory and process cap (256 MB; a scenario can ask for more with a header line, see below). the container is removed when the scenario ends. the host's own
 # install.sh is never run. exit status: 0 all passed, 1 an assertion failed, 77 no container
 # engine is running (a skip, not a pass), 2 the harness itself broke.
 
@@ -40,8 +40,11 @@ for scenario in "$HARNESS_DIR"/scenarios/linux/*.sh; do
   name="$(basename "$scenario" .sh)"
   printf '\n# %s\n' "$name"
   started=$SECONDS
+  # 256 MB unless the scenario asks for more in a header line "# harness-memory: 1g" (the kernel's own cache of
+  # hundreds of thousands of folders counts against the container). the helper's own peak is asserted by the scenario.
+  memory="$(sed -n 's/^# harness-memory: \([0-9]*[mg]\)$/\1/p' "$scenario" | head -1)"
   "$ENGINE" run --rm --label "sirven-harness=$RUN_ID" --network none \
-    --memory 256m --pids-limit 256 --cap-drop NET_RAW \
+    --memory "${memory:-256m}" --pids-limit 256 --cap-drop NET_RAW \
     -v "$REPO_DIR":/src:ro \
     "$IMAGE:$recipe_sum" bash "/src/tests/harness/scenarios/linux/$name.sh" < /dev/null
   status=$?

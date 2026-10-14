@@ -42,7 +42,6 @@ snapshot recorded (same device and inode), or it is skipped with a warning.
 """
 
 import argparse
-import base64
 import bisect
 import datetime
 import errno
@@ -55,12 +54,18 @@ import struct
 import subprocess
 import sys
 import time
+import urllib.parse
+
+try:
+    import sqlite3
+except ImportError:  # reported when a snapshot is needed, not at start
+    sqlite3 = None
 
 ACCESS = "system.posix_acl_access"
 DEFAULT = "system.posix_acl_default"
 USER_OBJ, USER, GROUP_OBJ, GROUP, MASK, OTHER = 0x01, 0x02, 0x04, 0x08, 0x10, 0x20
 NO_ID = 0xFFFFFFFF
-FORMAT = 3
+FORMAT = 4
 LISTED = 10
 
 EXIT_FAILED = 1
@@ -424,8 +429,16 @@ def problems_in(entries, ours, where):
     return found
 
 
-def scan(folder, recursive, user, collect=True):
-    """walk the folder once. returns (context, entries, refusals, errors)."""
+def signed(number):
+    """a device or inode number as the signed 64-bit integer sqlite stores."""
+    return number - (1 << 64) if number >= (1 << 63) else number
+
+
+def scan(folder, recursive, user, sink=None):
+    """walk the folder once. returns (context, refusals, errors). when a sink is given it is called with a row for
+    every path that holds a list the undo may need to put back: (dev, ino, kind, parent dev, parent ino, name,
+    access list, default list). a path with no list costs nothing, so the snapshot is as large as the lists the
+    tree already had, not as large as the tree."""
     resolved = os.path.realpath(folder)
     descriptor = open_folder(resolved)
     try:
@@ -435,7 +448,7 @@ def scan(folder, recursive, user, collect=True):
     agent = account_number(user)
     ours = {number for number in (agent, info.st_uid) if number is not None}
     context = {"resolved": resolved, "dev": info.st_dev, "ino": info.st_ino, "agent": agent, "owner": info.st_uid}
-    entries, refusals, errors = [], Capped(), Capped()
+    refusals, errors = Capped(), Capped()
 
     def visit(fd, item, where, is_folder, parent=None):
         access = read_list(fd, ACCESS)
@@ -445,22 +458,17 @@ def scan(folder, recursive, user, collect=True):
         if item.st_uid != agent:
             for reason in problems_in(access, ours, "access") + problems_in(default, ours, "default"):
                 refusals.append((where, reason))
-        if not collect:  # the check only looks for refusals; it keeps nothing for a snapshot
+        if sink is None:  # the check only looks for refusals; it keeps nothing for a snapshot
             return
-        record = {}
-        if access is not None and (has_named(access) or any(tag == MASK for tag, _, _ in access)):
-            record["access"] = base64.b64encode(build(access)).decode()
-        if default is not None:
-            record["default"] = base64.b64encode(build(default)).decode()
-        if is_folder or "access" in record:
-            # the name and the parent, not the whole path, so a deep tree costs a line per folder, not a path per folder
-            record.update({"n": where.name.hex(),
-                           "u": list(parent) if parent else None,
-                           "d": item.st_dev, "i": item.st_ino, "k": "d" if is_folder else "f"})
-            entries.append(record)
+        keep_access = access is not None and (has_named(access) or any(tag == MASK for tag, _, _ in access))
+        if keep_access or default is not None:
+            sink((signed(item.st_dev), signed(item.st_ino), "d" if is_folder else "f",
+                  signed(parent[0]) if parent else None, signed(parent[1]) if parent else None,
+                  where.name, build(access) if keep_access else None,
+                  build(default) if default is not None else None))
 
     start(resolved, recursive, visit, errors)
-    return context, entries, refusals, errors
+    return context, refusals, errors
 
 
 def print_refusals(refusals):
@@ -548,9 +556,10 @@ def start_checked(arguments, recursive, visit, errors):
         os.close(descriptor)
     if arguments.snapshot:
         try:
-            with open(arguments.snapshot, encoding="utf-8") as handle:
-                context = json.load(handle)["context"]
-        except (OSError, ValueError, KeyError) as error:
+            snapshot = Snapshot(arguments.snapshot)
+            context = snapshot.context
+            snapshot.close()
+        except (OSError, ValueError, KeyError, sqlite3.Error, Failure) as error:
             raise Failure("no usable snapshot at %s (%s), so %s is not changed" % (arguments.snapshot, error, arguments.folder))
         if (context["dev"], context["ino"], context["resolved"]) != (info.st_dev, info.st_ino, resolved):
             raise Failure("%s is not the folder that was recorded before the grant; it was not changed" % arguments.folder)
@@ -729,7 +738,7 @@ def command_check(arguments):
             if not os.path.isdir(folder):
                 continue
             try:
-                _, _, found, errors = scan(folder, recursive, arguments.user, collect=False)
+                _, found, errors = scan(folder, recursive, arguments.user)
             except OSError as error:
                 unreadable.append((os.fsencode(folder), error.strerror))
                 continue
@@ -749,44 +758,111 @@ def command_check(arguments):
 
 def command_record(arguments):
     recursive = arguments.recursive == "yes"
-    context, entries, refusals, errors = scan(arguments.folder, recursive, arguments.user)
-    if refusals:
-        print_refusals(refusals)
-        return EXIT_REFUSED
-    if errors:
-        report_errors(errors)
-        return EXIT_FAILED
-    document = {"format": FORMAT, "folder": os.fsencode(arguments.folder).hex(),
-                "recursive": recursive, "context": context, "entries": entries}
+    if sqlite3 is None:
+        raise Failure("python3 has no sqlite3 module, so a snapshot cannot be written")
     folder = os.path.dirname(arguments.snapshot)
     os.makedirs(folder, mode=0o700, exist_ok=True)
     os.chmod(folder, 0o700)
     temporary = arguments.snapshot + ".new"
-    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
-    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-        json.dump(document, handle)
+    try:
+        os.unlink(temporary)
+    except FileNotFoundError:
+        pass
+    os.close(os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600))
+    db = sqlite3.connect(temporary)
+    try:
+        db.execute("PRAGMA journal_mode = OFF")
+        db.execute("PRAGMA synchronous = OFF")
+        db.execute("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT)")
+        db.execute("CREATE TABLE entries (dev INTEGER, ino INTEGER, kind TEXT, pdev INTEGER, pino INTEGER, "
+                   "name BLOB, access BLOB, dflt BLOB)")
+        batch = []
+
+        def sink(row):  # written as the walk goes, 1,000 rows at a time
+            batch.append(row)
+            if len(batch) >= 1000:
+                db.executemany("INSERT INTO entries VALUES (?, ?, ?, ?, ?, ?, ?, ?)", batch)
+                del batch[:]
+
+        context, refusals, errors = scan(arguments.folder, recursive, arguments.user, sink)
+        status = 0
+        if refusals:
+            print_refusals(refusals)
+            status = EXIT_REFUSED
+        elif errors:
+            report_errors(errors)
+            status = EXIT_FAILED
+        else:
+            db.executemany("INSERT INTO entries VALUES (?, ?, ?, ?, ?, ?, ?, ?)", batch)
+            db.execute("CREATE UNIQUE INDEX by_inode ON entries (dev, ino)")
+            db.execute("CREATE INDEX by_place ON entries (pdev, pino, name)")
+            db.executemany("INSERT INTO meta VALUES (?, ?)", [
+                ("format", str(FORMAT)), ("folder", os.fsencode(arguments.folder).hex()),
+                ("recursive", str(recursive)), ("context", json.dumps(context))])
+            db.commit()
+    except BaseException:
+        db.close()
+        os.unlink(temporary)
+        raise
+    db.close()
+    if status != 0:
+        os.unlink(temporary)
+        return status
     os.replace(temporary, arguments.snapshot)
     return 0
+
+
+class Snapshot:
+    """a snapshot on disk (a sqlite file, root only). nothing is loaded into memory: the paths that held a list
+    are looked up by device and inode as the walk meets them."""
+
+    def __init__(self, path, folder=None, recursive=None):
+        if sqlite3 is None:
+            raise Failure("python3 has no sqlite3 module, so a snapshot cannot be read")
+        self.db = sqlite3.connect("file:%s?mode=ro" % urllib.parse.quote(path), uri=True)
+        try:
+            meta = dict(self.db.execute("SELECT key, value FROM meta"))
+        except sqlite3.DatabaseError as error:
+            self.db.close()
+            raise ValueError("it is not a snapshot of this version (%s)" % error)
+        if meta.get("format") != str(FORMAT):
+            self.db.close()
+            raise ValueError("it is in another format (%s)" % meta.get("format"))
+        if folder is not None and (meta.get("folder") != os.fsencode(folder).hex() or meta.get("recursive") != str(recursive)):
+            self.db.close()
+            raise ValueError("it is not for this folder")
+        self.context = json.loads(meta["context"])
+        self.rows = self.db.execute("SELECT COUNT(*) FROM entries").fetchone()[0]
+
+    def earlier(self, device, inode):
+        """(access list, default list) the path held before the grant, as raw attribute bytes, or (None, None)."""
+        if not self.rows:
+            return None, None
+        row = self.db.execute("SELECT access, dflt FROM entries WHERE dev = ? AND ino = ?",
+                              (signed(device), signed(inode))).fetchone()
+        return row if row else (None, None)
+
+    def folder_at(self, parent, name):
+        """(device, inode) of the folder with this parent and name that held a list, or None."""
+        if not self.rows or not parent:
+            return None
+        row = self.db.execute("SELECT dev, ino FROM entries WHERE kind = 'd' AND pdev = ? AND pino = ? AND name = ?",
+                              (signed(parent[0]), signed(parent[1]), name)).fetchone()
+        return (row[0] % (1 << 64), row[1] % (1 << 64)) if row else None
+
+    def close(self):
+        self.db.close()
 
 
 def load_snapshot(path, folder, recursive, warnings):
     """the snapshot, or None with a warning saying why it cannot be used."""
     try:
-        with open(path, encoding="utf-8") as handle:
-            document = json.load(handle)
-        if document.get("format") not in (2, FORMAT) or document.get("folder") != os.fsencode(folder).hex() \
-                or document.get("recursive") != recursive:
-            raise ValueError("it is not for this folder, or it is in an older format")
-        document["by_identity"] = {(item["d"], item["i"]): item for item in document["entries"]}
-        # (parent, name) -> the folder recorded there, to tell a folder replaced by a link or another folder
-        document["by_place"] = {(tuple(item["u"]), item["n"]): item for item in document["entries"]
-                                if item.get("k") == "d" and item.get("u")}
-        return document
+        return Snapshot(path, folder, recursive)
     except FileNotFoundError:
         warnings.add("could not restore the earlier access control lists of %s: there is no snapshot at %s. "
                      "the entries the grant added are removed anyway; look at what is left with: getfacl -R -p %s"
                      % (folder, path, folder))
-    except (OSError, ValueError, KeyError, TypeError) as error:
+    except (OSError, ValueError, KeyError, TypeError, sqlite3.Error) as error:
         warnings.add("could not restore the earlier access control lists of %s: the snapshot %s cannot be used (%s). "
                      "the entries the grant added are removed anyway; look at what is left with: getfacl -R -p %s"
                      % (folder, path, error, folder))
@@ -807,7 +883,7 @@ def access_without_grant(current, agent, owner, recorded):
     if len(kept) == len(current):
         return None
     if recorded:
-        before = parse(base64.b64decode(recorded))
+        before = parse(bytes(recorded))
         again = [entry for entry in before if entry[0] == USER and entry[2] in (agent, owner)]
         kept = kept + again
         masks = [entry[1] for entry in before if entry[0] == MASK]
@@ -874,7 +950,7 @@ def undo_default(fd, agent, recorded, changes):
     if current is None or not any(tag == USER and number == agent for tag, _, number in current):
         return
     if recorded:
-        os.setxattr(fd, DEFAULT, base64.b64decode(recorded))
+        os.setxattr(fd, DEFAULT, bytes(recorded))
     else:
         os.removexattr(fd, DEFAULT)
     changes.append(1)
@@ -903,11 +979,12 @@ def restore_folder(arguments):
     snapshot = None
     if arguments.snapshot:
         snapshot = load_snapshot(arguments.snapshot, arguments.folder, recursive, warnings)
+        arguments.opened = snapshot
     else:
         say("repairing %s: no snapshot is used, so lists the folder had before the grant cannot be put back" % arguments.folder)
     agent = account_number(arguments.user)
     if agent is None and snapshot:
-        agent = snapshot["context"]["agent"]
+        agent = snapshot.context["agent"]
     leftovers = agent is None
     if getattr(arguments, "dry_run", False) and not leftovers:
         say("dry run: nothing was changed. repair would remove the entries of %s (and the folder owner's, and the "
@@ -919,9 +996,9 @@ def restore_folder(arguments):
             "grant wrote (group and other nothing)" % arguments.user)
     resolved = os.path.realpath(arguments.folder)
     if snapshot:
-        if resolved != snapshot["context"]["resolved"]:
+        if resolved != snapshot.context["resolved"]:
             warnings.add("%s now resolves to %s, not the %s it was granted as; it was not touched"
-                         % (arguments.folder, resolved, snapshot["context"]["resolved"]))
+                         % (arguments.folder, resolved, snapshot.context["resolved"]))
             return 0
     elif resolved != arguments.folder.rstrip("/") and arguments.folder != "/":
         warnings.add("%s contains a symbolic link (it resolves to %s); with no snapshot to check it against, "
@@ -934,33 +1011,30 @@ def restore_folder(arguments):
         return 0
     info = os.fstat(descriptor)
     os.close(descriptor)
-    if snapshot and (info.st_dev, info.st_ino) != (snapshot["context"]["dev"], snapshot["context"]["ino"]):
+    if snapshot and (info.st_dev, info.st_ino) != (snapshot.context["dev"], snapshot.context["ino"]):
         warnings.add("%s is not the folder that was recorded (it was replaced during the grant); it was not touched"
                      % arguments.folder)
         return 0
-    owner = snapshot["context"]["owner"] if snapshot else info.st_uid
-    recorded = snapshot["by_identity"] if snapshot else {}
+    owner = snapshot.context["owner"] if snapshot else info.st_uid
     changes, errors = Capped(), Capped()
-    by_place = snapshot["by_place"] if snapshot else {}
 
     def replaced(parent, name, path, what):
-        item = by_place.get((tuple(parent), name.hex())) if parent else None
-        if item is not None:
+        if snapshot and snapshot.folder_at(parent, name) is not None:
             warnings.add("%s was a folder when the grant was made and is now %s; it was not followed" % (printable(path), what))
 
     def visit(fd, item, where, is_folder, parent=None):
-        earlier = recorded.get((item.st_dev, item.st_ino), {})
-        if is_folder and parent:
-            place = by_place.get((tuple(parent), where.name.hex()))
-            if place is not None and (place["d"], place["i"]) != (item.st_dev, item.st_ino):
+        earlier_access, earlier_default = snapshot.earlier(item.st_dev, item.st_ino) if snapshot else (None, None)
+        if is_folder and parent and snapshot:
+            place = snapshot.folder_at(parent, where.name)
+            if place is not None and place != (item.st_dev, item.st_ino):
                 warnings.add("%s is not the folder that was recorded (it was replaced during the grant)" % printable(where))
         try:
             if leftovers:
                 undo_leftovers(fd, owner, is_folder and recursive, where, changes, getattr(arguments, "dry_run", False))
                 return
-            undo_access(fd, agent, owner, earlier.get("access"), changes)
+            undo_access(fd, agent, owner, earlier_access, changes)
             if is_folder and recursive:
-                undo_default(fd, agent, earlier.get("default"), changes)
+                undo_default(fd, agent, earlier_default, changes)
         except OSError as error:
             errors.append((where, error.strerror))
 
@@ -978,7 +1052,12 @@ def restore_folder(arguments):
 
 
 def command_restore(arguments):
-    status = restore_folder(arguments)
+    arguments.opened = None
+    try:
+        status = restore_folder(arguments)
+    finally:
+        if arguments.opened is not None:
+            arguments.opened.close()
     if status == 0 and arguments.snapshot:
         # a snapshot that was used is spent, and one that could not be used or applied was already warned
         # about, so none is kept: a rerun would only warn again.
