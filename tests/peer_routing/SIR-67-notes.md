@@ -105,10 +105,19 @@ Not done, and left open:
 - N4: `peer init` still rewrites `ledger.json` and `nonces.json` without the lock.
 - N5: some reciprocity arguments are still separate values. None can begin with `-` today.
 
-Residual window, documented in `verify-lock.mjs`: a waiter that dies between creating a break file
-and removing the lock leaves the break file behind. A later waiter removes it by renaming it. Two
-recoveries of the same abandoned break file racing each other would need two crashes inside
-microsecond windows.
+Residual window, documented in `verify-lock.mjs`: one earlier crash, a waiter dying between creating a
+break file and removing the lock, leaves the break file behind. Two waiters recovering that abandoned
+break file at about the same moment can then both be inside the break step, which needs an interleaving
+of microseconds. It is not closed. The cheap closure is named in the header comment.
+
+Final review round (commits `acdc160` to `cebc71d`):
+
+- R1: the boot tolerance is ten minutes, so a clock step of seconds cannot make a live holder dead.
+  Tested with a ten-second offset on a live holder, which is refused.
+- R2: the refusal names the lock file and the owner it records. A lock whose owner cannot be checked
+  from this machine is dead after 24 hours (tested at 23 and 25 hours). The clearing procedure is in
+  `docs/peer-routing.md`, "The peer verify lock, and clearing a stuck verify lock".
+- R3: the header comment describes the break-file window as one crash plus two concurrent recoveries.
 
 ## Reproducing
 
