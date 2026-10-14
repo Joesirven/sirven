@@ -75,8 +75,8 @@ sudo /usr/local/sbin/sirven revoke --all
 
 The kill switch. Cuts the agent off in one shot: ends its processes, locks and expires its account, removes its keys, services and
 jobs, and takes back every grant. It keeps the records so you can look at what happened, and it asks you to type `revoke` first
-(`--yes` skips the question). It works on a real machine, not only in a container. Run it from the kept copy,
-`sudo /usr/local/sbin/sirven revoke --all`, so code the agent could have edited never runs as root.
+(`--yes` skips the question). It works on a real machine, not only in a container. Run it through the launcher, `sudo /usr/local/sbin/sirven revoke --all`, which runs the root-owned kept copy, so code the agent
+could have edited never runs as root. Install lays the launcher down. Delete the folder you unpacked the package in, or grant a path that does not hold it.
 A plain install will not turn the account back on; `install.sh --reinstate` does, on purpose.
 
 ## known limitations, not built yet

@@ -32,7 +32,7 @@ if [ "$(uname -s)" = Linux ] && [ ! -x /usr/sbin/nologin ] && [ -x /sbin/nologin
 KILL_SWITCH_SWEEPS=6
 
 # the helpers run from the folder this installer runs from (install.sh re-runs itself from the root-owned
-# pinned copy when there is one, see lib/trust.sh), so the lock never waits on the pinned copy being there:
+# pinned copy when there is one, see the gate at the top of install.sh), so the lock never waits on the pinned copy being there:
 # the kill switch must work on a machine where that copy is gone.
 kill_switch_helper() {
   printf '%s/lib/%s' "$ROOT_DIR" "$1"

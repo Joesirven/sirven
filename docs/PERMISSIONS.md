@@ -390,15 +390,27 @@ the kill switch reads it to know what to remove.
   shell, removes the marker, writes a `reinstate` audit entry, and goes on with the install. the removed keys, services, jobs
   and grant do not come back. the kill switch itself never takes `--reinstate`.
 
-  **root runs only code root and the owner can write.** an agent that edited a copy of this package, for example one inside the folder
-  it was granted, would otherwise have its edits run as root by the kill switch. `lib/trust.sh` is read first by every entry script
-  (from the kept copy when there is one), and install, uninstall, rollback, repair and revoke then run the kept copy
-  `/var/lib/sirven/package`, which only root can write, instead of the copy they were started from. install is the exception, because it
-  is how a newer release replaces the kept copy: it runs from where it was started only if no account besides root and the owner can
-  write that folder (mode, owner, access list, the whole way to it; a read-only mount counts as safe), and runs the kept copy otherwise.
-  with no kept copy, a folder that the agent or any other account can write is refused, naming the place. this does not
-  help if the entry script the owner starts was itself edited: to be sure, run the kept copy, as the documentation says. not checked on a fake
-  root (`--prefix`) or in a dry run.
+  **root runs only code that root controls, and the path to it is built in, not looked up.** an agent that edited a copy of this
+  package, for example one inside the folder it was granted, must never have its edits run as root. so, as root, on every
+  command and every flag (`--dry-run`, `--help` and `--prefix` included, because a dry run reads the same code):
+  the same block of text sits at the top of `install.sh`, `uninstall.sh` and `bin/sirven` (a test keeps the three equal) and runs
+  before any library is read. it resets the search path to `/usr/sbin:/usr/bin:/sbin:/bin` and names the tools it uses by absolute
+  path; it takes the kept copy from the constant `/var/lib/sirven/package`, never from `project.json` or any file of the folder
+  under test (the package name must also be a plain lowercase name, and a `--prefix` that is or resolves to `/` is refused,
+  because it used to turn into a real run); the checker is the text of the block, not a file of the folder it judges; the
+  folder is resolved to its physical path once and every library is read through that path, so a link swapped in later changes
+  nothing. then: when a kept copy exists and this is not it, the kept copy runs instead, after the kept copy is checked too
+  (install is the exception, because it is how a newer release replaces the kept copy; it runs from where it was started only
+  if nobody but root and the owner who ran `sudo` can write that folder, and runs the kept copy otherwise). with no kept
+  copy (the first install), the folder must be one nobody but root and the owner can write. "can write" is judged on every
+  file and folder of the package tree and every folder on the way to it: owner, mode, group members, and access list entries; a
+  link that leaves the package is refused; a read-only mount is **not** taken as safe, because the same files can be writable
+  through another mount. the state directory is forced to mode 0700 and root as owner whether or not this run made it.
+  the safe way to run any root command is the launcher `/usr/local/sbin/sirven`, written by install, root-owned, mode 755: it
+  sets its own search path and runs the kept copy (`sudo /usr/local/sbin/sirven revoke --all`, `... uninstall`, `... grant rollback`,
+  `... install --reinstate`). the one limit left is the first install: it runs from the folder it was unpacked in, so unpack it where
+  only you can write, and delete it afterwards, or grant a path that does not hold it. the harness covers each route the reviews
+  found (scenarios 40 and 46 to 53, and `tests/harness/run-ro-bind.sh`).
 
   **uninstall is link-safe too.** the undo of the key files and of the `.ssh` folder calls the same helper instead of `rm`
   and `rmdir` by path, so a plain uninstall (no revoke first) cannot be steered through a link the agent planted: a `.ssh`

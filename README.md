@@ -37,6 +37,11 @@ sudo bash install.sh             # answer two questions: level, folder
 bash bin/sirven grant inspect    # see exactly what the agent can touch
 ```
 
+Unpack the package where only you can write, and delete that folder after the install (or grant a path that does not hold it): as root,
+it is the only code that runs from a place the agent could reach. Install lays down the launcher `/usr/local/sbin/sirven` and a
+root-owned kept copy in `/var/lib/sirven/package`; every root command after that goes through the launcher, for example
+`sudo /usr/local/sbin/sirven revoke --all`.
+
 Today the installer applies its plan only inside a Linux container run as root. On any other
 machine it refuses before changing anything, and `--dry-run` still shows the full plan. With the
 npm package (`npm install -g @joesirven/sirven`), `sirven` is on your path directly.

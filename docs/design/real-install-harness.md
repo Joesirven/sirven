@@ -127,6 +127,13 @@ Four kinds, all in `tests/harness/lib/world.sh`:
 
 Output uses the same `ok` / `not ok` lines as `tests/run.sh`, plus `known`.
 
+### 4.3b Running it on this Mac
+
+Docker Desktop on Omashu runs the same scenarios: `bash tests/harness/run-linux.sh`. The runner mounts the repository read only at
+`/src` and copies it inside the container to `/srv/pkg`, owned by root, because the installer (rightly) refuses, as root, to run code
+from a folder owned by the host user. The scenarios run that copy (`SRC=/srv/pkg`). The read-only mount case needs two mounts of one
+folder and has its own runner: `bash tests/harness/run-ro-bind.sh`.
+
 ### 4.3a Running it on a server
 
 Docker Desktop on Omashu may not start (task SIR-76). The same scenarios run on the server ba-sing-se over SSH, one container at a

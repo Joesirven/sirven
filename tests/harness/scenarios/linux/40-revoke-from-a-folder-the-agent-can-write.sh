@@ -12,9 +12,9 @@ set -uo pipefail
 mkdir -p /work && cp -r "$SRC" /work/repo && cd /work/repo || exit 2
 check_exit "first install from a copy only root can write applies" 0 bash install.sh --yes --level builder --transport none --path /work/repo
 check "precondition: the agent can write inside the granted copy" runuser -u agent -- test -w /work/repo/lib/kill_switch.sh
-check "the agent edits the kill switch library and the gate" runuser -u agent -- bash -c '
+check "the agent edits the kill switch library and two others" runuser -u agent -- bash -c '
   printf "\ntouch /tmp/ROOT-RAN-AGENT-CODE\n" >> /work/repo/lib/kill_switch.sh &&
-  printf "\ntouch /tmp/ROOT-RAN-AGENT-CODE\n" >> /work/repo/lib/trust.sh &&
+  printf "\ntouch /tmp/ROOT-RAN-AGENT-CODE\n" >> /work/repo/lib/plan.sh &&
   printf "\ntouch /tmp/ROOT-RAN-AGENT-CODE\n" >> /work/repo/lib/common.sh'
 setsid runuser -u agent -- sleep 600 >/dev/null 2>&1 &
 sleep 0.3
