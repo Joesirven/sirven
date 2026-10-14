@@ -150,17 +150,83 @@ test_revoke_reads_the_grant_record() {
   assert_status 0 install_sh revoke --all --dry-run --prefix "$root"
   assert_contains "$CAPTURED_STDOUT" "access_control_snapshot.sh restore"
   assert_contains "$CAPTURED_STDOUT" "$root/home/example/project yes agent"
-  assert_contains "$CAPTURED_STDOUT" "usermod --lock --expiredate 1"
-  assert_contains "$CAPTURED_STDOUT" "pkill -KILL -u agent"
+  assert_contains "$CAPTURED_STDOUT" "kill_switch_quiesce agent $root/var/lib/sirven/agent-quiesce.json"
+  assert_contains "$CAPTURED_STDOUT" "usermod --shell /usr/sbin/nologin agent"
+  assert_contains "$CAPTURED_STDOUT" "kill_switch_remove_keys $root/home/agent"
   assert_contains "$CAPTURED_STDOUT" "revoke_started"
   assert_contains "$CAPTURED_STDOUT" "revoke_finished"
+  assert_not_contains "$CAPTURED_STDOUT" "not yet"
 }
 
-test_revoke_apply_says_not_yet() {
+test_revoke_applies_on_a_fake_root() {
+  local root="$TEST_TMP/root" log first last
+  assert_status 0 install_sh --prefix "$root" --level builder --path /home/example/project --transport none
+  assert_status 0 install_sh revoke --all --prefix "$root" --transport none
+  assert_contains "$CAPTURED_STDOUT" "applied 9 steps, skipped 0 already done"
+  log="$(cat "$root/var/lib/sirven/simulated-system-commands.log")"
+  assert_contains "$log" "kill_switch_quiesce agent $root/var/lib/sirven/agent-quiesce.json"
+  assert_contains "$log" "usermod --shell /usr/sbin/nologin agent"
+  assert_contains "$log" "kill_switch_remove_keys $root/home/agent"
+  assert_contains "$log" "restore $root/var/lib/sirven/access-lists/"
+  # the record is kept, renamed, and uninstall can still remove it
+  assert_no_file "$root/etc/sirven/grants/agent.json"
+  assert_file_exists "$root/etc/sirven/grants/agent.json.revoked"
+  assert_contains "$(cat "$root/var/lib/sirven/install-record.tsv")" "rm -f $root/etc/sirven/grants/agent.json.revoked"
+  # revoke_started is the first entry of the run and revoke_finished the last
+  first="$(grep -n '"event": "revoke_started"' "$root/var/log/sirven/audit.jsonl" | cut -d: -f1)"
+  last="$(grep -n '"event": "revoke_finished"' "$root/var/log/sirven/audit.jsonl" | cut -d: -f1)"
+  assert_eq "$last" "$(grep -c . "$root/var/log/sirven/audit.jsonl")" "revoke_finished is the last entry"
+  assert_contains "$(sed -n "$((first + 1))p" "$root/var/log/sirven/audit.jsonl")" '"operation": "revoke", "step": 1'
+  assert_contains "$(sed -n "${last}p" "$root/var/log/sirven/audit.jsonl")" '"outcome": "finished"'
+  assert_contains "$(sed -n "${last}p" "$root/var/log/sirven/audit.jsonl")" '"paths": ["/home/example/project"]'
+}
+
+test_revoke_twice_is_idempotent_and_keeps_both_records() {
   local root="$TEST_TMP/root"
-  assert_status 3 install_sh revoke --all --prefix "$root" --path /srv/app
-  assert_contains "$CAPTURED_STDERR" "kill switch is plan output in the alpha cut"
-  assert_no_file "$root"
+  assert_status 0 install_sh --prefix "$root" --level builder --path /home/example/project --transport none
+  assert_status 0 install_sh revoke --all --prefix "$root" --transport none
+  assert_status 0 install_sh revoke --all --prefix "$root" --transport none
+  assert_contains "$CAPTURED_STDOUT" "no grant record at"
+  assert_file_exists "$root/etc/sirven/grants/agent.json.revoked"
+  # install, revoke again: the earlier revoked record is kept beside the new one, never overwritten
+  assert_status 0 install_sh --prefix "$root" --level observer --path /home/example/project --transport none
+  assert_status 0 install_sh revoke --all --prefix "$root" --transport none
+  assert_contains "$(cat "$root/etc/sirven/grants/agent.json.revoked")" '"level": "observer"'
+  assert_eq 1 "$(find "$root/etc/sirven/grants" -name 'agent.json.revoked.*' | grep -c .)" "the earlier revoked record is kept"
+}
+
+test_revoke_removes_the_recorded_paths_and_the_paths_given() {
+  local root="$TEST_TMP/root" log
+  assert_status 0 install_sh --prefix "$root" --level builder --path /home/example/project --transport none
+  assert_status 0 install_sh revoke --all --prefix "$root" --transport none --path /srv/other
+  log="$(cat "$root/var/lib/sirven/simulated-system-commands.log")"
+  assert_contains "$log" "restore $root/var/lib/sirven/access-lists/"
+  assert_contains "$log" "$root/home/example/project yes agent"
+  assert_contains "$log" "$root/srv/other yes agent"
+}
+
+test_revoke_locks_before_it_stops_for_an_unreadable_record() {
+  local root="$TEST_TMP/root" log
+  assert_status 0 install_sh --prefix "$root" --level builder --path /home/example/project --transport none
+  printf 'not json\n' > "$root/etc/sirven/grants/agent.json"
+  assert_status 4 install_sh revoke --all --prefix "$root" --transport none
+  log="$(cat "$root/var/lib/sirven/simulated-system-commands.log")"
+  assert_contains "$log" "kill_switch_quiesce agent"
+  assert_contains "$log" "kill_switch_remove_keys $root/home/agent"
+  assert_contains "$CAPTURED_STDERR" "cannot be read"
+  assert_contains "$CAPTURED_STDERR" "run the same command again: ./install.sh revoke --all"
+  assert_not_contains "$CAPTURED_STDERR" "release"
+  assert_eq "not json" "$(cat "$root/etc/sirven/grants/agent.json")" "the unreadable record is left where it was"
+  assert_contains "$(tail -1 "$root/var/log/sirven/audit.jsonl")" '"outcome": "failed"'
+}
+
+test_revoke_on_macos_is_still_plan_only() {
+  TEST_OS=macos
+  assert_status 0 install_sh revoke --all --dry-run --prefix "$TEST_TMP/root" --path /Users/example/code/app
+  assert_contains "$CAPTURED_STDOUT" "dscl . -create /Users/agent UserShell /usr/bin/false"
+  assert_status 3 install_sh revoke --all --prefix "$TEST_TMP/root" --path /Users/example/code/app
+  assert_contains "$CAPTURED_STDERR" "kill switch on macos is plan output"
+  assert_no_file "$TEST_TMP/root"
 }
 
 test_real_apply_is_refused_outside_a_container() {

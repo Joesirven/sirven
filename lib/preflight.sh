@@ -211,3 +211,20 @@ PREFLIGHT_SSH_COMMAND="${PREFLIGHT_SSH_COMMAND:-ssh}"
     die "preflight found $PREFLIGHT_PROBLEMS problem(s); nothing was changed"
   fi
 }
+
+# preflight_revoke OPERATING_SYSTEM STRICT: only what the kill switch itself runs. no transport tool is
+# asked for, because a machine that lost its tailscale or never had it must still be cut off.
+preflight_revoke() {
+  local os="$1" strict="$2"
+  PREFLIGHT_PROBLEMS=0
+  preflight_bash
+  preflight_python "$os"
+  preflight_commands yes grep sed tr head id uname dirname cut mv rm date
+  case "$os" in
+    linux) preflight_commands "$strict" usermod getent pkill pgrep ;;
+    macos) preflight_commands "$strict" dscl pkill pgrep ;;
+  esac
+  if [ "$PREFLIGHT_PROBLEMS" -gt 0 ]; then
+    die "preflight found $PREFLIGHT_PROBLEMS problem(s); nothing was changed"
+  fi
+}

@@ -7,44 +7,38 @@ sirven revoke plan
   mode: dry run: nothing will be changed
 
 kill switch: revoke --all
-    1. write revoke_started to the audit log (plan only)
-       $ printf '{"time": "%s", "event": "revoke_started", "user": "agent", "principal": "owner"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> <prefix>/var/log/sirven/audit.jsonl
-       not yet: the kill switch is plan output in the alpha cut; apply comes in alpha + 1
-    2. remove every authorized key for agent (plan only)
-       $ : > <prefix>/home/agent/.ssh/authorized_keys
-       not yet: the kill switch is plan output in the alpha cut; apply comes in alpha + 1
-    3. lock agent so no new session starts (plan only)
-       $ usermod --lock --expiredate 1 --shell /usr/sbin/nologin agent
-       not yet: the kill switch is plan output in the alpha cut; apply comes in alpha + 1
-    4. end every running session and process of agent (plan only)
-       $ pkill -KILL -u agent
-       not yet: the kill switch is plan output in the alpha cut; apply comes in alpha + 1
+     note: audit log: revoke_started is written before the first step and revoke_finished last, with the outcome. every step writes its own entry too.
+    1. end every process of agent and lock and expire its account, so nothing new starts (to do, recorded not run under --prefix)
+       $ kill_switch_quiesce agent <prefix>/var/lib/sirven/agent-quiesce.json
+    2. set the shell of agent to /usr/sbin/nologin (to do, recorded not run under --prefix)
+       $ usermod --shell /usr/sbin/nologin agent
+    3. stop and disable every service that runs as agent, and end its systemd session (to do, recorded not run under --prefix)
+       $ kill_switch_stop_services agent
+    4. remove every authorized key of agent, by name, without following a link (to do, recorded not run under --prefix)
+       $ kill_switch_remove_keys <prefix>/home/agent
 
 kill switch: access control lists
-    5. remove agent from /home/example/project and put back the access control lists it had (plan only)
+    5. remove agent from /home/example/project and put back the access control lists it had (to do, recorded not run under --prefix)
        $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh restore <prefix>/var/lib/sirven/access-lists/867467bcb77869b9.txt <prefix>/home/example/project yes agent --audit <prefix>/var/log/sirven/audit.jsonl
-       not yet: the kill switch is plan output in the alpha cut; apply comes in alpha + 1
-    6. stop agent passing through /home and put back its access control list (plan only)
+    6. stop agent passing through /home and put back its access control list (to do, recorded not run under --prefix)
        $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh restore <prefix>/var/lib/sirven/access-lists/2cc974af6afc822c.txt <prefix>/home no agent --audit <prefix>/var/log/sirven/audit.jsonl
-       not yet: the kill switch is plan output in the alpha cut; apply comes in alpha + 1
-    7. stop agent passing through /home/example and put back its access control list (plan only)
+    7. stop agent passing through /home/example and put back its access control list (to do, recorded not run under --prefix)
        $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh restore <prefix>/var/lib/sirven/access-lists/67a166d2c72af6bb.txt <prefix>/home/example no agent --audit <prefix>/var/log/sirven/audit.jsonl
-       not yet: the kill switch is plan output in the alpha cut; apply comes in alpha + 1
-    8. mark the grant record revoked (plan only)
-       $ mv <prefix>/etc/sirven/grants/agent.json <prefix>/etc/sirven/grants/agent.json.revoked
-       not yet: the kill switch is plan output in the alpha cut; apply comes in alpha + 1
+    8. mark the grant record revoked, and keep it (already done)
+       $ kill_switch_mark_revoked <prefix>/etc/sirven/grants/agent.json
+    9. forget the earlier state of the account, so no later step gives it back (to do)
+       $ rm -f <prefix>/var/lib/sirven/agent-quiesce.json
 
 kill switch: transport
-    9. remove the agent rule from your tailnet policy (owner, by hand)
-       tailscale admin console: delete the tag:agent rule and any unused auth key for it.
+   10. remove the tailscale auth key from disk, if one is left (already done)
+       $ rm -f <prefix>/etc/sirven/tailscale-auth-key
+   11. remove the agent rule from your tailnet policy (owner, by hand)
+       tailscale admin console: delete the tag:agent rule and any unused auth key for it. the keys and the account above already refuse the agent; this closes the way in.
 
 kill switch: finish
-   10. write revoke_finished to the audit log (plan only)
-       $ printf '{"time": "%s", "event": "revoke_finished", "user": "agent", "principal": "owner"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> <prefix>/var/log/sirven/audit.jsonl
-       not yet: the kill switch is plan output in the alpha cut; apply comes in alpha + 1
-     note: undo is a fresh install. nothing here is reversed automatically.
+     note: kept on purpose: the install record, the audit log, the revoked grant record, and the home folder of agent with whatever the agent left in it.
+     note: the account stays locked, expired, and on the /usr/sbin/nologin shell. to give the agent access again, unlock the account yourself and install again; nothing here is reversed automatically.
 
-summary: 10 steps. 0 to do, 0 already done, 1 by the owner, 9 plan only.
+summary: 11 steps. 8 to do, 2 already done, 1 by the owner, 0 plan only.
 dry run: nothing was changed. run the same command without --dry-run to apply this plan.
-applying would stop before any change: the plan has plan-only steps the alpha cut does not apply yet.
 exit status: 0

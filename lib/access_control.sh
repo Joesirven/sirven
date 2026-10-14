@@ -180,20 +180,68 @@ plan_access_control_release() {
     "bash $(rooted "$STATE_DIR/package/lib/access_control_snapshot.sh") release $SERVICE_USER $(rooted "$STATE_DIR/agent-quiesce.json")"
 }
 
-# removal steps for the kill switch. uses --path when given, otherwise the grant record.
+# removal steps for the kill switch. on macos: --path when given, otherwise the grant record, as plan output.
+# on linux: every path in the grant record plus every --path, so a --path never leaves a recorded grant behind,
+# as system steps. a record or a path the compiler refuses must not stop the lock and the key removal that
+# come before these steps, so the refusal is kept in KILL_SWITCH_LATE_FAILURE and becomes a step after them.
+# sets KILL_SWITCH_REVOKE_PATHS, the paths this plan removes, for the audit log.
 plan_access_control_revoke() {
-  local record fragment
+  local record fragment shown key value path known index status=0 message
   record="${PREFIX}$(access_control_record_file)"
   fragment="$STAGE_DIR/revoke-fragment.txt"
-  if [ "${#GRANT_PATHS[@]}" -gt 0 ]; then
-    _access_control_run_compiler "$fragment" revoke --level "$LEVEL_FILE" --prefix "$PREFIX"
-  elif [ -f "$record" ]; then
-    _access_control_run_compiler "$fragment" revoke --level "$LEVEL_FILE" --prefix "$PREFIX" --record "$record"
-  else
+  KILL_SWITCH_REVOKE_PATHS=()
+  if [ "$OPERATING_SYSTEM" = macos ]; then
+    if [ "${#GRANT_PATHS[@]}" -gt 0 ]; then
+      _access_control_run_compiler "$fragment" revoke --level "$LEVEL_FILE" --prefix "$PREFIX"
+    elif [ -f "$record" ]; then
+      _access_control_run_compiler "$fragment" revoke --level "$LEVEL_FILE" --prefix "$PREFIX" --record "$record"
+    else
+      plan_note "no grant record at $record and no --path given, so there are no access control lists to remove."
+      return 0
+    fi
+    _access_control_add_fragment "$fragment" planonly "$KILL_SWITCH_REASON"
+    return 0
+  fi
+
+  index=0
+  while [ "$index" -lt "${#GRANT_PATHS[@]}" ]; do
+    KILL_SWITCH_REVOKE_PATHS[${#KILL_SWITCH_REVOKE_PATHS[@]}]="${GRANT_PATHS[index]}"
+    index=$((index + 1))
+  done
+  if [ -f "$record" ]; then
+    shown="$(grant_compiler show --record "$record" 2>&1)" || status=$?
+    if [ "$status" -ne 0 ]; then
+      KILL_SWITCH_LATE_FAILURE="the grant record $record cannot be read, so the grants it lists were not removed: $(printf '%s' "$shown" | tr '\n' ' ') the account is locked and the keys are gone. repair or move that file aside, name the granted folders with --path, and run revoke --all again."
+      plan_note "the grant record $record cannot be read. the lock and the keys come first; a step after them stops the run with the reason."
+      return 0
+    fi
+    while IFS='=' read -r key value; do
+      [ "$key" = path ] || continue
+      known=no
+      index=0
+      while [ "$index" -lt "${#KILL_SWITCH_REVOKE_PATHS[@]}" ]; do
+        if [ "${KILL_SWITCH_REVOKE_PATHS[index]}" = "$value" ]; then known=yes; fi
+        index=$((index + 1))
+      done
+      if [ "$known" = no ]; then KILL_SWITCH_REVOKE_PATHS[${#KILL_SWITCH_REVOKE_PATHS[@]}]="$value"; fi
+    done <<END
+$shown
+END
+  fi
+  if [ "${#KILL_SWITCH_REVOKE_PATHS[@]}" -eq 0 ]; then
     plan_note "no grant record at $record and no --path given, so there are no access control lists to remove."
     return 0
   fi
-  _access_control_add_fragment "$fragment" planonly "$KILL_SWITCH_REASON"
+  GRANT_PATHS=()
+  for path in "${KILL_SWITCH_REVOKE_PATHS[@]}"; do GRANT_PATHS[${#GRANT_PATHS[@]}]="$path"; done
+  ( _access_control_run_compiler "$fragment" revoke --level "$LEVEL_FILE" --prefix "$PREFIX" ) 2> "$STAGE_DIR/revoke-compiler.error" || status=$?
+  if [ "$status" -ne 0 ]; then
+    message="$(tr '\n' ' ' < "$STAGE_DIR/revoke-compiler.error")"
+    KILL_SWITCH_LATE_FAILURE="the grant compiler refused the paths to remove: $message the account is locked and the keys are gone. fix the paths and run revoke --all again."
+    plan_note "the grant compiler refused the paths to remove. the lock and the keys come first; a step after them stops the run with the reason."
+    return 0
+  fi
+  _access_control_add_fragment "$fragment" system "$KILL_SWITCH_REASON"
 }
 
 # plan_access_control_remove_paths: removal steps for the paths in GRANT_PATHS only, as system

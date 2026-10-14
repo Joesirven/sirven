@@ -228,7 +228,18 @@ build_install_plan() {
   fi
 }
 
-# apply the plan, writing the install record and the audit log as it goes.
+# kill_switch_audit_paths: the paths the kill switch removed, as a JSON array for the audit log.
+kill_switch_audit_paths() {
+  local index=0 paths=""
+  while [ "$index" -lt "${#KILL_SWITCH_REVOKE_PATHS[@]}" ]; do
+    paths="${paths:+$paths, }$(audit_json_string "${KILL_SWITCH_REVOKE_PATHS[index]}")"
+    index=$((index + 1))
+  done
+  printf '[%s]' "$paths"
+}
+
+# apply the plan, writing the install record and the audit log as it goes. the kill switch writes
+# revoke_started before its first step and revoke_finished after its last, also when a step failed.
 apply_for_real() {
   local status=0 record before
   PLAN_RECORD_FILE="${PREFIX}$(layout_record_file)"
@@ -238,17 +249,28 @@ apply_for_real() {
   record="${PREFIX}$(access_control_record_file)"
   before="$STAGE_DIR/grant-before.json"
   if [ -f "$record" ]; then cp "$record" "$before"; fi
+  if [ "$COMMAND" = revoke ] && [ -z "$(plan_blockers)" ]; then
+    audit_write "$(audit_entry revoke_started "operation=revoke")"
+  fi
   plan_apply || status=$?
-  if [ "$status" -eq 4 ]; then access_control_report_locked_account; fi
+  if [ "$status" -eq 4 ]; then
+    if [ "$COMMAND" = revoke ]; then kill_switch_report_failure; else access_control_report_locked_account; fi
+  fi
   if [ "$status" -ne 3 ]; then
-    if [ "$COMMAND" = install ]; then
+    if [ "$COMMAND" = revoke ]; then
+      if [ "$status" -eq 0 ]; then
+        audit_write "$(audit_entry revoke_finished "operation=revoke" "outcome=finished" "json:paths=$(kill_switch_audit_paths)")"
+      else
+        audit_write "$(audit_entry revoke_finished "operation=revoke" "outcome=failed" "json:exit_status=$status" "json:paths=$(kill_switch_audit_paths)")"
+      fi
+    else
       adopt_audit_entries
       audit_grant_change "$before" "$record" install
-    fi
-    if [ "$status" -eq 0 ]; then
-      audit_write "$(audit_entry "$COMMAND" "operation=$COMMAND" "level=$LEVEL" "outcome=finished")"
-    else
-      audit_write "$(audit_entry "$COMMAND" "operation=$COMMAND" "level=$LEVEL" "outcome=failed" "json:exit_status=$status")"
+      if [ "$status" -eq 0 ]; then
+        audit_write "$(audit_entry "$COMMAND" "operation=$COMMAND" "level=$LEVEL" "outcome=finished")"
+      else
+        audit_write "$(audit_entry "$COMMAND" "operation=$COMMAND" "level=$LEVEL" "outcome=failed" "json:exit_status=$status")"
+      fi
     fi
   fi
   audit_flush
@@ -301,7 +323,13 @@ main() {
     refusal="$(plan_real_apply_refusal)"
     [ -z "$refusal" ] || DIE_STATUS=3 die "not applied: $refusal"
   fi
-  preflight_all "$OPERATING_SYSTEM" "$TRANSPORT" "$strict"
+  if [ "$COMMAND" = revoke ]; then
+    # the kill switch needs no transport tool and no SSH probe: it must work on a machine where
+    # tailscale is gone or never was, and it must not stop on something it does not use.
+    preflight_revoke "$OPERATING_SYSTEM" "$strict"
+  else
+    preflight_all "$OPERATING_SYSTEM" "$TRANSPORT" "$strict"
+  fi
 
   # what is already here comes first: a grant in force answers the questions it can.
   if [ "$COMMAND" = install ]; then

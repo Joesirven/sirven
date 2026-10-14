@@ -1,27 +1,38 @@
 #!/usr/bin/env bash
-# the kill switch and the refusals. revoke is plan only today (exit 3); the known_defect lines
-# are the acceptance test for SIR-32 and flip to real assertions when it lands.
+# the kill switch applies, and the refusals. revoke --all with a live agent process: the account is locked,
+# expired and on the nologin shell, nothing of the agent's runs, the agent can no longer read the granted folder,
+# and the access control lists are back exactly as before the install (SIR-32). then a real apply as an
+# ordinary user is refused before any change.
 set -uo pipefail
 . "$(dirname "$0")/../../lib/world.sh"
 cd "$SRC" || exit 2
 
-mkdir -p /srv/app && echo hello > /srv/app/file.txt
+# the folder and the file are private to root, so the agent reads them only through its access list entry.
+mkdir -p /srv/app && echo hello > /srv/app/file.txt && chmod 700 /srv/app && chmod 600 /srv/app/file.txt
+world_acls /srv > /tmp/before.acls
 bash install.sh --yes --level observer --transport none --path /srv/app >/dev/null 2>&1
+
+agent_reads() { setpriv --reuid="$(id -u agent)" --regid="$(id -g agent)" --clear-groups cat /srv/app/file.txt; }
+check "precondition: the agent reads the granted folder through its list entry" agent_reads
 
 # something running as the agent, so "no processes remain" can fail for the right reason.
 setsid runuser -u agent -- sleep 600 >/dev/null 2>&1 &
 sleep 0.3
 check "precondition: a process of agent is running" pgrep -u agent
 
-check_exit "revoke --all refuses to apply while it is plan only" 3 bash install.sh revoke --all --yes --level observer --transport none --path /srv/app
-check "a refused revoke changed nothing: agent still exists" id -u agent
-known_defect "revoke --all applies and exits 0" SIR-32 \
-  bash -c 'cd "$0" && bash install.sh revoke --all --yes --level observer --transport none --path /srv/app >/dev/null' "$SRC"
-known_defect "after revoke the account is locked" SIR-32 \
-  bash -c '[ "$(getent passwd agent | cut -d: -f7)" = /usr/sbin/nologin ] && passwd --status agent | grep -q "^agent L"'
-known_defect "after revoke the agent can no longer read the granted folder" SIR-32 \
-  bash -c '! runuser -u agent -- cat /srv/app/file.txt 2>/dev/null'
-known_defect "after revoke no sessions or processes of agent remain" SIR-32 bash -c '! pgrep -u agent'
+check_exit "revoke --all applies" 0 bash install.sh revoke --all --yes --level observer --transport none --path /srv/app
+check "the account is locked, expired, and on the nologin shell" bash -c '
+  [ "$(getent passwd agent | cut -d: -f7)" = /usr/sbin/nologin ] &&
+  passwd --status agent | grep -q "^agent L" &&
+  [ "$(getent shadow agent | cut -d: -f8)" = 1 ]'
+check "after revoke no sessions or processes of agent remain" bash -c '! pgrep -u agent && ! pgrep -U agent'
+check "after revoke the agent can no longer read the granted folder" bash -c '! setpriv --reuid="$(id -u agent)" --regid="$(id -g agent)" --clear-groups cat /srv/app/file.txt'
+check "no list entry of the agent is left" bash -c '! getfacl -R -n -p /srv | grep -Eq "^(default:)?user:[0-9]+:"'
+world_unchanged "access control lists match the machine before the install" acls /tmp/before.acls /srv
+check "the install record, the audit log and the revoked grant record are kept" bash -c '
+  [ -s /var/lib/sirven/install-record.tsv ] && [ -s /var/log/sirven/audit.jsonl ] &&
+  [ -f /etc/sirven/grants/agent.json.revoked ] && [ ! -e /etc/sirven/grants/agent.json ]'
+check "the earlier state marker is gone, so no later step unlocks the account" bash -c '[ ! -e /var/lib/sirven/agent-quiesce.json ]'
 
 # a real apply as an ordinary user is refused before any change.
 check_exit "an ordinary user is refused" 3 setpriv --reuid=65534 --regid=65534 --clear-groups bash install.sh --yes --level observer --transport none
