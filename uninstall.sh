@@ -31,7 +31,7 @@ set -euo pipefail
 # what it does: a copy of this package other than the kept one is never run as root when the kept one exists (install is the
 # exception, to upgrade, and only from a folder that nobody but root and the owner can write). with no kept copy, the folder it
 # runs from must be one that nobody but root and the owner can write, the whole way down and up. the kept copy itself must be
-# that too. the safe way to run any root command is the launcher /usr/local/sbin/sirven, which runs the kept copy.
+# that too. the safe way to run any root command is the one install prints: the launcher /usr/local/sbin/sirven when its folder is safe, else the kept copy.
 if [ -z "${BASH_SOURCE[0]:-}" ]; then
   printf 'error: run this as a file, for example: bash install.sh ... . started from standard input or with -c it cannot tell which folder it belongs to, and so cannot check the code it would read. nothing was changed.\n' >&2
   exit 2
@@ -196,7 +196,7 @@ sirven_gate() {
   fi
   if ! output="$(sirven_vet "$ROOT_DIR" "$owner" 2>&1)"; then
     printf 'error: refusing to run as root from %s: %s can change the code there, and it would run as root:\n%s\n' "$ROOT_DIR" "$who" "$output" >&2
-    printf 'there is no kept copy to run instead. run it from a folder only %s can write, or, once installed, with the launcher: sudo /usr/local/sbin/sirven ...\nnothing was changed.\n' "${owner}" >&2
+    printf 'there is no kept copy to run instead. run it from a folder only %s can write, or, once installed, with the root command that install prints (it is the launcher when its folder is safe, and the kept copy otherwise).\nnothing was changed.\n' "${owner}" >&2
     exit 2
   fi
 }
@@ -232,7 +232,7 @@ options:
 
 only steps recorded in the install record are reversed. the service user's home folder is
 kept, with whatever the agent left in it. to cut access now without removing anything, use
-the kill switch: sudo /usr/local/sbin/sirven revoke --all (--dry-run reads the plan first)
+the kill switch: $(layout_root_command revoke) (--dry-run reads the plan first)
 
 examples:
   ./uninstall.sh --dry-run

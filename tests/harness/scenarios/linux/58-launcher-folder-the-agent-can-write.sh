@@ -19,6 +19,12 @@ check "no launcher was written into the folder the agent can write" bash -c '[ !
 check "the plan says the launcher is not installed, and why" bash -c 'grep -q "the launcher /usr/local/sbin/sirven is NOT installed" <<< "$0" && grep -q "can be changed by an account other than root" <<< "$0"' "$out"
 check "it gives the kept-copy commands instead" bash -c 'grep -q "sudo bash /var/lib/sirven/package/install.sh revoke --all" <<< "$0" && grep -q "sudo bash /var/lib/sirven/package/uninstall.sh" <<< "$0"' "$out"
 check "it says anything found at that path is not ours" grep -q 'anything found at that path is not ours: do not run it' <<< "$out"
+check "--help of the installer and the uninstaller point at the kept copy, not at the launcher path" bash -c '
+  for helper in install.sh uninstall.sh; do
+    text="$(bash /var/lib/sirven/package/$helper --help 2>&1)"
+    grep -q "sudo bash /var/lib/sirven/package/install.sh revoke --all" <<< "$text" || exit 1
+    ! grep -q "sudo /usr/local/sbin/sirven" <<< "$text" || exit 1
+  done'
 check "it does not tell the owner to run the launcher" bash -c '! grep -q "sudo /usr/local/sbin/sirven" <<< "$0"' "$out"
 
 # the agent plants its own launcher, then the owner runs the command install advertised
@@ -42,6 +48,7 @@ check "no launcher, no folder made for it, and the plan says so" bash -c '[ ! -e
 chown root /usr/local; mkdir -p /usr/local/sbin; chown root /usr/local/sbin; chmod 755 /usr/local/sbin
 check_exit "install again, with the folders root's" 0 bash install.sh --yes --level observer --transport none --path /srv/app
 check "the launcher is there, root-owned, mode 755, and advertised" bash -c '[ "$(stat -c "%a %u" /usr/local/sbin/sirven)" = "755 0" ] && grep -q "sudo /usr/local/sbin/sirven revoke --all" <<< "$0"' "$LAST_OUTPUT"
+check "with the folders root's, --help names the launcher" bash -c 'bash /var/lib/sirven/package/install.sh --help | grep -q "sudo /usr/local/sbin/sirven revoke --all" && bash /var/lib/sirven/package/uninstall.sh --help | grep -q "sudo /usr/local/sbin/sirven revoke --all"'
 # and it is checked again when it is written
 chown agent /usr/local/sbin; rm -f /usr/local/sbin/sirven
 check "the step itself refuses to write into a folder that stopped being safe" bash -c '

@@ -29,6 +29,7 @@ check "(1) and the agent's code did not run" bash -c '! getent passwd agent && [
 rm -rf /work/bad && cp -r "$SRC" /work/bad && chmod o+w /work/bad/lib && cd /work/bad || exit 2
 check_exit "(2) install from a folder everyone can write is refused" 2 bash install.sh --yes --level observer --transport none
 check "(2) it names the folder and says why" grep -q '/work/bad/lib: writable by everyone' <<< "$LAST_OUTPUT"
+check "(2) the refusal does not point at the launcher path" bash -c '! grep -q "usr/local/sbin/sirven" <<< "$0"' "$LAST_OUTPUT"
 check "(2) nothing was created" bash -c '! getent passwd agent && [ ! -e /var/lib/sirven ]'
 chmod o-w /work/bad/lib
 useradd -m intruder

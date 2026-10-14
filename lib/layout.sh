@@ -123,8 +123,10 @@ LAYOUT_LAUNCHER="/usr/local/sbin/sirven"
 # entry script), on a real linux machine only; a fake root and other systems have nothing real to judge. a folder that does not exist
 # yet is judged by the nearest one that does, since the install creates the rest as root.
 layout_launcher_safe() {
-  local folder
-  [ -z "$PREFIX" ] && [ "$OPERATING_SYSTEM" = linux ] || return 0
+  local folder os
+  # (also called by --help, before the arguments and the operating system are known)
+  os="${OPERATING_SYSTEM:-$(detect_os)}"
+  [ -z "${PREFIX:-}" ] && [ "$os" = linux ] || return 0
   command -v sirven_vet >/dev/null 2>&1 || return 1
   folder="$(dirname "$LAYOUT_LAUNCHER")"
   while [ ! -d "$folder" ] && [ "$folder" != / ]; do folder="$(dirname "$folder")"; done
@@ -193,7 +195,7 @@ END
 }
 
 layout_package_copy() {
-  printf '%s/package' "$STATE_DIR"
+  printf '%s/package' "${STATE_DIR:-/var/lib/sirven}"
 }
 
 # layout_real_folder PATH: the resolved absolute path of an existing folder, nothing otherwise.

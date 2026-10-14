@@ -25,7 +25,7 @@ set -euo pipefail
 # what it does: a copy of this package other than the kept one is never run as root when the kept one exists (install is the
 # exception, to upgrade, and only from a folder that nobody but root and the owner can write). with no kept copy, the folder it
 # runs from must be one that nobody but root and the owner can write, the whole way down and up. the kept copy itself must be
-# that too. the safe way to run any root command is the launcher /usr/local/sbin/sirven, which runs the kept copy.
+# that too. the safe way to run any root command is the one install prints: the launcher /usr/local/sbin/sirven when its folder is safe, else the kept copy.
 if [ -z "${BASH_SOURCE[0]:-}" ]; then
   printf 'error: run this as a file, for example: bash install.sh ... . started from standard input or with -c it cannot tell which folder it belongs to, and so cannot check the code it would read. nothing was changed.\n' >&2
   exit 2
@@ -190,7 +190,7 @@ sirven_gate() {
   fi
   if ! output="$(sirven_vet "$ROOT_DIR" "$owner" 2>&1)"; then
     printf 'error: refusing to run as root from %s: %s can change the code there, and it would run as root:\n%s\n' "$ROOT_DIR" "$who" "$output" >&2
-    printf 'there is no kept copy to run instead. run it from a folder only %s can write, or, once installed, with the launcher: sudo /usr/local/sbin/sirven ...\nnothing was changed.\n' "${owner}" >&2
+    printf 'there is no kept copy to run instead. run it from a folder only %s can write, or, once installed, with the root command that install prints (it is the launcher when its folder is safe, and the kept copy otherwise).\nnothing was changed.\n' "${owner}" >&2
     exit 2
   fi
 }
@@ -235,7 +235,8 @@ usage() {
   cat <<END
 usage:
   ./install.sh [options]              set up agent access
-  sudo /usr/local/sbin/sirven revoke --all [options]  the kill switch: cut the agent off now, keep the records
+  $(layout_root_command revoke) [options]
+                                      the kill switch: cut the agent off now, keep the records
 
 setup asks at most two questions, the level and the path, each with its default shown. a flag
 or environment variable answers a question ahead of time. with --yes, or with no terminal to
@@ -273,7 +274,7 @@ examples:
   ./install.sh --dry-run --level builder --path /home/you/code/app
   SIRVEN_LEVEL=builder SIRVEN_PATH=/srv/app ./install.sh --yes --dry-run
   ./install.sh --dry-run --prefix /tmp/fake-root --level observer --path /srv/app --transport none
-  sudo /usr/local/sbin/sirven revoke --all --dry-run
+  $(layout_root_command revoke) --dry-run
 
 nothing is applied to a real machine in the alpha cut, except inside a linux container as root, and
 revoke --all, which only takes access away and also runs on a real linux machine as root. a real revoke asks
