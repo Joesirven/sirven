@@ -110,8 +110,30 @@ test_peer_verify_refuses_a_lock_held_by_a_live_process() {
   export SIRVEN_ATTESTATION_TEST_LOCK_WAIT_MS=300
   assert_status 3 attest peer verify --dir "$TEST_TMP/peer" --host shop.example.com --bytes 100 --envelope "$TEST_TMP/envelope.json"
   assert_contains "$CAPTURED_STDOUT" '"reason": "lock_unavailable"'
+  assert_contains "$CAPTURED_STDOUT" "peer/verify.lock is held by process $$ on host"
   assert_contains "$(cat "$TEST_TMP/peer/verify.lock")" live-holder
 }
+
+# sets the modification time of a file to the given number of hours ago, with node so it works on
+# both macOS and Linux.
+age_file_hours() {
+  node -e 'const fs = require("fs"); const at = (Date.now() - Number(process.argv[2]) * 3600e3) / 1000; fs.utimesSync(process.argv[1], at, at);' "$1" "$2"
+}
+
+test_a_lock_whose_owner_cannot_be_checked_is_cleared_after_a_day() {
+  have_node || return 0
+  setup_roles
+  attest sign --dir "$TEST_TMP/originator" --audience "$(cat "$TEST_TMP/peer/peer-identifier")" --domain shop.example.com --bytes 100 > "$TEST_TMP/envelope.json"
+  write_lock_record "$(gone_pid)" "elsewhere.invalid" other-host
+  export SIRVEN_ATTESTATION_TEST_LOCK_WAIT_MS=300
+  age_file_hours "$TEST_TMP/peer/verify.lock" 23
+  assert_status 3 attest peer verify --dir "$TEST_TMP/peer" --host shop.example.com --bytes 100 --envelope "$TEST_TMP/envelope.json"
+  assert_contains "$(cat "$TEST_TMP/peer/verify.lock")" other-host
+  age_file_hours "$TEST_TMP/peer/verify.lock" 25
+  assert_status 0 attest peer verify --dir "$TEST_TMP/peer" --host shop.example.com --bytes 100 --envelope "$TEST_TMP/envelope.json"
+  assert_no_file "$TEST_TMP/peer/verify.lock"
+}
+
 
 test_peer_verify_clears_the_lock_of_a_process_that_is_gone() {
   have_node || return 0
