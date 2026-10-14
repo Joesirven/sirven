@@ -103,15 +103,36 @@ test_with_bb_is_a_plan_only_note() {
   assert_no_file "$TEST_TMP/root"
 }
 
-test_macos_plan_is_plan_only() {
+test_macos_plan_applies_on_a_fake_root() {
   TEST_OS=macos
   assert_status 0 install_sh --dry-run --prefix "$TEST_TMP/root" --level builder --path /Users/example/code/app --transport none
   assert_contains "$CAPTURED_STDOUT" "operating system: macos"
   assert_contains "$CAPTURED_STDOUT" "dscl . -create /Users/agent"
   assert_contains "$CAPTURED_STDOUT" "/bin/chmod -h +a"
   assert_not_contains "$CAPTURED_STDOUT" "setfacl"
-  assert_status 3 install_sh --prefix "$TEST_TMP/root" --level builder --path /Users/example/code/app --transport none
-  assert_contains "$CAPTURED_STDERR" "macos virtual machine"
+  assert_not_contains "$CAPTURED_STDOUT" "(plan only)"
+  assert_status 0 install_sh --prefix "$TEST_TMP/root" --level builder --path /Users/example/code/app --transport none
+  assert_contains "$CAPTURED_STDOUT" "applied"
+  assert_file_exists "$TEST_TMP/root/var/lib/sirven/install-record.tsv"
+  # the system steps are recorded, not run
+  assert_contains "$(cat "$TEST_TMP/root/var/lib/sirven/simulated-system-commands.log")" "service_user_macos_create agent 601 "
+  assert_contains "$(cat "$TEST_TMP/root/var/lib/sirven/simulated-system-commands.log")" "/bin/chmod -h +a 'agent allow search' "
+  # every grant step records its undo, and the account removal comes after them in the record
+  assert_contains "$(cat "$TEST_TMP/root/var/lib/sirven/install-record.tsv")" "access_control_macos.sh sweep agent yes "
+  assert_contains "$(cat "$TEST_TMP/root/var/lib/sirven/install-record.tsv")" "dscl . -delete /Users/agent"
+}
+
+# a dry run on a real root changes nothing, so it can say what a real apply would meet. the real apply
+# itself is never run from a test: its refusal is pinned in test_plan_engine.sh by calling the function.
+test_macos_dry_run_says_a_real_apply_would_be_refused() {
+  TEST_OS=macos
+  assert_status 0 env -u SIRVEN_MACOS_REAL_APPLY SIRVEN_OS_OVERRIDE=macos "$REPO_DIR/install.sh" --dry-run --transport none --yes --owner example
+  assert_contains "$CAPTURED_STDOUT" "applying would be refused on this machine: applying to a real macos machine is not verified yet"
+}
+
+test_help_names_the_macos_switch() {
+  assert_status 0 install_sh --help
+  assert_contains "$CAPTURED_STDOUT" "sudo env SIRVEN_MACOS_REAL_APPLY=1 bash install.sh"
 }
 
 test_paths_the_policy_refuses() {

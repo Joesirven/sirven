@@ -74,15 +74,28 @@ test_revoke_from_record_matches_revoke_from_paths() {
     "$(compiler revoke --level "$LEVEL_BUILDER" --os linux --path /srv/app)"
 }
 
+# on macos the undo is not the revoke subtraction: it sweeps every entry of the agent (see
+# lib/access_control_macos.py), because a subtraction leaves the entries a new file inherited and fails
+# on a file with no list. revoke keeps its subtraction, which the kill switch uses.
 test_with_undo_pairs_every_grant_with_its_removal() {
-  local os=macos with_undo undo_commands revoke_commands
+  local os=macos with_undo undo_commands
   with_undo="$(compiler compile --level "$LEVEL_BUILDER" --os "$os" --with-undo --path /srv/b --path /opt/site/app)"
   assert_eq "" "$(printf '%s\n' "$with_undo" | grep -v '^#' | awk -F '\t' 'NF != 6')" "six fields on $os"
   assert_eq "$(compiler compile --level "$LEVEL_BUILDER" --os "$os" --path /srv/b --path /opt/site/app)" \
     "$(printf '%s\n' "$with_undo" | cut -f1-3)" "the first three fields are the plain compile on $os"
-  undo_commands="$(printf '%s\n' "$with_undo" | grep -v '^#' | cut -f6 | sort)"
-  revoke_commands="$(compiler revoke --level "$LEVEL_BUILDER" --os "$os" --path /srv/b --path /opt/site/app | grep -v '^#' | cut -f3 | sort)"
-  assert_eq "$revoke_commands" "$undo_commands" "undo and revoke agree on $os"
+  undo_commands="$(printf '%s\n' "$with_undo" | grep -v '^#' | cut -f6)"
+  assert_eq "" "$(printf '%s\n' "$undo_commands" | grep -v '^bash /var/lib/sirven/package/lib/access_control_macos.sh sweep agent ')" "every macos undo is a sweep"
+  assert_contains "$undo_commands" "sweep agent yes /srv/b"
+  assert_contains "$undo_commands" "sweep agent no /opt"
+  assert_eq "" "$(printf '%s\n' "$with_undo" | grep -v '^#' | cut -f5 | grep -v 'access_control_macos.sh status agent ')" "every macos undo check reads the whole tree"
+  assert_eq "" "$(printf '%s\n' "$undo_commands" | grep -F 'chmod')" "no macos undo is a subtraction"
+}
+
+test_macos_revoke_keeps_its_subtraction() {
+  local revoke
+  revoke="$(compiler revoke --level "$LEVEL_BUILDER" --os macos --path /srv/b)"
+  assert_contains "$revoke" "/bin/chmod -h -a "
+  assert_not_contains "$revoke" "access_control_macos.sh"
 }
 
 test_linux_with_undo_records_a_snapshot_before_any_change() {

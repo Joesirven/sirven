@@ -316,6 +316,22 @@ def macos_folders_removal(rights, user, target, path):
             % (target, shlex.quote("%s allow %s" % (user, rights["directories"]))))
 
 
+def macos_helper(package):
+    """the helper that checks and sweeps the lists, in the pinned copy the install keeps."""
+    return "/var/lib/%s/package/lib/access_control_macos.sh" % package
+
+
+def macos_sweep_removal(user, target, path, tree, title, prefix, package):
+    """the undo of a macos grant: remove every entry of the agent from the path and, for a granted folder,
+    everything inside it, then check that none is left. not the subtraction revoke uses: see the header of
+    lib/access_control_macos.py for why that cannot restore a list exactly."""
+    helper = shlex.quote(prefix + macos_helper(package))
+    word = linux_recursive_word(tree)
+    return (title,
+            "bash %s status %s %s %s" % (helper, user, word, target),
+            "bash %s sweep %s %s %s" % (helper, user, word, target))
+
+
 def compile_linux(level, user, prefix, paths, with_undo=False, package="sirven"):
     grant = level["access_control"]["linux"]["grant"]
     traverse = level["access_control"]["linux"]["traverse"]
@@ -389,16 +405,20 @@ def compile_linux(level, user, prefix, paths, with_undo=False, package="sirven")
     return lines
 
 
-def compile_macos(level, user, prefix, paths, with_undo=False, package=None):
+def compile_macos(level, user, prefix, paths, with_undo=False, package="sirven"):
     rights = level["access_control"]["macos"]
     lines = []
+
+    def undo(target, path, tree, title):
+        return with_undo and macos_sweep_removal(user, target, path, tree, title, prefix, package)
+
     for parent in traverse_parents(paths):
         target = shlex.quote(prefix + parent)
         lines.append(fragment_line(
             "let %s pass through %s" % (user, parent),
             "/bin/ls -lde %s 2>/dev/null | grep -q 'user:%s allow search'" % (target, user),
             "/bin/chmod -h +a %s %s" % (shlex.quote("%s allow %s" % (user, rights["traverse"])), target),
-            with_undo and macos_traverse_removal(rights, user, target, parent)))
+            undo(target, parent, False, "stop %s passing through %s" % (user, parent))))
     for path in paths:
         target = shlex.quote(prefix + path)
         marker = "/bin/ls -lde %s 2>/dev/null | grep -q 'user:%s allow list'" % (target, user)
@@ -407,13 +427,13 @@ def compile_macos(level, user, prefix, paths, with_undo=False, package=None):
             marker,
             "/usr/bin/find -P %s -type f -exec /bin/chmod -h +a %s {} +"
             % (target, shlex.quote("%s allow %s" % (user, rights["files"]))),
-            with_undo and macos_files_removal(rights, user, target, path)))
+            undo(target, path, True, "remove every entry of %s from %s and everything inside it" % (user, path))))
         lines.append(fragment_line(
             "grant %s folder rights on %s and folders inside, inherited by new files" % (user, path),
             marker,
             "/usr/bin/find -P %s -type d -exec /bin/chmod -h +a %s {} +"
             % (target, shlex.quote("%s allow %s" % (user, rights["directories"]))),
-            with_undo and macos_folders_removal(rights, user, target, path)))
+            undo(target, path, True, "remove every entry of %s from %s and everything inside it" % (user, path))))
     return lines
 
 

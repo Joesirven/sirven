@@ -443,7 +443,7 @@ main() {
   preflight_commands yes rm rmdir grep cut awk python3
   case "$OPERATING_SYSTEM" in
     linux) preflight_commands "$strict" userdel pkill setfacl getfacl ;;
-    macos) preflight_commands "$strict" dscl pkill ;;
+    macos) preflight_commands "$strict" dscl pkill python3 ;;
   esac
   if [ "$PREFLIGHT_PROBLEMS" -gt 0 ]; then
     die "preflight found $PREFLIGHT_PROBLEMS problem(s); nothing was changed"
