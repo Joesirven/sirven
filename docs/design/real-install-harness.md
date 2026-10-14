@@ -139,7 +139,7 @@ folder and has its own runner: `bash tests/harness/run-ro-bind.sh`.
 Docker Desktop on Omashu may not start (task SIR-76). The same scenarios run on the server ba-sing-se over SSH, one container at a
 time and capped: `--memory 256m --memory-swap 256m --pids-limit 256 --cpus 1 --network none --cap-drop NET_RAW`, with available
 memory checked before every run (stop below 800 MB), existing containers never touched, and every container and image the run
-made removed afterwards. Scenarios 26 and 27 ask for more memory and are skipped there. The image now also holds `openssh-server`,
+made removed afterwards. Scenario 27 asks for 3 GB and is skipped there. Scenarios 17, 22 and 26 carry the header `# harness-apparmor: unconfined`: on ba-sing-se the default AppArmor profile fails their deep chains with ENAMETOOLONG (errno 36), so those three containers run with `--security-opt apparmor=unconfined`. Nothing else about them changes (no host folder, no network, the same caps and memory cap). Docker Desktop on Omashu has no AppArmor and runs them as before. The image now also holds `openssh-server`,
 `openssh-client`, `cron` and `at`, so key logins, cron jobs and at jobs are real; systemd is not there, so scenario 36 uses stand-ins
 for `systemctl` and `loginctl`.
 
