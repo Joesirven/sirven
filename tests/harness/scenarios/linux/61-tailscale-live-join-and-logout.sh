@@ -16,6 +16,8 @@ cd "$SRC" || exit 2
 ENV_KEY="${SIRVEN_TAILSCALE_AUTHKEY:-}"
 # docker --env-file keeps the quotes a dotenv writer may put around a value, and a key with quotes is not a key
 ENV_KEY="${ENV_KEY#[\"\']}"; ENV_KEY="${ENV_KEY%[\"\']}"
+# the harness passes the key line of a dotenv file and nothing else from it: a canary variable in that file must not be here
+check "no variable of the secrets file but the key reached this container" bash -c '[ -z "${SIRVEN_HARNESS_CANARY:-}" ]'
 BAD_KEY="tskey""-auth-kINVALIDinvalid-INVALIDINVALIDINVALIDINVALIDINVALID"
 unset SIRVEN_TAILSCALE_AUTHKEY TAILSCALE_AUTHKEY
 export BAD_KEY
