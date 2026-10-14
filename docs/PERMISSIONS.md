@@ -271,12 +271,21 @@ the kill switch reads it to know what to remove.
   using the mask as the group bits would have widened access nobody granted.
   this holds for uninstall, rollback and the kill switch alike.
 
+  **the snapshot is as large as the lists the tree already had, not as large as the tree.** it records only paths
+  that held a list before the grant (a default list, a mask, a named entry: earlier default lists, earlier entries of
+  the agent or the folder owner), written into a sqlite file as the walk goes and looked up by device and inode
+  when undo meets each path, so nothing is loaded whole. an agent that makes 300,000 empty folders adds nothing to
+  it and costs 15 MB to record and 15 MB to restore (it was 239 MB and 335 MB). the cost is that the warning for a
+  folder the agent replaced with a link now names only folders that held a list; a swapped folder with no list
+  of its own is not followed either, but is not named in the audit log. snapshots written by earlier versions of this
+  package (a text format) are not read: undo treats them as missing, removes the grant's entries and warns.
+
   **memory.** the walk keeps no path per open folder and no listing for a folder it let go of: a folder is a
   few small values and its own name, the path is built only when something is printed, and a let-go folder is
   listed again (sorted, resuming after the last name read) when it is reopened. problems are counted and only
   the first ten are kept. so 3,000 levels of 255-character names, or 240,000 long-named files, stay under about
-  25 MB in the install-time check and in uninstall, and a tree of 301,001 entries takes about 11.5 s and 61 MB to
-  install and 4.4 s and 88 MB to uninstall. a folder lost from under the walk (moved, replaced or removed after it
+  25 MB in the install-time check and in uninstall, and a tree of 301,001 entries takes about 10.5 s to
+  install and 4.0 s to uninstall, each with about 15 MB in the helper. a folder lost from under the walk (moved, replaced or removed after it
   was let go) is an error with a recovery hint, never a silent skip.
 
   **depth and descriptors.** the walk is iterative and keeps the deepest 48 folders open, whatever the depth,

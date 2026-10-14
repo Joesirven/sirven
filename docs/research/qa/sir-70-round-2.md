@@ -95,3 +95,13 @@ the narrower default-list removal.
 | should fix 2: the mask comes back wider | the recorded mask is restored when the grant's entries come off a path that had named entries | 25 |
 
 Against 2211d8f: scenario 22 fails 6 assertions, 23 fails 3, 24 fails 5, 25 fails 6, 26 fails 3.
+
+# Round 5 (re-review 4 of b9e1b21)
+
+| Item | Change | Scenario |
+| --- | --- | --- |
+| E memory linear in the number of folders | The snapshot records only paths that held a list (default lists, masks, named entries), as rows written while the walk goes into a sqlite file, looked up by device and inode when undo meets each path; nothing is loaded whole. The re-review proposed a line-by-line text stream; undo is driven by the walk, not by the snapshot, so it needs a lookup by inode, which a text stream cannot give without loading it. The sqlite file is the smallest thing that does. | 27: 300,000 empty folders made by the agent, then a rollback to a lower level (record at the re-grant) and uninstall. Peak 15 MB and 15 MB (b9e1b21: 156 MB and 220 MB in this container; the re-review measured 239 MB and 335 MB), snapshots under 2 MB (72 MB). The scenario asks the runner for 3 GB with a `# harness-memory: 3g` header, because the kernel's own cache of 300,000 folders with inherited lists needs it; the helper needs 15 MB. |
+| 301,001-entry baseline | install 10.5 s and 15 MB (was 11.5 s and 61 MB), uninstall 4.0 s and 15 MB (was 4.4 s and 88 MB) | probe |
+| link-swap warning | now covers folders that held a list; a swapped folder with no list is not followed, and not named. Scenarios 07 and 15 give the swapped folder a default list of its own; scenario 07 also swaps a plain folder and checks its target is unchanged. | 07, 15 |
+
+Snapshots written by earlier versions of this package are not read (undo removes the grant's entries and warns, as for a missing snapshot).
