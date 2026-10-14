@@ -250,11 +250,7 @@ END
   first=$PLAN_COUNT
   _access_control_add_fragment "$fragment" system "$KILL_SWITCH_REASON"
   # each restore is attempted whatever happens to the others, and each is read again at the end
-  index=$first
-  while [ "$index" -lt "$PLAN_COUNT" ]; do
-    if [ "${PLAN_KIND[index]}" = system ]; then PLAN_CONTINUE[index]=yes; PLAN_TAG[index]=verify; fi
-    index=$((index + 1))
-  done
+  plan_continue_since "$first" verify
 }
 
 # plan_access_control_remove_paths: removal steps for the paths in GRANT_PATHS only, as system

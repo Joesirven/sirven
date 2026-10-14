@@ -146,6 +146,18 @@ plan_continue() {
   PLAN_CONTINUE[PLAN_COUNT - 1]=yes
 }
 
+# plan_continue_since FIRST TAG: every run or system step added since step index FIRST may fail without stopping the
+# run (see plan_continue) and gets TAG. for a module that adds a list of steps through a helper.
+plan_continue_since() {
+  local index="$1"
+  while [ "$index" -lt "$PLAN_COUNT" ]; do
+    case "${PLAN_KIND[index]}" in
+      run | system) PLAN_CONTINUE[index]=yes; PLAN_TAG[index]="$2" ;;
+    esac
+    index=$((index + 1))
+  done
+}
+
 # plan_tag TAG: tag the most recent step.
 plan_tag() {
   [ "$PLAN_COUNT" -gt 0 ] || die "plan_tag: no step to tag"
@@ -400,7 +412,7 @@ _plan_recheck() {
   [ "$PLAN_RECHECK" = yes ] || return 0
   [ "${PLAN_ASSUMED_UNDONE[index]}" != yes ] || return 0
   if [ "${PLAN_KIND[index]}" = system ] && [ -n "$PLAN_PREFIX" ]; then return 0; fi
-  if _plan_check_passes "${PLAN_CHECK[index]}"; then PLAN_STATUS[index]=done; else PLAN_STATUS[index]=todo; fi
+  if _plan_check_passes "${PLAN_CHECK[index]}"; then PLAN_STATUS[index]="done"; else PLAN_STATUS[index]="todo"; fi
 }
 
 # apply the evaluated plan. refuses up front, before any change, if any step cannot run.
