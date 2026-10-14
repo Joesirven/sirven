@@ -43,6 +43,7 @@ snapshot recorded (same device and inode), or it is skipped with a warning.
 
 import argparse
 import base64
+import bisect
 import datetime
 import errno
 import json
@@ -125,12 +126,65 @@ MAX_DEPTH = 30000  # deeper than this is reported by name and skipped
 
 
 class Frame:
-    """one folder being walked: its identity, where it is, what is left to read in it."""
-    __slots__ = ("fd", "ident", "name", "path", "names", "position", "parent")
+    """one folder being walked. memory per folder is a few small values and its own name, never its path: the
+    path is built only when something is printed. the listing is kept only while the folder is held open;
+    a folder let go is listed again when it is reopened, and resumes after the last name it had read."""
+    __slots__ = ("fd", "ident", "name", "names", "position", "last")
 
-    def __init__(self, fd, ident, name, path, names, parent):
-        self.fd, self.ident, self.name, self.path = fd, ident, name, path
-        self.names, self.position, self.parent = names, 0, parent
+    def __init__(self, fd, ident, name, names):
+        self.fd, self.ident, self.name = fd, ident, name
+        self.names, self.position, self.last = names, 0, None
+
+
+class Where:
+    """a place in the tree, as the folders above it and a last name. the path is built by path(), when asked,
+    from the walk's live frame list, so ask at once (inside visit or when recording an error)."""
+    __slots__ = ("frames", "leaf")
+
+    def __init__(self, frames, leaf=None):
+        self.frames, self.leaf = frames, leaf
+
+    @property
+    def name(self):
+        return self.leaf if self.leaf is not None else self.frames[-1].name
+
+    def path(self):
+        parts = [self.frames[0].name.rstrip(b"/")]
+        parts.extend(b"/" + frame.name for frame in self.frames[1:])
+        if self.leaf is not None:
+            parts.append(b"/" + self.leaf)
+        return b"".join(parts) or b"/"
+
+
+def resolve(where):
+    """bytes for a Where (built now) or for a path already in bytes."""
+    return where.path() if isinstance(where, Where) else where
+
+
+class Capped:
+    """the first LISTED items of a list an agent could make as long as it likes, and a count of the rest, so
+    reporting many problems never costs memory."""
+
+    def __init__(self):
+        self.items, self.count = [], 0
+
+    def append(self, item):
+        self.count += 1
+        if len(self.items) < LISTED:
+            self.items.append((resolve(item[0]), item[1]) if isinstance(item, tuple) else item)
+
+    def merge(self, other):
+        self.count += other.count
+        self.items.extend(other.items[:max(0, LISTED - len(self.items))])
+
+    def __len__(self):
+        return self.count
+
+    def __getitem__(self, index):
+        return self.items[index]
+
+    def __iter__(self):
+        return iter(self.items)
 
 
 def identity(info):
@@ -157,29 +211,50 @@ def reopen(frames, index):
         return None
 
 
-def walk(folder_fd, path, visit, errors, on_link=None):
-    """call visit(handle, info, path, is_folder, parent) for the folder and everything below it. the handle is
-    an open descriptor, or for a pipe, device, or socket a /proc/self/fd path naming one; parent is the
-    (device, inode) of the folder it is in, None for the start folder. symbolic links are skipped (on_link is
-    told of each one); a path that cannot be opened is reported, not fatal.
+def relist(frame):
+    """read a folder's names again, sorted, and resume after the last name it had read."""
+    frame.names = sorted(os.listdir(frame.fd))
+    frame.position = bisect.bisect_right(frame.names, frame.last) if frame.last is not None else 0
 
-    iterative: only the deepest HELD folders are kept open, and a folder let go is opened again from the one
-    below it ("..", checked against the identity recorded when it was first opened), so no depth, however
-    great, needs more descriptors or any recursion."""
+
+LOST = ("moved, replaced or removed while it was being read, so the names still to be read in it were not visited. "
+        "run the same command again")
+
+
+def walk(folder_fd, path, visit, errors, on_link=None):
+    """call visit(handle, info, where, is_folder, parent) for the folder and everything below it. the handle is
+    an open descriptor, or for a pipe, device, or socket a /proc/self/fd path naming one; where.name is the last
+    name (the whole path for the start folder) and where.path() the path; parent is the (device, inode) of the
+    folder it is in, None for the start folder. symbolic links are skipped (on_link is told of each one); a path
+    that cannot be opened is reported, not fatal. a folder lost from under the walk is reported as an error.
+
+    iterative, and bounded in memory whatever the depth or the names: only the deepest HELD folders are kept
+    open, with their listings; a folder let go is opened again from the one below it ("..", checked against
+    the identity recorded when it was first opened) and listed again."""
     root_info = os.fstat(folder_fd)
-    visit(folder_fd, root_info, path, True, None)
+    root = Frame(folder_fd, identity(root_info), path, None)
+    frames = [root]
+    visit(folder_fd, root_info, Where(frames), True, None)
     try:
-        names = os.listdir(folder_fd)
+        root.names = sorted(os.listdir(folder_fd))
     except OSError as error:
-        errors.append((path, "cannot list: %s" % error.strerror))
+        errors.append((Where(frames), "cannot list: %s" % error.strerror))
         return
-    frames = [Frame(folder_fd, identity(root_info), b"", path, names, None)]
     while frames:
         top = frames[-1]
         if top.fd is None:
             top.fd = reopen(frames, len(frames) - 1)
             if top.fd is None:
-                frames.pop()  # moved or removed since it was read; what is left in it is not reachable safely
+                errors.append((Where(frames), LOST))
+                frames.pop()
+                continue
+        if top.names is None:
+            try:
+                relist(top)
+            except OSError as error:
+                errors.append((Where(frames), "cannot list: %s" % error.strerror))
+                os.close(top.fd)
+                frames.pop()
                 continue
         if top.position >= len(top.names):
             frames.pop()
@@ -197,8 +272,8 @@ def walk(folder_fd, path, visit, errors, on_link=None):
             continue
         name = top.names[top.position]
         top.position += 1
+        top.last = name
         raw = os.fsencode(name)
-        child = top.path.rstrip(b"/") + b"/" + raw
         try:
             before = os.stat(name, dir_fd=top.fd, follow_symlinks=False)
             if stat.S_ISDIR(before.st_mode):
@@ -212,41 +287,43 @@ def walk(folder_fd, path, visit, errors, on_link=None):
                 descriptor = os.open(name, os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=top.fd)
             else:
                 if stat.S_ISLNK(before.st_mode) and on_link:
-                    on_link(top.ident, raw, child)
+                    on_link(top.ident, raw, Where(frames, raw))
                 continue
         except FileNotFoundError:
             continue
         except OSError as error:
             if error.errno == errno.ELOOP:
                 if on_link:
-                    on_link(top.ident, raw, child)
+                    on_link(top.ident, raw, Where(frames, raw))
             else:
-                errors.append((child, error.strerror))
+                errors.append((Where(frames, raw), error.strerror))
             continue
         keep = False
         try:
             opened = os.fstat(descriptor)
             if identity(opened) != identity(before) or stat.S_IFMT(opened.st_mode) != stat.S_IFMT(before.st_mode):
-                errors.append((child, "changed while it was being read"))
+                errors.append((Where(frames, raw), "changed while it was being read"))
             elif stat.S_ISDIR(opened.st_mode):
                 if len(frames) >= MAX_DEPTH:
-                    errors.append((child, "deeper than %d levels, so it and everything in it was skipped. remove that "
-                                   "folder (rm -r) and run the same command again" % MAX_DEPTH))
+                    errors.append((Where(frames, raw), "deeper than %d levels, so it and everything in it was skipped. "
+                                   "remove that folder (rm -r) and run the same command again" % MAX_DEPTH))
                 else:
-                    visit(descriptor, opened, child, True, top.ident)
-                    frames.append(Frame(descriptor, identity(opened), raw, child, os.listdir(descriptor), top.ident))
+                    visit(descriptor, opened, Where(frames, raw), True, top.ident)
+                    frames.append(Frame(descriptor, identity(opened), raw, sorted(os.listdir(descriptor))))
                     keep = True
                     if len(frames) > HELD + 1:
-                        let_go = frames[len(frames) - 2 - HELD]
-                        if let_go.fd is not None and len(frames) - 2 - HELD > 0:
+                        index = len(frames) - 2 - HELD
+                        let_go = frames[index]
+                        if let_go.fd is not None and index > 0:
                             os.close(let_go.fd)
                             let_go.fd = None
+                            let_go.names = None
             elif stat.S_ISREG(opened.st_mode):
-                visit(descriptor, opened, child, False, top.ident)
+                visit(descriptor, opened, Where(frames, raw), False, top.ident)
             else:
-                visit("/proc/self/fd/%d" % descriptor, opened, child, False, top.ident)
+                visit("/proc/self/fd/%d" % descriptor, opened, Where(frames, raw), False, top.ident)
         except OSError as error:
-            errors.append((child, error.strerror))
+            errors.append((Where(frames, raw), error.strerror))
         finally:
             if not keep:
                 os.close(descriptor)
@@ -259,7 +336,8 @@ def start(path, recursive, visit, errors, on_link=None):
         if recursive:
             walk(descriptor, os.fsencode(path), visit, errors, on_link)
         else:
-            visit(descriptor, os.fstat(descriptor), os.fsencode(path), True, None)
+            info = os.fstat(descriptor)
+            visit(descriptor, info, Where([Frame(descriptor, identity(info), os.fsencode(path), None)]), True, None)
     finally:
         os.close(descriptor)
 
@@ -281,6 +359,7 @@ def describe_user(number):
 
 
 def printable(path):
+    path = resolve(path)
     return os.fsdecode(path).encode("utf-8", "backslashreplace").decode("utf-8").replace("\n", "\\n").replace("\t", "\\t")
 
 
@@ -343,7 +422,7 @@ def problems_in(entries, ours, where):
     return found
 
 
-def scan(folder, recursive, user):
+def scan(folder, recursive, user, collect=True):
     """walk the folder once. returns (context, entries, refusals, errors)."""
     resolved = os.path.realpath(folder)
     descriptor = open_folder(resolved)
@@ -354,16 +433,18 @@ def scan(folder, recursive, user):
     agent = account_number(user)
     ours = {number for number in (agent, info.st_uid) if number is not None}
     context = {"resolved": resolved, "dev": info.st_dev, "ino": info.st_ino, "agent": agent, "owner": info.st_uid}
-    entries, refusals, errors = [], [], []
+    entries, refusals, errors = [], Capped(), Capped()
 
-    def visit(fd, item, path, is_folder, parent=None):
+    def visit(fd, item, where, is_folder, parent=None):
         access = read_list(fd, ACCESS)
         default = read_list(fd, DEFAULT) if is_folder and recursive else None
         # the agent owns what it made and can put any entry on it itself, so those paths never block a
         # change of level or a rollback.
         if item.st_uid != agent:
             for reason in problems_in(access, ours, "access") + problems_in(default, ours, "default"):
-                refusals.append((path, reason))
+                refusals.append((where, reason))
+        if not collect:  # the check only looks for refusals; it keeps nothing for a snapshot
+            return
         record = {}
         if access is not None and (has_named(access) or any(tag == MASK for tag, _, _ in access)):
             record["access"] = base64.b64encode(build(access)).decode()
@@ -371,7 +452,7 @@ def scan(folder, recursive, user):
             record["default"] = base64.b64encode(build(default)).decode()
         if is_folder or "access" in record:
             # the name and the parent, not the whole path, so a deep tree costs a line per folder, not a path per folder
-            record.update({"n": (path if parent is None else path.rsplit(b"/", 1)[-1]).hex(),
+            record.update({"n": where.name.hex(),
                            "u": list(parent) if parent else None,
                            "d": item.st_dev, "i": item.st_ino, "k": "d" if is_folder else "f"})
             entries.append(record)
@@ -475,24 +556,30 @@ def start_checked(arguments, recursive, visit, errors):
     return agent, info
 
 
-def finish_changes(errors):
+def report_errors(errors):
     for path, reason in errors[:LISTED]:
         say("error: %s: %s" % (printable(path), reason))
+    if len(errors) > LISTED:
+        say("error: and %d more" % (len(errors) - LISTED))
+
+
+def finish_changes(errors):
+    report_errors(errors)
     return EXIT_FAILED if errors else 0
 
 
 def command_grant_access(arguments):
     recursive = arguments.recursive == "yes"
-    errors = []
+    errors = Capped()
 
-    def visit(handle, item, path, is_folder, parent=None):
+    def visit(handle, item, where, is_folder, parent=None):
         try:
             current = read_list(handle, ACCESS)
             wanted = access_with_grant(current, stat.S_IMODE(item.st_mode), is_folder, agent, arguments.permissions)
             if wanted != current:
                 os.setxattr(handle, ACCESS, build(wanted))
         except OSError as error:
-            errors.append((path, error.strerror))
+            errors.append((where, error.strerror))
 
     agent = account_number(arguments.user)
     start_checked(arguments, recursive, visit, errors)
@@ -500,10 +587,10 @@ def command_grant_access(arguments):
 
 
 def command_grant_default(arguments):
-    errors = []
+    errors = Capped()
     owner = []
 
-    def visit(handle, item, path, is_folder, parent=None):
+    def visit(handle, item, where, is_folder, parent=None):
         if not is_folder:
             return
         try:
@@ -515,7 +602,7 @@ def command_grant_default(arguments):
             if wanted != read_list(handle, DEFAULT):
                 os.setxattr(handle, DEFAULT, build(wanted))
         except OSError as error:
-            errors.append((path, error.strerror))
+            errors.append((where, error.strerror))
 
     agent = account_number(arguments.user)
     start_checked(arguments, True, visit, errors)
@@ -533,16 +620,16 @@ def command_verify_access(arguments):
     agent = account_number(arguments.user)
     if agent is None:
         return 1
-    missing, errors = [], []
+    missing, errors = [], Capped()
 
-    def visit(handle, item, path, is_folder, parent=None):
+    def visit(handle, item, where, is_folder, parent=None):
         try:
             current = read_list(handle, ACCESS)
             wanted = access_with_grant(current, stat.S_IMODE(item.st_mode), is_folder, agent, arguments.permissions)
             if agent_bits(current, agent) != agent_bits(wanted, agent):
-                missing.append(path)
+                missing.append(1)
         except OSError as error:
-            errors.append((path, error.strerror))
+            errors.append((where, error.strerror))
 
     start(os.path.realpath(arguments.folder), recursive, visit, errors)
     return 1 if missing or errors else 0
@@ -553,9 +640,9 @@ def command_verify_default(arguments):
     agent = account_number(arguments.user)
     if agent is None:
         return 1
-    bad, errors, owner = [], [], []
+    bad, errors, owner = [], Capped(), []
 
-    def visit(handle, item, path, is_folder, parent=None):
+    def visit(handle, item, where, is_folder, parent=None):
         if not is_folder:
             return
         try:
@@ -568,9 +655,9 @@ def command_verify_default(arguments):
                 (tag, perm) in [(t, p) for t, p, n in current if n == number]
                 for tag, perm, number in wanted if tag in (USER, GROUP_OBJ, OTHER))
             if not same:
-                bad.append(path)
+                bad.append(1)
         except OSError as error:
-            errors.append((path, error.strerror))
+            errors.append((where, error.strerror))
 
     start(os.path.realpath(arguments.folder), True, visit, errors)
     return 1 if bad or errors else 0
@@ -634,24 +721,26 @@ def command_release(arguments):
 # ---- commands ----
 
 def command_check(arguments):
-    refusals, unreadable = [], []
+    refusals, unreadable = Capped(), Capped()
     for recursive, folders in ((True, arguments.tree), (False, arguments.alone)):
         for folder in folders:
             if not os.path.isdir(folder):
                 continue
             try:
-                _, _, found, errors = scan(folder, recursive, arguments.user)
+                _, _, found, errors = scan(folder, recursive, arguments.user, collect=False)
             except OSError as error:
                 unreadable.append((os.fsencode(folder), error.strerror))
                 continue
-            refusals.extend(found)
-            unreadable.extend(errors)
+            refusals.merge(found)
+            unreadable.merge(errors)
     if refusals:
         print_refusals(refusals)
         return EXIT_REFUSED
     if unreadable:
         for path, reason in unreadable[:LISTED]:
             sys.stdout.write("  %s (could not read: %s)\n" % (printable(path), reason))
+        if len(unreadable) > LISTED:
+            sys.stdout.write("  and %d more\n" % (len(unreadable) - LISTED))
         return EXIT_FAILED
     return 0
 
@@ -663,8 +752,7 @@ def command_record(arguments):
         print_refusals(refusals)
         return EXIT_REFUSED
     if errors:
-        for path, reason in errors[:LISTED]:
-            say("error: %s: %s" % (printable(path), reason))
+        report_errors(errors)
         return EXIT_FAILED
     document = {"format": FORMAT, "folder": os.fsencode(arguments.folder).hex(),
                 "recursive": recursive, "context": context, "entries": entries}
@@ -721,7 +809,7 @@ def access_without_grant(current, agent, owner, recorded):
         again = [entry for entry in before if entry[0] == USER and entry[2] in (agent, owner)]
         kept = kept + again
         masks = [entry[1] for entry in before if entry[0] == MASK]
-        if again and masks:
+        if masks:  # the mask it had, no wider: the grant raised it, and it must not stay raised
             kept = [(tag, perm & masks[0], number) if tag == MASK else (tag, perm, number) for tag, perm, number in kept]
     return collapsed(kept)
 
@@ -756,13 +844,14 @@ def access_without_leftovers(current, owner):
 
 
 def default_is_leftover(current, owner):
-    """a default list the grant wrote and an old undo left: group and other get nothing, and the only named
-    entries are for the folder owner or for numbers no account has."""
+    """a default list the grant wrote and an old undo left: it has a mask, and the only named entries are for
+    the folder owner or for numbers no account has (the agent's was removed or its account is gone). the
+    older grant copied the folder's own group and other bits into it, so those are not required to be closed.
+    an ordinary default list has no mask unless it names someone, so it is not taken for a leftover."""
     if current is None:
         return False
-    closed = all(perm == 0 for tag, perm, _ in current if tag in (GROUP_OBJ, OTHER))
     named_ours = all(number == owner or not has_account(number) for tag, _, number in current if tag == USER)
-    return closed and named_ours and any(tag == MASK for tag, _, _ in current)
+    return named_ours and any(tag == MASK for tag, _, _ in current)
 
 
 def undo_access(fd, agent, owner, recorded, changes):
@@ -789,7 +878,7 @@ def undo_default(fd, agent, recorded, changes):
     changes.append(1)
 
 
-def undo_leftovers(fd, owner, with_default, path, changes, dry):
+def undo_leftovers(fd, owner, with_default, where, changes, dry):
     """the no-account form of undo for one path. records the path in changes; writes unless dry."""
     current = read_list(fd, ACCESS)
     wanted = access_without_leftovers(current, owner) if current else None
@@ -797,7 +886,7 @@ def undo_leftovers(fd, owner, with_default, path, changes, dry):
     drop_default = default_is_leftover(default, owner)
     if wanted is None and not drop_default:
         return
-    changes.append(path)
+    changes.append((where, ""))
     if dry:
         return
     if wanted is not None:
@@ -849,7 +938,7 @@ def restore_folder(arguments):
         return 0
     owner = snapshot["context"]["owner"] if snapshot else info.st_uid
     recorded = snapshot["by_identity"] if snapshot else {}
-    changes, errors = [], []
+    changes, errors = Capped(), Capped()
     by_place = snapshot["by_place"] if snapshot else {}
 
     def replaced(parent, name, path, what):
@@ -857,35 +946,32 @@ def restore_folder(arguments):
         if item is not None:
             warnings.add("%s was a folder when the grant was made and is now %s; it was not followed" % (printable(path), what))
 
-    def visit(fd, item, path, is_folder, parent=None):
+    def visit(fd, item, where, is_folder, parent=None):
         earlier = recorded.get((item.st_dev, item.st_ino), {})
         if is_folder and parent:
-            place = by_place.get((tuple(parent), path.rsplit(b"/", 1)[-1].hex()))
+            place = by_place.get((tuple(parent), where.name.hex()))
             if place is not None and (place["d"], place["i"]) != (item.st_dev, item.st_ino):
-                warnings.add("%s is not the folder that was recorded (it was replaced during the grant)" % printable(path))
+                warnings.add("%s is not the folder that was recorded (it was replaced during the grant)" % printable(where))
         try:
             if leftovers:
-                undo_leftovers(fd, owner, is_folder and recursive, path, changes, getattr(arguments, "dry_run", False))
+                undo_leftovers(fd, owner, is_folder and recursive, where, changes, getattr(arguments, "dry_run", False))
                 return
             undo_access(fd, agent, owner, earlier.get("access"), changes)
             if is_folder and recursive:
                 undo_default(fd, agent, earlier.get("default"), changes)
         except OSError as error:
-            errors.append((path, error.strerror))
+            errors.append((where, error.strerror))
 
     start(resolved, recursive, visit, errors,
           lambda parent, name, path: replaced(parent, name, path, "a symbolic link"))
     if leftovers:
-        for path in changes[:LISTED]:
+        for path, _ in changes[:LISTED]:
             say("%s %s" % ("would change" if getattr(arguments, "dry_run", False) else "changed", printable(path)))
         if len(changes) > LISTED:
             say("and %d more" % (len(changes) - LISTED))
         if not changes:
             say("nothing left to remove in %s" % arguments.folder)
-    for path, reason in errors[:LISTED]:
-        say("error: %s: %s" % (printable(path), reason))
-    if len(errors) > LISTED:
-        say("error: and %d more" % (len(errors) - LISTED))
+    report_errors(errors)
     return EXIT_FAILED if errors else 0
 
 
@@ -911,14 +997,14 @@ def command_status(arguments):
         return 0
     left = []
 
-    def visit(fd, item, path, is_folder, parent=None):
+    def visit(fd, item, where, is_folder, parent=None):
         for name in (ACCESS, DEFAULT) if is_folder and recursive else (ACCESS,):
             entries = read_list(fd, name)
             if entries and any(tag == USER and number == agent for tag, _, number in entries):
-                left.append(path)
+                left.append(1)
 
     try:
-        start(os.path.realpath(arguments.folder), recursive, visit, [])
+        start(os.path.realpath(arguments.folder), recursive, visit, Capped())
     except OSError:
         return 1
     return 1 if left else 0
