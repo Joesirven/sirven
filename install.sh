@@ -67,6 +67,8 @@ options:
                              asked default: the current folder when it can be granted
   --transport NAME           tailscale (default), cloudflare, or none
   --with-bb                  add the bb install note to the plan (plan only for now)
+  --reinstate                turn an account the kill switch cut off back on (unlock, no expiry, the
+                             /bin/bash shell) and go on with the install. without it, install refuses
   --user NAME                service user name (default: agent)
   --owner NAME               owner account that holds the audit log (default: you)
   --help                     show this help
@@ -115,6 +117,7 @@ parse_arguments() {
   SERVICE_USER=agent
   OWNER="${SUDO_USER:-$(id -un)}"
   REVOKE_ALL=no
+  REINSTATE=no
 
   if [ "$#" -gt 0 ] && [ "$1" = revoke ]; then
     COMMAND=revoke
@@ -138,6 +141,7 @@ parse_arguments() {
       --owner) needs_value "$1" "$#" "${2:-}"; OWNER="$2"; shift ;;
       --owner=*) OWNER="${1#*=}" ;;
       --all) REVOKE_ALL=yes ;;
+      --reinstate) REINSTATE=yes ;;
       -h | --help) usage; exit 0 ;;
       *) usage_error "unknown option '$1'" ;;
     esac
@@ -171,6 +175,9 @@ parse_arguments() {
   fi
   if [ "$COMMAND" = revoke ] && [ "$REVOKE_ALL" != yes ]; then
     usage_error "revoke needs --all; revoking one invite is designed, not built"
+  fi
+  if [ "$COMMAND" = revoke ] && [ "$REINSTATE" = yes ]; then
+    usage_error "--reinstate only goes with install; the kill switch never turns an account back on"
   fi
   if [ "$COMMAND" = install ] && [ "$REVOKE_ALL" = yes ]; then
     usage_error "--all only goes with revoke"
@@ -211,6 +218,7 @@ plan_with_bb() {
 
 build_install_plan() {
   plan_adopt
+  plan_reinstate
   plan_layout
   plan_audit
   plan_service_user
@@ -251,6 +259,9 @@ apply_for_real() {
   if [ -f "$record" ]; then cp "$record" "$before"; fi
   if [ "$COMMAND" = revoke ] && [ -z "$(plan_blockers)" ]; then
     audit_write "$(audit_entry revoke_started "operation=revoke")"
+  fi
+  if [ "$COMMAND" = install ] && [ "$REINSTATE" = yes ] && kill_switch_account_cut_off "$SERVICE_USER"; then
+    audit_write "$(audit_entry reinstate "operation=install" "message=$SERVICE_USER was cut off by the kill switch (expired, shell $KILL_SWITCH_NOLOGIN); --reinstate turns it back on")"
   fi
   plan_apply || status=$?
   if [ "$status" -eq 4 ]; then

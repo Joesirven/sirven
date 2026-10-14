@@ -9,6 +9,9 @@ standard library python, linux only, started by the kill switch plan (lib/kill_s
       from that descriptor, so a name the agent turned into a link is removed as a name and the
       file it pointed at is never opened, read, truncated or changed. when .ssh itself is a link
       (the agent swapped it), the link name is removed from the home folder. prints what it did.
+  remove-ssh-folder HOME
+      remove the .ssh folder of the agent when it is empty (uninstall), by the same no-follow walk: a .ssh that is a
+      link is removed as a name, a folder with anything left in it is kept and said so, nothing is followed.
   keys-gone HOME
       read only. exit 0 when no key file and no .ssh link is left, by the same no-follow walk.
 
@@ -17,6 +20,7 @@ nothing here is done by path below the home folder, and nothing is truncated: a 
 not emptied, because emptying writes through a link.
 """
 
+import errno
 import os
 import stat
 import sys
@@ -96,6 +100,33 @@ def command_remove_keys(home):
     return 0
 
 
+def command_remove_ssh_folder(home):
+    base = open_folder(home)
+    if base is None:
+        return 0
+    try:
+        found = entry(".ssh", base)
+        if found is None:
+            return 0
+        if stat.S_ISLNK(found.st_mode):
+            os.unlink(".ssh", dir_fd=base)
+            print("removed the link %s/.ssh (it was not a folder); what it pointed at was not opened or changed" % home)
+            return 0
+        if not stat.S_ISDIR(found.st_mode):
+            print("       kept %s/.ssh: it is not a folder this package created" % home)
+            return 0
+        try:
+            os.rmdir(".ssh", dir_fd=base)
+        except OSError as error:
+            if error.errno in (errno.ENOTEMPTY, errno.EEXIST):
+                print("       kept %s/.ssh: it holds files this package did not create" % home)
+                return 0
+            raise
+    finally:
+        os.close(base)
+    return 0
+
+
 def command_keys_gone(home):
     base = open_folder(home)
     if base is None:
@@ -122,17 +153,19 @@ def command_keys_gone(home):
 
 
 def main(arguments):
-    if len(arguments) != 2 or arguments[0] not in ("remove-keys", "keys-gone"):
-        sys.stderr.write("usage: kill_switch.py remove-keys|keys-gone HOME\n")
+    if len(arguments) != 2 or arguments[0] not in ("remove-keys", "remove-ssh-folder", "keys-gone"):
+        sys.stderr.write("usage: kill_switch.py remove-keys|remove-ssh-folder|keys-gone HOME\n")
         return 2
     try:
         if arguments[0] == "remove-keys":
             return command_remove_keys(arguments[1])
+        if arguments[0] == "remove-ssh-folder":
+            return command_remove_ssh_folder(arguments[1])
         return command_keys_gone(arguments[1])
     except Failure as error:
         sys.stderr.write("error: %s\n" % error)
         sys.stderr.write("recovery: look at %s as root (ls -la), remove the link or odd entry by hand "
-                         "(rm, never rm -r through a link), and run revoke --all again\n" % arguments[1])
+                         "(rm, never rm -r through a link), and run the same command again\n" % arguments[1])
         return 1
     except OSError as error:
         sys.stderr.write("error: %s: %s\n" % (error.filename or arguments[1], error.strerror))

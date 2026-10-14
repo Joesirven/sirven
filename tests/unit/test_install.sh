@@ -228,6 +228,15 @@ test_revoke_refuses_root_and_the_owner() {
   assert_no_file "$TEST_TMP/root"
 }
 
+test_reinstate_goes_with_install_only() {
+  assert_status 64 install_sh revoke --all --reinstate --dry-run
+  assert_contains "$CAPTURED_STDERR" "--reinstate only goes with install"
+  assert_status 0 install_sh --dry-run --reinstate --prefix "$TEST_TMP/root" --path /srv/app --transport none
+  assert_contains "$CAPTURED_STDOUT" "reinstate agent, as --reinstate asked"
+  assert_status 0 install_sh --dry-run --prefix "$TEST_TMP/root" --path /srv/app --transport none
+  assert_not_contains "$CAPTURED_STDOUT" "reinstate agent"
+}
+
 test_revoke_on_macos_is_still_plan_only() {
   TEST_OS=macos
   assert_status 0 install_sh revoke --all --dry-run --prefix "$TEST_TMP/root" --path /Users/example/code/app

@@ -295,6 +295,11 @@ adopt_refuse_conflicts() {
       "keep it as it is and run again with --transport none: the agent stays reachable over your tailnet, under your tailnet's own policy. or tag this machine tag:agent yourself in the Tailscale admin console and run again: sirven adopts a tagged machine as it is."
   fi
 
+  if [ "$REINSTATE" != yes ] && kill_switch_account_cut_off "$SERVICE_USER"; then
+    _adopt_conflict "the account $SERVICE_USER was cut off by the kill switch: it is expired and its shell is $KILL_SWITCH_NOLOGIN. install will not turn it back on by itself." \
+      "to bring it back on purpose, run the same command with --reinstate: it unlocks the account, removes the expiry, gives back the /bin/bash shell, writes audit entries, then goes on with the install. to leave it cut off, do not install."
+  fi
+
   case "$ADOPT_GRANT" in
     unreadable)
       _adopt_conflict "the grant record $(adopt_grant_record) is there but cannot be read as a grant, and sirven will not overwrite it." \

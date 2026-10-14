@@ -44,6 +44,25 @@ layout_remove_directory() {
   printf '       kept %s: it holds files this package did not create\n' "$1"
 }
 
+# the agent owns its home folder, so a name inside it may be a link it planted to something of root's. the undo of the
+# keys and the ssh folder never goes by path below the home folder: lib/kill_switch.py opens each folder without
+# following a link and removes names with unlinkat. HOME is the agent's home folder (under the prefix on a fake root).
+layout_helper() {
+  python3 -I "$ROOT_DIR/lib/kill_switch.py" "$@"
+}
+
+layout_remove_keys() {
+  layout_helper remove-keys "$1"
+}
+
+layout_keys_gone() {
+  layout_helper keys-gone "$1"
+}
+
+layout_remove_ssh_folder() {
+  layout_helper remove-ssh-folder "$1"
+}
+
 # layout_directory PATH MODE TITLE
 layout_directory() {
   local path

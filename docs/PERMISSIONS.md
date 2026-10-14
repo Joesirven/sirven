@@ -367,8 +367,16 @@ the kill switch reads it to know what to remove.
   `revoke_started` is the first audit entry of a run and `revoke_finished` the last; every step also writes its own entry.
 
   **after a revoke** the account stays locked, expired and on `nologin`. `sirven grant rollback` is refused (the grant record
-  no longer matches the audit log), so nothing hands the access back. to give the agent access again the owner unlocks the account
-  by hand and installs again.
+  no longer matches the audit log), so nothing hands the access back. an install on an account the kill switch cut off (expired,
+  shell `nologin`) refuses with exit 2, also in a dry run, and changes nothing. the owner brings it back on purpose with
+  `install.sh --reinstate`: it unlocks the account, removes the expiry, gives back the `/bin/bash` shell, writes a `reinstate`
+  audit entry, and goes on with the install. the removed keys do not come back; the owner adds the agent client's key again.
+  the kill switch itself never takes `--reinstate`.
+
+  **uninstall is link-safe too.** the undo of the key files and of the `.ssh` folder calls the same helper instead of `rm`
+  and `rmdir` by path, so a plain uninstall (no revoke first) cannot be steered through a link the agent planted: a `.ssh`
+  that is a link is removed as a name and the folder it pointed at is left alone. installs made by an earlier version keep
+  their old recorded undo (`rm -f` by path); run this version's kill switch before uninstalling such an install.
 - **uninstall.** `uninstall.sh` reverses the install record in reverse order: the snapshots restore
   each folder first, then the service user, then files and folders, which are removed only when
   empty. the audit log stays unless `--remove-audit-log` is given.

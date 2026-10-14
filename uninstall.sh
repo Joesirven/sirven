@@ -8,7 +8,8 @@
 #
 # --dry-run prints the removal plan and changes nothing; without it the identical plan is
 # printed and then applied. the audit log is kept unless --remove-audit-log is given.
-# runs on macos bash 3.2 and on linux bash. needs no python.
+# runs on macos bash 3.2 and on linux bash. python3 is used only to remove the agent's key files and ssh folder
+# without following a link the agent planted (lib/kill_switch.py).
 
 # stop early, and readably, when started by sh or zsh instead of bash.
 if [ -z "${BASH_VERSION:-}" ]; then
@@ -248,7 +249,7 @@ main() {
     [ -z "$refusal" ] || DIE_STATUS=3 die "not applied: $refusal"
   fi
   preflight_bash
-  preflight_commands yes rm rmdir grep cut awk
+  preflight_commands yes rm rmdir grep cut awk python3
   case "$OPERATING_SYSTEM" in
     linux) preflight_commands "$strict" userdel pkill setfacl getfacl ;;
     macos) preflight_commands "$strict" dscl pkill ;;

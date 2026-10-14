@@ -156,6 +156,38 @@ kill_switch_report_failure() {
     "$KILL_SWITCH_NOLOGIN" "$SERVICE_USER" "$SERVICE_USER" >&2
 }
 
+# kill_switch_account_cut_off USER: true when the account was left cut off by a revoke: it exists, its shell is
+# nologin and it is expired. read only, and only on a real root, where an account is real.
+kill_switch_account_cut_off() {
+  local shadow
+  [ -z "$PREFIX" ] && [ "$OPERATING_SYSTEM" = linux ] || return 1
+  id -u "$1" >/dev/null 2>&1 || return 1
+  [ "$(getent passwd "$1" | cut -d: -f7)" = "$KILL_SWITCH_NOLOGIN" ] || return 1
+  shadow="$(getent shadow "$1" 2>/dev/null)" || return 1
+  [ "$(printf '%s' "$shadow" | cut -d: -f8)" = 1 ]
+}
+
+# kill_switch_reinstate USER: turn a cut-off account back on, as install made it: unlocked (the password stays
+# off, keys only), no expiry, the shell install gives it.
+kill_switch_reinstate() {
+  usermod --unlock --expiredate '' --shell /bin/bash "$1"
+}
+
+# plan_reinstate: install --reinstate on an account the kill switch cut off. the steps come first, so the
+# install that follows finds an ordinary account.
+plan_reinstate() {
+  [ "$REINSTATE" = yes ] || return 0
+  plan_section "reinstate"
+  if ! kill_switch_account_cut_off "$SERVICE_USER" && [ -z "$PREFIX" ]; then
+    plan_note "--reinstate was given, but $SERVICE_USER is not cut off (it is not expired with the $KILL_SWITCH_NOLOGIN shell), so there is nothing to turn back on."
+    return 0
+  fi
+  plan_step system "reinstate $SERVICE_USER, as --reinstate asked: unlock the account, remove the expiry, give back the /bin/bash shell" \
+    "! kill_switch_account_cut_off $SERVICE_USER" \
+    "kill_switch_reinstate $SERVICE_USER"
+  plan_note "the kill switch removed the keys of $SERVICE_USER and the grant is a new one, so nothing else of the old access comes back. add the agent client's public key again."
+}
+
 # kill_switch_refuse_unsafe_user: the kill switch locks an account and ends its processes, so it refuses the accounts
 # that must never be locked by mistake (root, the owner, a system account) before it plans anything.
 kill_switch_refuse_unsafe_user() {
@@ -259,5 +291,5 @@ plan_kill_switch() {
   plan_kill_switch_transport
   plan_section "kill switch: finish"
   plan_note "kept on purpose: the install record, the audit log, the revoked grant record, and the home folder of $SERVICE_USER with whatever the agent left in it."
-  plan_note "the account stays locked and expired, with its shell turned off. to give the agent access again, unlock the account yourself and install again; nothing here is reversed automatically."
+  plan_note "the account stays locked and expired, with its shell turned off. to give the agent access again on purpose, run install.sh with --reinstate; nothing here is reversed automatically."
 }

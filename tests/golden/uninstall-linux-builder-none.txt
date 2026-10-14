@@ -27,9 +27,9 @@ undo: access to paths, level builder
 
 undo: service user
    10. remove every authorized key of agent (to do, recorded not run under --prefix)
-       $ rm -f <prefix>/home/agent/.ssh/authorized_keys
+       $ rm -f <prefix>/home/agent/.ssh/authorized_keys   # by name, never through a link
    11. remove the SSH folder of agent if nothing else is inside (to do, recorded not run under --prefix)
-       $ rmdir <prefix>/home/agent/.ssh   # kept if anything else is inside
+       $ rmdir <prefix>/home/agent/.ssh   # kept if anything else is inside; a link in its place is removed, never followed
    12. end every process of agent, then remove the account, keeping /home/agent (to do, recorded not run under --prefix)
        $ { pkill -KILL -u agent || true; } && userdel agent
 

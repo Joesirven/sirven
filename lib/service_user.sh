@@ -62,11 +62,12 @@ plan_service_user_linux() {
   plan_tag always
   plan_step system "create the SSH folder for $user" "[ -d $ssh ]" \
     "install -d -m 0700 -o $user -g $user $ssh"
-  plan_undo "remove the SSH folder of $user if nothing else is inside" "[ ! -d $ssh ]" \
-    "layout_remove_directory $ssh" "rmdir $ssh   # kept if anything else is inside"
+  plan_undo "remove the SSH folder of $user if nothing else is inside" "[ ! -d $ssh ] && [ ! -L $ssh ]" \
+    "layout_remove_ssh_folder $home" "rmdir $ssh   # kept if anything else is inside; a link in its place is removed, never followed"
   plan_step system "create an empty authorized_keys file" "[ -f $keys ]" \
     "install -m 0600 -o $user -g $user /dev/null $keys"
-  plan_undo "remove every authorized key of $user" "[ ! -e $keys ]" "rm -f $keys"
+  plan_undo "remove every authorized key of $user" "layout_keys_gone $home" "layout_remove_keys $home" \
+    "rm -f $keys   # by name, never through a link"
 }
 
 plan_service_user_macos() {
@@ -99,8 +100,8 @@ createhomedir -c -u $user" \
 install -m 0600 -o $user -g staff /dev/null $keys" \
     "$SERVICE_USER_MACOS_REASON" \
     "[ -f $keys ]"
-  plan_undo "remove the SSH folder and every authorized key of $user" "[ ! -d $ssh ]" \
-    "rm -f $keys && layout_remove_directory $ssh" "rm -f $keys && rmdir $ssh"
+  plan_undo "remove the SSH folder and every authorized key of $user" "[ ! -d $ssh ] && [ ! -L $ssh ]" \
+    "layout_remove_keys $home && layout_remove_ssh_folder $home" "rm -f $keys && rmdir $ssh   # by name, never through a link"
   plan_owner "allow $user in remote login" \
     "system settings, general, sharing, remote login: if it lists allowed users, add $user."
 }
