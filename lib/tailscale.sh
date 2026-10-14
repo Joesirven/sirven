@@ -27,9 +27,12 @@ tailscale_node_script() {
   printf '%s/package/lib/tailscale_node.sh' "$STATE_DIR"
 }
 
-# true when a key is there to join with: in the environment, or in the key file.
+# true when a key is there to join with: in the environment, or in the key file. the key file counts only when it passes the
+# same check the join makes (a plain file, owned by root, no permission for anyone else), so the refusal comes before a change.
 tailscale_key_available() {
-  [ -n "${SIRVEN_TAILSCALE_AUTHKEY:-}" ] || [ -n "${TAILSCALE_AUTHKEY:-}" ] || [ -s "${PREFIX}$(tailscale_auth_key_file)" ]
+  [ -n "${SIRVEN_TAILSCALE_AUTHKEY:-}" ] || [ -n "${TAILSCALE_AUTHKEY:-}" ] ||
+    bash "$ROOT_DIR/lib/tailscale_node.sh" key-file-check "${PREFIX}$(tailscale_auth_key_file)" >/dev/null 2>&1 ||
+    return 1
 }
 
 # true when an earlier run of this package joined this machine to the tailnet (the record is there).
@@ -40,6 +43,7 @@ tailscale_joined_by_us() {
 # tailscale_refuse_before_apply: a real apply that cannot join stops before its first change, with what to do. a dry run and a
 # fake root never join, so they are not stopped. a machine that is already the agent node needs no key.
 tailscale_refuse_before_apply() {
+  local key_file_status
   [ "$COMMAND" = install ] && [ "$TRANSPORT" = tailscale ] && [ "$DRY_RUN" != yes ] && [ -z "$PREFIX" ] || return 0
   [ "$OPERATING_SYSTEM" = linux ] && [ "$ADOPT_TAILSCALE" != agent_node ] || return 0
   if [ "$ADOPT_TAILSCALE" = unanswered ]; then
@@ -48,10 +52,20 @@ tailscale_refuse_before_apply() {
     exit 2
   fi
   if ! tailscale_key_available; then
+    key_file_status=0
+    bash "$ROOT_DIR/lib/tailscale_node.sh" key-file-check "$(tailscale_auth_key_file)" >/dev/null || key_file_status=$?
+    if [ "$key_file_status" -eq 2 ]; then
+      printf 'error: refused: the saved auth key file cannot be trusted (above). nothing was changed.\n' >&2
+      printf 'you can: fix it (chown root:root and chmod 600 %s), or remove it and hand the key over in the environment.\n' "$(tailscale_auth_key_file)" >&2
+      exit 2
+    fi
     printf 'error: refused: there is no Tailscale auth key to join the tailnet with. nothing was changed.\n' >&2
     printf 'you can: make a key in the Tailscale admin console (settings, keys: tagged tag:agent, pre-approved, ephemeral if you can), then run again with it in the environment: sudo --preserve-env=SIRVEN_TAILSCALE_AUTHKEY ... or saved as %s, owned by root, mode 0600. or run again with --transport none.\n' "$(tailscale_auth_key_file)" >&2
     exit 2
   fi
+  # every other refusal the join itself would make, now, so that "nothing was changed" is true: a tailscale too old to read a key from
+  # a file, a key with characters no key has, a login that is not ours, tailscale itself missing. the script prints why.
+  bash "$ROOT_DIR/lib/tailscale_node.sh" check "$SERVICE_USER" "$(tailscale_auth_key_file)" || exit 2
 }
 
 # policy snippet in the tailscale policy file syntax, which allows comments.

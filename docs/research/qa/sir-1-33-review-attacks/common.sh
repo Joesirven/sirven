@@ -16,7 +16,7 @@ if [ "$1" = up ] && [ "${2:-}" != --help ]; then
   ls -la "$(dirname "$(printf '%s\n' "$@" | sed -n 's/^--auth-key=file://p')")" >> /tmp/ts-up-view 2>&1
 fi
 bash "$fixture" "$@"; status=$?
-if [ "$1" = up ] && [ -e /tmp/ts-knob/end-needs-machine-auth ]; then printf 'NeedsMachineAuth\n' > "$FAKE_TS_DIR/state"; fi
+if [ "$1" = up ] && [ "${2:-}" != --help ] && [ -e /tmp/ts-knob/end-needs-machine-auth ]; then printf 'NeedsMachineAuth\n' > "$FAKE_TS_DIR/state"; fi
 exit "$status"
 WRAP
 chmod 755 /usr/local/bin/tailscale

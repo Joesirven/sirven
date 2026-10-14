@@ -191,6 +191,118 @@ test_a_key_with_odd_characters_is_refused_and_not_run() {
   assert_not_contains "$(calls)" "up --auth-key"
 }
 
+# a key file that is not a plain file owned by the account running this with nothing for anyone else is not used. (owned by
+# root is the rule as root; the tests run as a normal user, so "owned by whoever runs it". scenario 60 and the attack scripts
+# cover a file owned by another account, which needs root to make.)
+test_a_key_file_others_can_read_or_write_is_refused() {
+  setup_node
+  local mode
+  printf '%s\n' "$SENTINEL_KEY" > "$TEST_TMP/key-file"
+  for mode in 644 640 660 666 604 602; do
+    chmod "$mode" "$TEST_TMP/key-file"
+    assert_status 2 bash "$NODE" join "$MARKER" agent "$TEST_TMP/key-file"
+    assert_contains "$CAPTURED_STDERR" "is not used: its mode is"
+    assert_contains "$CAPTURED_STDERR" "nothing was changed"
+    assert_status 2 bash "$NODE" key-file-check "$TEST_TMP/key-file"
+  done
+  assert_not_contains "$(calls)" "up --auth-key"
+  assert_no_file "$MARKER"
+  chmod 400 "$TEST_TMP/key-file"
+  assert_status 0 bash "$NODE" key-file-check "$TEST_TMP/key-file"
+  chmod 600 "$TEST_TMP/key-file"
+  assert_status 0 bash "$NODE" key-file-check "$TEST_TMP/key-file"
+  assert_status 0 bash "$NODE" join "$MARKER" agent "$TEST_TMP/key-file"
+}
+
+test_a_key_file_that_is_a_link_or_a_folder_is_refused_and_a_missing_one_is_just_missing() {
+  setup_node
+  printf '%s\n' "$SENTINEL_KEY" > "$TEST_TMP/real-key"
+  chmod 600 "$TEST_TMP/real-key"
+  ln -s "$TEST_TMP/real-key" "$TEST_TMP/key-link"
+  assert_status 2 bash "$NODE" join "$MARKER" agent "$TEST_TMP/key-link"
+  assert_contains "$CAPTURED_STDERR" "not a plain file"
+  mkdir "$TEST_TMP/key-dir"
+  assert_status 2 bash "$NODE" key-file-check "$TEST_TMP/key-dir"
+  assert_status 1 bash "$NODE" key-file-check "$TEST_TMP/nothing-here"
+  : > "$TEST_TMP/empty-key"
+  chmod 600 "$TEST_TMP/empty-key"
+  assert_status 1 bash "$NODE" key-file-check "$TEST_TMP/empty-key"
+  assert_not_contains "$(calls)" "up --auth-key"
+}
+
+test_the_environment_key_is_not_held_back_by_a_bad_key_file() {
+  setup_node
+  printf 'not-the-key\n' > "$TEST_TMP/key-file"
+  chmod 666 "$TEST_TMP/key-file"
+  SIRVEN_TAILSCALE_AUTHKEY="$SENTINEL_KEY" assert_status 0 bash "$NODE" join "$MARKER" agent "$TEST_TMP/key-file"
+}
+
+test_tailscale_key_available_applies_the_same_check_to_the_key_file() {
+  setup_node
+  local root="$TEST_TMP/root" file
+  # shellcheck source=install.sh
+  . "$REPO_DIR/install.sh"
+  PREFIX="$root" CONFIG_DIR=/etc/sirven
+  file="$root$(tailscale_auth_key_file)"
+  mkdir -p "$(dirname "$file")"
+  printf '%s\n' "$SENTINEL_KEY" > "$file"
+  chmod 600 "$file"
+  assert_status 0 tailscale_key_available
+  chmod 644 "$file"
+  assert_status 1 tailscale_key_available
+  chmod 666 "$file"
+  assert_status 1 tailscale_key_available
+  rm "$file"
+  assert_status 1 tailscale_key_available
+  SIRVEN_TAILSCALE_AUTHKEY="$SENTINEL_KEY" assert_status 0 tailscale_key_available
+}
+
+test_check_makes_the_refusals_of_the_join_and_changes_nothing() {
+  setup_node
+  # all fine: no refusal, tailscale never asked to log in, nothing written
+  SIRVEN_TAILSCALE_AUTHKEY="$SENTINEL_KEY" assert_status 0 bash "$NODE" check agent "$TEST_TMP/no-key-file"
+  assert_not_contains "$(calls)" "up --auth-key"
+  assert_no_file "$MARKER"
+  assert_eq "" "$(ls -A "$STATE")" "nothing in the state folder"
+  assert_not_contains "$CAPTURED_STDOUT" "joined"
+  # each refusal the join makes late is made here
+  FAKE_TS_OLD=yes SIRVEN_TAILSCALE_AUTHKEY="$SENTINEL_KEY" assert_status 2 bash "$NODE" check agent "$TEST_TMP/no-key-file"
+  assert_contains "$CAPTURED_STDERR" "cannot read an auth key from a file"
+  SIRVEN_TAILSCALE_AUTHKEY="$(printf '%s\r' "$SENTINEL_KEY")" assert_status 2 bash "$NODE" check agent "$TEST_TMP/no-key-file"
+  assert_contains "$CAPTURED_STDERR" "characters a Tailscale key never has"
+  assert_status 2 bash "$NODE" check agent "$TEST_TMP/no-key-file"
+  assert_contains "$CAPTURED_STDERR" "there is no Tailscale auth key"
+  SIRVEN_TAILSCALE=none SIRVEN_TAILSCALE_AUTHKEY="$SENTINEL_KEY" assert_status 2 bash "$NODE" check agent "$TEST_TMP/no-key-file"
+  FAKE_TS_STOPPED=yes SIRVEN_TAILSCALE_AUTHKEY="$SENTINEL_KEY" assert_status 2 bash "$NODE" check agent "$TEST_TMP/no-key-file"
+  fake_login Running node-owner ""
+  SIRVEN_TAILSCALE_AUTHKEY="$SENTINEL_KEY" assert_status 2 bash "$NODE" check agent "$TEST_TMP/no-key-file"
+  assert_contains "$CAPTURED_STDERR" "already logged in to Tailscale without tag:agent"
+  assert_not_contains "$(calls)" "up --auth-key"
+  assert_not_contains "$(calls)" "logout"
+  # a key file saved with Windows line ends is refused by the check, too
+  printf '%s\r\n' "$SENTINEL_KEY" > "$TEST_TMP/key-file"
+  chmod 600 "$TEST_TMP/key-file"
+  rm -rf "$FAKE_TS_DIR"
+  assert_status 2 bash "$NODE" check agent "$TEST_TMP/key-file"
+  assert_contains "$CAPTURED_STDERR" "characters a Tailscale key never has"
+}
+
+test_a_copy_of_the_key_left_by_a_killed_join_is_swept_by_the_next_join_and_by_leave() {
+  setup_node
+  printf 'stale\n' > "$STATE/.tailscale-key.4242"
+  printf 'stale\n' > "$STATE/.tailscale-key.4243"
+  SIRVEN_TAILSCALE_AUTHKEY="$SENTINEL_KEY" assert_status 0 join
+  assert_no_file "$STATE/.tailscale-key.4242"
+  assert_no_file "$STATE/.tailscale-key.4243"
+  printf 'stale\n' > "$STATE/.tailscale-key.4244"
+  assert_status 0 leave
+  assert_no_file "$STATE/.tailscale-key.4244"
+  # leave with no record at all sweeps too
+  printf 'stale\n' > "$STATE/.tailscale-key.4245"
+  assert_status 0 leave
+  assert_no_file "$STATE/.tailscale-key.4245"
+}
+
 test_leave_logs_out_the_node_that_join_made_and_removes_the_record() {
   setup_node
   SIRVEN_TAILSCALE_AUTHKEY="$SENTINEL_KEY" assert_status 0 join
@@ -309,10 +421,11 @@ test_revoke_adds_the_logout_only_when_this_installer_joined() {
 }
 
 test_an_apply_without_a_key_is_refused_before_any_change() {
+  setup_node
   # install.sh is sourced so the refusal is read in a real-apply state without root or a container
   # shellcheck source=install.sh
   . "$REPO_DIR/install.sh"
-  COMMAND=install TRANSPORT=tailscale DRY_RUN=no PREFIX="" OPERATING_SYSTEM=linux ADOPT_TAILSCALE=logged_out CONFIG_DIR=/nonexistent/sirven
+  COMMAND=install TRANSPORT=tailscale DRY_RUN=no PREFIX="" OPERATING_SYSTEM=linux ADOPT_TAILSCALE=logged_out CONFIG_DIR=/nonexistent/sirven SERVICE_USER=agent
   unset SIRVEN_TAILSCALE_AUTHKEY TAILSCALE_AUTHKEY
   assert_status 2 tailscale_refuse_before_apply
   assert_contains "$CAPTURED_STDERR" "refused: there is no Tailscale auth key to join the tailnet with. nothing was changed."
@@ -325,4 +438,29 @@ test_an_apply_without_a_key_is_refused_before_any_change() {
   DRY_RUN=yes assert_status 0 tailscale_refuse_before_apply
   PREFIX=/tmp/fake assert_status 0 tailscale_refuse_before_apply
   TRANSPORT=none assert_status 0 tailscale_refuse_before_apply
+}
+
+test_an_apply_that_the_join_would_refuse_late_is_refused_before_any_change() {
+  setup_node
+  # shellcheck source=install.sh
+  . "$REPO_DIR/install.sh"
+  COMMAND=install TRANSPORT=tailscale DRY_RUN=no PREFIX="" OPERATING_SYSTEM=linux ADOPT_TAILSCALE=logged_out SERVICE_USER=agent
+  CONFIG_DIR="$TEST_TMP/etc-sirven"
+  mkdir -p "$CONFIG_DIR"
+  # a tailscale too old to read a key file, and a key with a stray carriage return: refused up front, with "nothing was changed" true
+  FAKE_TS_OLD=yes SIRVEN_TAILSCALE_AUTHKEY="$SENTINEL_KEY" assert_status 2 tailscale_refuse_before_apply
+  assert_contains "$CAPTURED_STDERR" "cannot read an auth key from a file"
+  assert_contains "$CAPTURED_STDERR" "nothing was changed"
+  SIRVEN_TAILSCALE_AUTHKEY="$(printf '%s\r' "$SENTINEL_KEY")" assert_status 2 tailscale_refuse_before_apply
+  assert_contains "$CAPTURED_STDERR" "characters a Tailscale key never has"
+  # a key file that others can write is named as the reason, not reported as "no key"
+  printf '%s\n' "$SENTINEL_KEY" > "$CONFIG_DIR/tailscale-auth-key"
+  chmod 666 "$CONFIG_DIR/tailscale-auth-key"
+  assert_status 2 tailscale_refuse_before_apply
+  assert_contains "$CAPTURED_STDERR" "its mode is"
+  assert_contains "$CAPTURED_STDERR" "cannot be trusted"
+  assert_not_contains "$CAPTURED_STDERR" "there is no Tailscale auth key"
+  chmod 600 "$CONFIG_DIR/tailscale-auth-key"
+  assert_status 0 tailscale_refuse_before_apply
+  assert_not_contains "$(calls)" "up --auth-key"
 }

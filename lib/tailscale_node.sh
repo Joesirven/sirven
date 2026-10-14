@@ -6,6 +6,8 @@
 #
 #   tailscale_node.sh join  MARKER USER KEY_FILE
 #   tailscale_node.sh leave MARKER
+#   tailscale_node.sh check USER KEY_FILE      every refusal the join can make, without any change (the installer's first look)
+#   tailscale_node.sh key-file-check KEY_FILE  exit 0 a usable key file, 1 none there, 2 there but not safe (says why)
 #
 # join: names the node USER-<short host name> (SIRVEN_TAILSCALE_HOSTNAME replaces the host name part),
 # runs 'tailscale up' with the auth key and the tag, then writes MARKER, a root-only file that says
@@ -14,7 +16,8 @@
 # make is never logged out, and no other node of the tailnet is touched: logout acts on this machine only.
 #
 # the auth key comes from the environment, SIRVEN_TAILSCALE_AUTHKEY or TAILSCALE_AUTHKEY, or else from
-# KEY_FILE. it is never put on a command line: tailscale reads it from a private temporary file. whatever
+# KEY_FILE, which must be a plain file owned by root (whoever runs this, when not root) that no other account can read or
+# write. it is never put on a command line: tailscale reads it from a private temporary file. whatever
 # tailscale prints is shown with the key blanked out.
 #
 # the tailscale command is found on the search path. SIRVEN_TAILSCALE names another one for the tests (not honored as root).
@@ -34,6 +37,30 @@ refuse() {
 fail() {
   printf 'error: %s\n' "$1" >&2
   exit 1
+}
+
+# key_file_problem FILE: why FILE may not be read as the auth key, or nothing when it may (or is not there at all).
+# a key file must be a plain file (not a link), owned by root (by whoever runs this, when that is not root, which only the tests do),
+# with no permission for the group or for anyone else: a file others can write picks the tailnet this machine joins, and a file
+# others can read leaks the key.
+key_file_problem() {
+  local file="$1" listing mode owner
+  [ -e "$file" ] || [ -L "$file" ] || return 0
+  listing="$(ls -ldn "$file" 2>/dev/null)" || { printf 'it cannot be examined'; return 0; }
+  mode="$(printf '%s' "$listing" | cut -c1-10)"
+  owner="$(printf '%s' "$listing" | awk '{print $3}')"
+  case "$mode" in
+    -*) ;;
+    *) printf 'it is not a plain file (a link or a folder is not used)'; return 0 ;;
+  esac
+  if [ "$owner" != "$(id -u)" ]; then
+    printf 'it is owned by account number %s, not by root' "$owner"
+    return 0
+  fi
+  case "${mode#????}" in
+    ------) ;;
+    *) printf 'its mode is %s: the group or others have permission on it; make it 0600 (chmod 600)' "$mode" ;;
+  esac
 }
 
 # the tailscale command, or nothing. SIRVEN_TAILSCALE is a seam for the tests ('none' means not installed), and root ignores it:
@@ -148,6 +175,12 @@ node_hostname() {
   printf '%s' "${name:-agent}"
 }
 
+# sweep_stale_key_copies MARKER: remove the private key copies a join that was killed (SIGKILL, power loss) left beside MARKER.
+# the installer holds its lock while a join runs, so none of them belongs to a join that is still going.
+sweep_stale_key_copies() {
+  rm -f "$(dirname "$1")"/.tailscale-key.* 2>/dev/null || true
+}
+
 # logout_node COMMAND: tailscale logout, given a minute at most (a kill switch must not hang on a network that is down).
 logout_node() {
   if command -v timeout >/dev/null 2>&1; then
@@ -157,40 +190,75 @@ logout_node() {
   fi
 }
 
-node_join() {
-  local marker="${1:-}" user="${2:-}" key_file="${3:-}" hostname command key="" origin="" output status=0 waited=0
-  [ -n "$marker" ] && [ -n "$user" ] || refuse "join needs a marker path and the account name."
-  hostname="$(node_hostname "$user")"
-  case "$hostname" in -* | *[!a-z0-9-]*) refuse "the host name '$hostname' is not a plain lowercase name (letters, digits, hyphens)." ;; esac
-  [ -d "$(dirname "$marker")" ] || refuse "the folder for the record, $(dirname "$marker"), is not there."
-  command="$(node_command)"
-  [ -n "$command" ] || refuse "tailscale is not installed on this machine. $(install_hint)"
+# node_prepare USER KEY_FILE: every check the join makes before it changes anything: the host name, tailscale itself, the key and
+# where it came from, the state of this machine's login. sets NODE_HOSTNAME, NODE_COMMAND, NODE_KEY and NODE_ORIGIN, refuses
+# (exit 2, nothing changed) when anything is wrong, and returns 3 when this machine is already the agent node (nothing to join).
+node_prepare() {
+  local user="$1" key_file="$2" problem
+  NODE_KEY="" NODE_ORIGIN=""
+  NODE_HOSTNAME="$(node_hostname "$user")"
+  case "$NODE_HOSTNAME" in -* | *[!a-z0-9-]*) refuse "the host name '$NODE_HOSTNAME' is not a plain lowercase name (letters, digits, hyphens)." ;; esac
+  NODE_COMMAND="$(node_command)"
+  [ -n "$NODE_COMMAND" ] || refuse "tailscale is not installed on this machine. $(install_hint)"
   if [ -n "${SIRVEN_TAILSCALE_AUTHKEY:-}" ]; then
-    key="$SIRVEN_TAILSCALE_AUTHKEY"; origin="SIRVEN_TAILSCALE_AUTHKEY"
+    NODE_KEY="$SIRVEN_TAILSCALE_AUTHKEY"; NODE_ORIGIN="SIRVEN_TAILSCALE_AUTHKEY"
   elif [ -n "${TAILSCALE_AUTHKEY:-}" ]; then
-    key="$TAILSCALE_AUTHKEY"; origin="TAILSCALE_AUTHKEY"
-  elif [ -n "$key_file" ] && [ -f "$key_file" ] && [ ! -L "$key_file" ]; then
-    key="$(head -n 1 "$key_file")"; origin="$key_file"
+    NODE_KEY="$TAILSCALE_AUTHKEY"; NODE_ORIGIN="TAILSCALE_AUTHKEY"
+  elif [ -n "$key_file" ]; then
+    problem="$(key_file_problem "$key_file")"
+    [ -z "$problem" ] || refuse "the auth key file $key_file is not used: $problem."
+    if [ -f "$key_file" ]; then
+      NODE_KEY="$(head -n 1 "$key_file")"; NODE_ORIGIN="$key_file"
+    fi
   fi
-  [ -n "$key" ] || refuse "there is no Tailscale auth key. put one in the environment as SIRVEN_TAILSCALE_AUTHKEY (sudo --preserve-env=SIRVEN_TAILSCALE_AUTHKEY ...), or save it as ${key_file:-the key file}, owned by root, mode 0600. make it in the Tailscale admin console, settings, keys: tagged $TAILSCALE_NODE_TAG, pre-approved."
+  [ -n "$NODE_KEY" ] || refuse "there is no Tailscale auth key. put one in the environment as SIRVEN_TAILSCALE_AUTHKEY (sudo --preserve-env=SIRVEN_TAILSCALE_AUTHKEY ...), or save it as ${key_file:-the key file}, owned by root, mode 0600. make it in the Tailscale admin console, settings, keys: tagged $TAILSCALE_NODE_TAG, pre-approved."
   unset SIRVEN_TAILSCALE_AUTHKEY TAILSCALE_AUTHKEY
-  case "$key" in *[!A-Za-z0-9_-]*) refuse "the auth key in $origin has characters a Tailscale key never has; it is not used." ;; esac
+  case "$NODE_KEY" in *[!A-Za-z0-9_-]*) refuse "the auth key in $NODE_ORIGIN has characters a Tailscale key never has (a carriage return from Windows line ends, for one); it is not used." ;; esac
 
-  read_status "$command"
+  read_status "$NODE_COMMAND"
   [ "$S_READABLE" = yes ] || refuse "tailscale is installed but tailscaled does not answer. start it (systemctl enable --now tailscaled) and run this again."
-  "$command" up --help 2>&1 | grep -q 'file:' || refuse "this tailscale cannot read an auth key from a file, which is the only way sirven passes one (a key on the command line shows in the process list). update tailscale from https://tailscale.com/download and run this again."
+  "$NODE_COMMAND" up --help 2>&1 | grep -q 'file:' || refuse "this tailscale cannot read an auth key from a file, which is the only way sirven passes one (a key on the command line shows in the process list). update tailscale from https://tailscale.com/download and run this again."
   case "$S_BACKEND" in
     NeedsLogin | NoState) ;;
     Running | Starting | Stopped | NeedsMachineAuth)
-      if has_tag; then
-        printf 'this machine is already logged in to Tailscale as %s. kept as it is: no join, nothing recorded.\n' "$TAILSCALE_NODE_TAG"
-        return 0
-      fi
+      has_tag && return 3
       refuse "this machine is already logged in to Tailscale without $TAILSCALE_NODE_TAG, and sirven never changes a login it did not make."
       ;;
     *) refuse "tailscale reports the state '$S_BACKEND'; sirven joins only from a machine that is logged out." ;;
   esac
+}
 
+# node_check USER KEY_FILE: the refusals of the join, and nothing else. for the installer's first look, before its first change.
+node_check() {
+  [ -n "${1:-}" ] || refuse "check needs the account name."
+  node_prepare "$1" "${2:-}" || true
+}
+
+# node_key_file_check FILE: exit 0 a key file that may be used, 1 there is none, 2 there is one that may not be used (says why).
+node_key_file_check() {
+  local problem
+  [ -n "${1:-}" ] || refuse "key-file-check needs a path."
+  problem="$(key_file_problem "$1")"
+  if [ -n "$problem" ]; then
+    printf 'error: the auth key file %s is not used: %s.\n' "$1" "$problem" >&2
+    exit 2
+  fi
+  [ -f "$1" ] && [ -s "$1" ] || exit 1
+}
+
+node_join() {
+  local marker="${1:-}" user="${2:-}" key_file="${3:-}" hostname command key output status=0 waited=0 prepared=0
+  [ -n "$marker" ] && [ -n "$user" ] || refuse "join needs a marker path and the account name."
+  [ -d "$(dirname "$marker")" ] || refuse "the folder for the record, $(dirname "$marker"), is not there."
+  node_prepare "$user" "$key_file" || prepared=$?
+  if [ "$prepared" -eq 3 ]; then
+    printf 'this machine is already logged in to Tailscale as %s. kept as it is: no join, nothing recorded.\n' "$TAILSCALE_NODE_TAG"
+    return 0
+  fi
+  hostname="$NODE_HOSTNAME" command="$NODE_COMMAND" key="$NODE_KEY"
+  NODE_KEY=""
+
+  sweep_stale_key_copies "$marker"
   PRIVATE_KEY_FILE="$(dirname "$marker")/.tailscale-key.$$"
   trap 'rm -f "$PRIVATE_KEY_FILE"' EXIT
   ( umask 077; printf '%s\n' "$key" > "$PRIVATE_KEY_FILE" ) || fail "could not write a private copy of the auth key next to $marker."
@@ -230,6 +298,7 @@ node_join() {
 node_leave() {
   local marker="${1:-}" command recorded
   [ -n "$marker" ] || refuse "leave needs a marker path."
+  sweep_stale_key_copies "$marker"
   if [ ! -e "$marker" ]; then
     printf 'no Tailscale join of ours is recorded: nothing to log out.\n'
     return 0
@@ -272,5 +341,7 @@ node_leave() {
 case "${1:-}" in
   join) shift; node_join "$@" ;;
   leave) shift; node_leave "$@" ;;
-  *) printf 'usage: tailscale_node.sh join MARKER USER KEY_FILE | leave MARKER\n' >&2; exit 64 ;;
+  check) shift; node_check "$@" ;;
+  key-file-check) shift; node_key_file_check "$@" ;;
+  *) printf 'usage: tailscale_node.sh join MARKER USER KEY_FILE | leave MARKER | check USER KEY_FILE | key-file-check KEY_FILE\n' >&2; exit 64 ;;
 esac
