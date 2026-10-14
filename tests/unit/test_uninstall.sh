@@ -112,7 +112,7 @@ test_real_apply_is_refused_without_root() {
     return 0
   fi
   assert_status 3 "$REPO_DIR/uninstall.sh"
-  assert_contains "$CAPTURED_STDERR" "applying needs root"
+  assert_real_apply_refusal "$CAPTURED_STDERR"
 }
 
 test_install_after_uninstall_records_again() {

@@ -38,6 +38,7 @@ usage:
 
 options:
   --dry-run              print the removal plan and change nothing
+  --yes, -y              on a real machine, apply without asking you to type yes (or SIRVEN_YES=1)
   --prefix PATH          the fake root an install was applied to with --prefix
   --remove-audit-log     also remove the audit log and its directory. kept by default
   --help                 show this help
@@ -60,12 +61,14 @@ usage_error() {
 
 parse_arguments() {
   DRY_RUN=no
+  ASSUME_YES=no
   PREFIX=""
   REMOVE_AUDIT_LOG=no
   SERVICE_USER=agent
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --dry-run) DRY_RUN=yes ;;
+      --yes | -y) ASSUME_YES=yes ;;
       --prefix)
         [ "$#" -ge 2 ] || usage_error "--prefix needs a value"
         case "$2" in --*) usage_error "--prefix needs a value" ;; esac

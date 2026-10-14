@@ -123,7 +123,7 @@ test_real_rollback_is_refused_without_root() {
     return 0
   fi
   assert_status 3 "$REPO_DIR/bin/sirven" grant rollback
-  assert_contains "$CAPTURED_STDERR" "applying needs root"
+  assert_real_apply_refusal "$CAPTURED_STDERR"
 }
 
 test_runs_through_a_symbolic_link() {

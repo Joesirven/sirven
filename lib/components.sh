@@ -57,6 +57,7 @@ your folder, where they are yours to edit; running add again never overwrites th
 
 options:
   --dry-run          print the plan and change nothing
+  --yes, -y          on a real machine, apply without asking you to type yes (or SIRVEN_YES=1)
   --dir PATH         the folder for the component (default: $(component_default_dir NAME))
   --env-file PATH    the dotenv that holds the component's credentials (default: .env in the
                      folder). a dotenv you control, for example one bb secret wrote. never a
@@ -88,14 +89,17 @@ components_parse() {
   COMPONENT_ENV_FILE=""
   COMPONENT_REMOVE_DATA=no
   DRY_RUN=no
+  ASSUME_YES=no
   PREFIX=""
   # shellcheck disable=SC2034 # read by lib/audit.sh (audit_entry records the user) and lib/access_control.sh
   SERVICE_USER=agent
   OWNER="${SUDO_USER:-$(id -un)}"
+  # shellcheck disable=SC2034 # ASSUME_YES is read by lib/plan.sh (plan_confirm_real_apply)
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --list) COMPONENT_LIST=yes ;;
       --dry-run) DRY_RUN=yes ;;
+      --yes | -y) ASSUME_YES=yes ;;
       --remove-data) COMPONENT_REMOVE_DATA=yes ;;
       --dir | --env-file | --prefix)
         [ "$#" -ge 2 ] || components_usage_error "$1 needs a value"

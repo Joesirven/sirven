@@ -169,7 +169,7 @@ test_real_apply_is_refused_without_root() {
     return 0
   fi
   assert_status 3 "$REPO_DIR/install.sh" --path /srv/app --transport none
-  assert_contains "$CAPTURED_STDERR" "applying needs root"
+  assert_real_apply_refusal "$CAPTURED_STDERR"
 }
 
 test_os_override_needs_dry_run_or_prefix() {

@@ -12,7 +12,8 @@
 #
 # inspect only reads. rollback is a plan like install.sh: --dry-run prints it and changes
 # nothing, and without --dry-run the identical plan is printed and then applied, under the
-# same rule: a fake root, or a throwaway linux container as root.
+# same rule: a fake root, or a real linux machine as root. on a real machine (not a container)
+# it asks you to type yes first, or takes --yes.
 #
 # after alpha: live sessions and per-command entries come from the forced-command wrapper on
 # the agent's SSH key, which is designed, not built. this command reads the grant records, the
@@ -72,6 +73,7 @@ options:
   --prefix PATH    read a fake root that install.sh was applied to with --prefix
   --user NAME      the service user (default: agent). inspect shows every user without it
   --dry-run        rollback or repair: print the plan or the list and change nothing
+  --yes, -y        rollback on a real machine: apply without asking you to type yes (or SIRVEN_YES=1)
   --path PATH      repair only: a granted folder, when the grant record is gone (after an older uninstall)
   --help           show this help
 
@@ -93,6 +95,7 @@ usage_error() {
 parse_arguments() {
   ACTION=""
   DRY_RUN=no
+  ASSUME_YES=no
   PREFIX=""
   SERVICE_USER=agent
   USER_GIVEN=no
@@ -113,6 +116,7 @@ parse_arguments() {
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --dry-run) DRY_RUN=yes ;;
+      --yes | -y) ASSUME_YES=yes ;;
       --prefix)
         [ "$#" -ge 2 ] || usage_error "--prefix needs a value"
         PREFIX="$2"

@@ -13,6 +13,7 @@ mkdir -p /srv/work && chown owner:owner /srv/work && chmod 755 /srv/work
 echo before > /srv/work/old.txt && chown owner:owner /srv/work/old.txt
 world_files > /tmp/before.files
 world_accounts > /tmp/before.accounts
+world_etc_content > /tmp/before.etc
 world_acls /srv > /tmp/before.acls
 world_aclraw_attributes /srv > /tmp/before.raw
 
@@ -37,10 +38,11 @@ check_exit "re-run with no flags adopts the grant in force" 0 bash install.sh --
 check "adopting changed nothing: 22 steps skipped, only the give-back-the-account step ran" grep -q 'applied 1 steps, skipped 22 already done' <<< "$LAST_OUTPUT"
 check "install record is still the same" cmp /tmp/record.first /var/lib/sirven/install-record.tsv
 
-check_exit "uninstall applies" 0 bash /var/lib/sirven/package/uninstall.sh
+check_exit "uninstall applies" 0 bash /var/lib/sirven/package/uninstall.sh --yes
 check "service user and group are gone" bash -c '! getent passwd agent && ! getent group agent'
 rm -f /srv/work/from-agent
 world_unchanged "files match the machine before the install" files /tmp/before.files
+world_unchanged "the content of every file in /etc matches the machine before the install" etc_content /tmp/before.etc
 world_unchanged "accounts and groups match the machine before the install" accounts /tmp/before.accounts
 world_unchanged "access control lists match the machine before the install" acls /tmp/before.acls /srv
 world_unchanged "raw attributes, owners and modes match the machine before the install" aclraw_attributes /tmp/before.raw /srv

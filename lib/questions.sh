@@ -21,21 +21,6 @@
 
 SETUP_DEFAULT_LEVEL=observer
 
-# _setup_terminal: print where to read answers from (stdin or tty), or nothing when nothing may
-# be asked. curl | bash has a pipe on standard input but a person at the terminal, so the
-# controlling terminal is used when standard error is one and it can be opened.
-_setup_terminal() {
-  case "${SIRVEN_INTERACTIVE:-}" in
-    yes) printf 'stdin'; return 0 ;;
-    no) return 0 ;;
-  esac
-  if [ -t 0 ]; then
-    printf 'stdin'
-  elif [ -t 2 ] && (: < /dev/tty) 2>/dev/null; then
-    printf 'tty'
-  fi
-}
-
 # _setup_valid_level LEVEL: true for a level that has a file in levels/.
 _setup_valid_level() {
   case "$1" in
