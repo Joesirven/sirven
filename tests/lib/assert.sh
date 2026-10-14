@@ -63,3 +63,12 @@ $CAPTURED_STDOUT
 $CAPTURED_STDERR"
   fi
 }
+
+# assert_real_apply_refusal TEXT: the refusal a real (no --prefix) apply gives by a non-root user
+# on the operating system the tests run on. macos is refused before root is asked about.
+assert_real_apply_refusal() {
+  case "$(uname -s)" in
+    Darwin) assert_contains "$1" "real macos machine" ;;
+    *) assert_contains "$1" "applying needs root" ;;
+  esac
+}

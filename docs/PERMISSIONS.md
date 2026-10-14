@@ -328,8 +328,7 @@ the kill switch reads it to know what to remove.
   **installs made before this change.** the install record stores the undo command text, so an install
   made by an earlier version keeps its old undo (`setfacl -R -P -x u:agent` and `-d -x`, or the
   first version of the snapshot helper), which leaves the default list, the mask and the folder
-  owner's entry behind. the alpha cut applies only inside throwaway containers, so none exist outside
-  them. to repair one, from a checkout of this package, as root:
+  owner's entry behind. an install of that kind exists only if an earlier version was applied to a real machine: before real apply on Linux the alpha cut applied only in throwaway containers, and macOS apply is off by default. to repair one, from a checkout of this package, as root:
   `bash lib/access_control_snapshot.sh repair FOLDER yes AGENT` for each granted folder, and
   `... repair PARENT no AGENT` for each pass-through parent, before running uninstall. repair is
   the no-snapshot removal above and changes no mode.
@@ -339,8 +338,7 @@ the kill switch reads it to know what to remove.
   undoes the first. the removal undoes the grant the same way uninstall does (see exactly what undo changes), so an
   owner's chmod made since the install survives it, and the earlier grant takes a new snapshot. what it grants goes into the install record too.
 - **kill switch.** `sudo /usr/local/sbin/sirven revoke --all` cuts the agent off now and keeps every
-  record. it applies on Linux, in a container and on a real machine (it only takes access away, so it is the one command
-  whose real apply is not limited to a container), and asks you to type `revoke` first unless `--yes` is given. on macOS it is still
+  record. it applies on Linux, in a container and on a real machine (a real Linux apply needs root), and asks you to type `revoke` first unless `--yes` is given. on macOS it is still
   plan output. in order, each step attempted even when an earlier one failed:
   (0) the kill switch's own marker `agent-revoked-USER.json` (one per account) is written in the state directory, before anything else changes;
   (1) in one `usermod` call the account is locked, expired and given the `nologin` shell, and every process of the agent,
@@ -446,18 +444,19 @@ revoke <invite>
 
 ## known limits in the alpha cut
 
-- macos entries are plan output only. they need a run in a macos virtual machine before apply
-  is turned on. the macos entries name the agent only, so no group or other entry is copied and
-  the linux default-list problem has no macos form, as far as the entries show. macos undo is
-  unchanged in kind: it removes the entries it added by their exact text, now with `-h`. not run on a Mac.
-  the manual check, on a test Mac: (1) `ls -lde` the granted folder, a file in it, and every parent up to
-  `/Users/you` (the parents show the pass-through entry), before apply. (2) apply, then `ls -le` the
-  same paths and confirm the agent's entries are the only new ones. (3) `umask 077`, create a file in the
-  folder, `ls -le` it, and confirm the agent's inherited entry is the only one for it. (4) as the owner,
-  `chmod 600` a pre-existing file in the folder, then revoke or uninstall, and confirm that file is
-  still 600 and `ls -le` of every path matches the listing from step 1. (5) make a link inside the
-  granted folder that points at a folder outside it (`ln -s ~/.ssh /granted/link`) before apply, and
-  confirm `ls -le ~/.ssh` is the same after apply and after revoke.
+- macos: the steps run on a fake root and are tested, but a real apply is switched off until
+  tests/macos/real-install-check.sh has passed on a real Mac, with the owner's approval (see
+  docs/research/qa/macos-real-apply-prep.md). the macos entries name the agent only, so no group
+  or other entry is copied and the linux default-list problem has no macos form.
+  macos undo is not a subtraction. `chmod +a` merges rights into an entry that is already there, a
+  file created in a granted folder inherits an entry built from the folder rights, and `chmod -a` of
+  a different right set leaves a remainder and fails on an item with no list. so the undo is
+  `lib/access_control_macos.sh sweep`: it removes every entry that names the service user from the
+  granted folder and everything inside it, never following a link, and the install first refuses a
+  tree where that account already has an entry, and a granted path that is a link. the service user
+  is made by the install, so it holds no entry anywhere before the grant, and the sweep restores
+  every list exactly. `revoke` (the kill switch) still uses the subtraction and has the remainder
+  problem described here; that is for the kill switch's owner to move to the sweep.
 - the grant, the check and the undo are all descriptor based, so no path is followed after the start
   folder is opened. who could race a first install: no agent process exists yet, and the folder owner or a
   collaborator who can write in the tree could plant a link, but the grant does not follow it, so they gain

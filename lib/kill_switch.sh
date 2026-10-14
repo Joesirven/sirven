@@ -418,6 +418,9 @@ kill_switch_confirm() {
   printf 'this will end every process of %s, lock and expire its account, remove its keys, services and jobs, and take back every grant.\ntype revoke to go on, anything else stops: ' "$SERVICE_USER" > /dev/tty
   read -r answer < /dev/tty || answer=""
   [ "$answer" = revoke ] || DIE_STATUS=2 die "not confirmed. nothing was changed."
+  # the typed word is the owner's consent to this plan, so plan_confirm_real_apply does not ask again
+  # shellcheck disable=SC2034 # read by lib/plan.sh
+  PLAN_CONFIRMED=yes
 }
 
 plan_kill_switch_macos() {

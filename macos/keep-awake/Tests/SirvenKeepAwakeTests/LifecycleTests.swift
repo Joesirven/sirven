@@ -272,7 +272,7 @@ final class LifecycleTests: XCTestCase {
 
     func testWithoutAHelperLidClosedSaysWhy() throws {
         let bare = KeepAwakeHolder(store: store, power: power, liveness: processes, helper: nil,
-                                   now: { [unowned self] in self.clock }, process: 4242)
+                                   batteries: batteries, now: { [unowned self] in self.clock }, process: 4242)
         client.setLidClosed(true)
         try client.begin(task: "inbox", reason: "summarize the inbox", owner: 100)
         let state = bare.reconcile()

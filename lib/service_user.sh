@@ -3,14 +3,15 @@
 # password, SSH keys only.
 #
 # linux uses useradd and usermod. macos uses dscl: sysadminctl -addUser wants a password and
-# this account never gets one. macos steps are plan only until a macos virtual machine run
-# verifies them.
+# this account never gets one. the macos steps run on a fake root (--prefix, recorded not run); a real
+# macos apply stays switched off until tests/macos/real-install-check.sh has passed (lib/plan.sh).
 #
 # undo: removing the account keeps its home folder. what the agent left there was not created
 # by this package, so the owner looks before deleting it.
 # reads: PREFIX, PACKAGE, OPERATING_SYSTEM, SERVICE_USER
 
-SERVICE_USER_MACOS_REASON="macos account creation is plan output in the alpha cut; apply needs a run in a macos virtual machine"
+# shellcheck source=lib/service_user_macos.sh
+. "$(dirname "${BASH_SOURCE[0]}")/service_user_macos.sh"
 
 service_user_home() {
   case "$OPERATING_SYSTEM" in
@@ -70,38 +71,113 @@ plan_service_user_linux() {
     "rm -f $keys   # by name, never through a link"
 }
 
+# service_user_macos_real_name: the real name the macos account is created with. an account that
+# carries it was made by an earlier run of this package, which is how a re-run tells it from an
+# account someone else made under the same name.
+service_user_macos_real_name() {
+  printf '%s agent' "$PACKAGE"
+}
+
+# service_user_macos_complete USER HOME: exit 0 only when the account is whole: a number, the hidden flag,
+# the home folder it names, no password, and the home folder on disk. a half-made account is not done.
+service_user_macos_complete() {
+  [ -n "$(service_user_macos_field "$1" UniqueID)" ] || return 1
+  [ -n "$(service_user_macos_field "$1" GeneratedUID)" ] || return 1
+  [ "$(service_user_macos_field "$1" IsHidden)" = 1 ] || return 1
+  [ "$(service_user_macos_field "$1" NFSHomeDirectory)" = "$2" ] || return 1
+  [ "$(service_user_macos_field "$1" Password)" = '*' ] || return 1
+  [ -d "$2" ]
+}
+
+# service_user_macos_create USER NUMBER HOME REAL_NAME: make the account, or finish one an earlier run left
+# half made. an account this call started and could not finish is removed again, so a failed run leaves
+# nothing to find. errexit is off inside a plan step, so every command is chained.
+service_user_macos_create() {
+  local user="$1" number="$2" home="$3" real_name="$4" existed=no existing
+  existing="$(service_user_macos_field "$user" UniqueID)"
+  if service_user_macos_exists "$user"; then
+    existed=yes
+  fi
+  if [ -n "$existing" ]; then
+    number="$existing"
+  fi
+  if ! {
+    dscl . -create "/Users/$user" &&
+      dscl . -create "/Users/$user" UserShell /bin/zsh &&
+      dscl . -create "/Users/$user" RealName "$real_name" &&
+      dscl . -create "/Users/$user" UniqueID "$number" &&
+      dscl . -create "/Users/$user" PrimaryGroupID 20 &&
+      dscl . -create "/Users/$user" NFSHomeDirectory "$home" &&
+      dscl . -create "/Users/$user" Password '*' &&
+      dscl . -create "/Users/$user" IsHidden 1 &&
+      { [ -n "$(service_user_macos_field "$user" GeneratedUID)" ] || dscl . -create "/Users/$user" GeneratedUID "$(uuidgen)"; } &&
+      createhomedir -c -u "$user" >/dev/null &&
+      chmod 0700 "$home" &&
+      service_user_macos_complete "$user" "$home"
+  }; then
+    printf 'error: could not finish creating the account %s\n' "$user" >&2
+    if [ "$existed" = no ]; then dscl . -delete "/Users/$user" >/dev/null 2>&1 || true; fi
+    return 1
+  fi
+}
+
+# service_user_macos_refuse_foreign: stop before any change when an account of this name is already on
+# the machine and this package did not make it. the removal at the end of a grant (and uninstall) sweeps
+# every access list entry of the account, which is only exact for an account that held none before.
+service_user_macos_refuse_foreign() {
+  local user="$SERVICE_USER" real_name
+  [ -z "$PREFIX" ] || return 0
+  command -v dscl >/dev/null 2>&1 || return 0
+  service_user_macos_exists "$user" || return 0
+  real_name="$(service_user_macos_field "$user" RealName)"
+  [ "$real_name" != "$(service_user_macos_real_name)" ] || return 0
+  if [ "${SIRVEN_MACOS_REAL_APPLY:-}" = 1 ]; then
+    DIE_STATUS=2 die "the account $user is already on this machine and this package did not make it (its real name is not '$(service_user_macos_real_name)').
+this package keeps and removes only what it created, so it will not set up or take away access for an account it does not own.
+run again with --user NAME for a name no account has yet. nothing was changed."
+  fi
+  plan_note "an account named $user is already on this machine and this package did not make it; a real apply would stop here and ask for another --user NAME."
+}
+
 plan_service_user_macos() {
-  local user="$SERVICE_USER" home number ssh keys
+  local user="$SERVICE_USER" home number ssh keys real_name
   home="$(rooted "$(service_user_home)")"
   ssh="$(rooted "$(service_user_home)/.ssh")"
   keys="$(rooted "$(service_user_home)/.ssh/authorized_keys")"
   number="$(service_user_macos_number)"
-  plan_planonly "create the service user $user, hidden, not an administrator" \
+  real_name="$(service_user_macos_real_name)"
+  service_user_macos_refuse_foreign
+  plan_step system "create the service user $user, hidden, not an administrator" \
+    "service_user_macos_complete $user $home" \
+    "service_user_macos_create $user $number $home $(shell_quote "$real_name")" \
 "dscl . -create /Users/$user
 dscl . -create /Users/$user UserShell /bin/zsh
-dscl . -create /Users/$user RealName '$PACKAGE agent'
+dscl . -create /Users/$user RealName '$real_name'
 dscl . -create /Users/$user UniqueID $number
 dscl . -create /Users/$user PrimaryGroupID 20
 dscl . -create /Users/$user NFSHomeDirectory $home
 dscl . -create /Users/$user Password '*'
 dscl . -create /Users/$user IsHidden 1
-createhomedir -c -u $user" \
-    "$SERVICE_USER_MACOS_REASON" \
-    "dscl . -read /Users/$user >/dev/null 2>&1"
+dscl . -create /Users/$user GeneratedUID \"\$(uuidgen)\"   # only when the directory service gave none
+createhomedir -c -u $user
+chmod 0700 $home
+# if any command fails, an account this step started is deleted again: dscl . -delete /Users/$user"
   plan_undo "end every process of $user, then remove the account, keeping $(service_user_home)" \
-    "! dscl . -read /Users/$user >/dev/null 2>&1" \
-    "{ pkill -KILL -u $user || true; } && dscl . -delete /Users/$user"
-  plan_planonly "confirm $user is not in the admin group" \
-    "dseditgroup -o checkmember -m $user admin   # must answer no" \
-    "$SERVICE_USER_MACOS_REASON" \
-    "! dseditgroup -o checkmember -m $user admin >/dev/null 2>&1"
-  plan_planonly "create the SSH folder and an empty authorized_keys file" \
-"install -d -m 0700 -o $user -g staff $ssh
-install -m 0600 -o $user -g staff /dev/null $keys" \
-    "$SERVICE_USER_MACOS_REASON" \
-    "[ -f $keys ]"
-  plan_undo "remove the SSH folder and every authorized key of $user" "[ ! -d $ssh ] && [ ! -L $ssh ]" \
-    "layout_remove_keys $home && layout_remove_ssh_folder $home" "rm -f $keys && rmdir $ssh   # by name, never through a link"
+    "bash $(rooted "$STATE_DIR/package/lib/service_user_macos.sh") gone $user $(shell_quote "$real_name")" \
+    "bash $(rooted "$STATE_DIR/package/lib/service_user_macos.sh") remove $user $(shell_quote "$real_name")" \
+    "{ pkill -KILL -u $user || true; } && dscl . -delete /Users/$user   # only while its real name is still '$real_name'"
+  plan_step system "confirm $user is not in the admin group" "" \
+    "service_user_refuse_admin $user" \
+    "id -nG $user   # must not list admin"
+  plan_tag always
+  plan_step system "create the SSH folder for $user" "[ -d $ssh ]" \
+    "install -d -m 0700 -o $user -g staff $ssh"
+  plan_undo "remove the SSH folder of $user if nothing else is inside" "[ ! -d $ssh ] && [ ! -L $ssh ]" \
+    "layout_remove_ssh_folder $home" "rmdir $ssh   # kept if anything else is inside; a link in its place is removed, never followed"
+  plan_step system "create an empty authorized_keys file" "[ -f $keys ]" \
+    "install -m 0600 -o $user -g staff /dev/null $keys"
+  plan_undo "remove every authorized key of $user" "layout_keys_gone $home" "layout_remove_keys $home" \
+    "rm -f $keys   # by name, never through a link"
   plan_owner "allow $user in remote login" \
     "system settings, general, sharing, remote login: if it lists allowed users, add $user."
 }

@@ -105,11 +105,13 @@ install_case install-linux-builder-tailscale linux --level builder --path /home/
 install_case install-linux-observer-none linux --level observer --path /srv/app --path /home/example/notes --transport none
 install_case install-macos-builder-tailscale-bb macos --level builder --path /Users/example/code/app --transport tailscale --with-bb
 install_case install-macos-operator-cloudflare macos --level operator --path /Users/example/code/site --transport cloudflare
+install_case install-macos-builder-none macos --level builder --path /Users/example/code/app --transport none
 install_case revoke-linux-tailscale linux revoke --all --level builder --path /home/example/project --transport tailscale
 install_case revoke-macos-cloudflare macos revoke --all --level observer --path /Users/example/code/app --transport cloudflare
 
 # removal plans: after an install, and with nothing recorded
 uninstall_case uninstall-linux-builder-none linux --level builder --path /home/example/project --path /srv/app --transport none
+uninstall_case uninstall-macos-builder-none macos --level builder --path /Users/example/code/app --path /opt/work/site --transport none
 golden_case uninstall-nothing-recorded linux "$UNINSTALL" --dry-run --prefix "$(case_prefix uninstall-nothing-recorded)"
 
 # adopt_case NAME OPERATING_SYSTEM INSTALL_ARGUMENT...: apply install.sh to a fake root on a

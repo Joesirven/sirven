@@ -117,12 +117,25 @@ test_uninstall_reverses_what_a_rollback_granted() {
   assert_contains "$CAPTURED_STDOUT" "$ROOT/srv/app"
 }
 
-test_real_rollback_is_refused_outside_a_container() {
-  if [ -f /.dockerenv ] || [ -f /run/.containerenv ]; then
+test_real_repair_is_refused_without_root_and_a_fake_root_is_not_asked() {
+  # as root this would really apply to the machine running the tests, so only a non-root run is checked here.
+  if [ "$(id -u)" != 0 ] && [ "$(uname -s)" = Linux ]; then
+    assert_status 3 "$REPO_DIR/bin/sirven" grant repair --path /srv/app
+    assert_contains "$CAPTURED_STDERR" "applying needs root"
+  fi
+  # a fake root and a dry run never ask for yes, even with no terminal
+  two_installs
+  SIRVEN_INTERACTIVE=no assert_status 0 sirven grant repair --prefix "$ROOT" --dry-run
+  SIRVEN_INTERACTIVE=no assert_status 0 sirven grant repair --prefix "$ROOT"
+}
+
+test_real_rollback_is_refused_without_root() {
+  # as root this would really apply to the machine running the tests, so only a non-root run is checked here.
+  if [ "$(id -u)" = 0 ]; then
     return 0
   fi
   assert_status 3 "$REPO_DIR/bin/sirven" grant rollback
-  assert_contains "$CAPTURED_STDERR" "not applied"
+  assert_real_apply_refusal "$CAPTURED_STDERR"
 }
 
 test_runs_through_a_symbolic_link() {

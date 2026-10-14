@@ -58,6 +58,13 @@ for scenario in "$HARNESS_DIR"/scenarios/linux/*.sh; do
   # 256 MB unless the scenario asks for more in a header line "# harness-memory: 1g" (the kernel's own cache of
   # hundreds of thousands of folders counts against the container). the helper's own peak is asserted by the scenario.
   memory="$(sed -n 's/^# harness-memory: \([0-9]*[mg]\)$/\1/p' "$scenario" | head -1)"
+  # "# harness-apparmor: unconfined" lifts the host's AppArmor profile for that one container. why: on a Linux host with AppArmor
+  # (the server ba-sing-se) its default profile rejects the deliberately deep mkdir chains of scenarios 17, 22 and 26 with
+  # ENAMETOOLONG; Docker Desktop on a Mac has no AppArmor. the depths must not be lowered to suit a host. no other isolation changes:
+  # no host folder, the same network as any other scenario (none unless it asks for the real Tailscale), same capabilities, memory and process caps.
+  apparmor="$(sed -n 's/^# harness-apparmor: \(unconfined\)$/\1/p' "$scenario" | head -1)"
+  apparmor_option=""
+  [ -n "$apparmor" ] && apparmor_option="--security-opt apparmor=$apparmor"
   # "# harness-tailscale: yes" gives the scenario the image with the real tailscale, a network made for this run alone (so the
   # container cannot reach another container on the shared default bridge), and the test key if one is available:
   # SIRVEN_TAILSCALE_AUTHKEY in this shell's environment (passed by name, so its value is never on a command line), or the
@@ -89,7 +96,7 @@ for scenario in "$HARNESS_DIR"/scenarios/linux/*.sh; do
   # refuses, as root, to run code from a folder owned by someone else (the host user who owns the mount), so the scenario
   # runs the copy (SRC=/srv/pkg). the scenario script itself is read from /src.
   "$ENGINE" run --rm --label "sirven-harness=$RUN_ID" --network "$network" \
-    --memory "${memory:-256m}" --pids-limit 256 --cap-drop NET_RAW \
+    --memory "${memory:-256m}" --pids-limit 256 --cap-drop NET_RAW $apparmor_option \
     "$@" \
     -v "$REPO_DIR":/src:ro \
     "$image" bash -c 'cp -r /src /srv/pkg && SRC=/srv/pkg exec bash "$0"' \

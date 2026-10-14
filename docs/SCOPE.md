@@ -61,10 +61,10 @@ Each workstream lists what it delivers, what it needs first, and its honest stat
 | # | Workstream | Delivers | Depends on | Tonight |
 |---|---|---|---|---|
 | W1 | Installer core | `install.sh`: operating system detection, preflight checks, at most two setup questions with visible defaults (`--yes` and `SIRVEN_*` for no questions), a plan-then-apply engine, `--dry-run`, idempotent re-runs, `--prefix` for a fake root | none | **Build** |
-| W2 | Service user | Create or reuse `agent` (Linux `useradd`, macOS `sysadminctl`/`dscl`), no administrator group, locked password, SSH key only | W1 | **Build**, verified by dry run and fake-root tests; real creation only in a throwaway container |
+| W2 | Service user | Create or reuse `agent` (Linux `useradd`, macOS `sysadminctl`/`dscl`), no administrator group, locked password, SSH key only | W1 | **Build**, verified by dry run and fake-root tests; real creation on Linux as root (verified in the harness container); macOS real creation is built but switched off by default |
 | W3 | Permission model | Levels as data (`levels/*.json` or similar), grant schema, a compiler from grants to access control list commands | none | **Design doc plus reference data and compiler** |
 | W4 | Audit log | Log format (JSON lines), location owned by the owner, append-only from the agent's point of view, session start and end, every command via a forced-command wrapper | W2, W3 | **Format designed; wrapper built if time allows**, otherwise designed |
-| W5 | Kill switch | `revoke --all`: remove authorized keys, end sessions, lock the user, remove tunnel access, write a final audit entry | W2, W4, W6 | **Built on Linux** (applies in a container, verified by the harness); plan output on macOS |
+| W5 | Kill switch | `revoke --all`: remove authorized keys, end sessions, lock the user, remove tunnel access, write a final audit entry | W2, W4, W6 | **Built on Linux** (applies in a container and on a real machine as root, verified by the harness in a container); plan output on macOS |
 | W6 | Transport: Tailscale | Install check, `tailscale up` with an auth key after one interactive login, tagged device, a policy snippet that lets only the owner's devices reach the agent port | W1 | **Build the plan and documentation**; never run against a real tailnet in tests |
 | W7 | Transport: Cloudflare Tunnel | `cloudflared` tunnel plus Cloudflare Access service token in front of SSH | W1 | **Documented second path**, plan output only |
 | W8 | Runtime adapters | Per-runtime setup for the service user: Claude Code, Codex, Pi. Config written into the service user's home, never the owner's | W2 | **Claude Code first**; Codex and Pi stubbed with clear "not yet" errors |
@@ -112,11 +112,11 @@ safely") is W1 → W2 → W3 → W4 → W6 → W8 → W9. Everything else makes 
 | Capability | Built tonight | Designed, not built | Not started |
 |---|---|---|---|
 | Install plan, dry run, idempotency | ✓ | | |
-| Service user creation (plan; apply only in a container) | ✓ | | |
+| Service user creation (plan; applies on Linux as root; macOS apply is switched off by default) | ✓ | | |
 | Levels as data and grant-to-access-control-list compiler | ✓ | | |
 | Per-path access control lists on macOS | plan output | apply verification needs a macOS virtual machine | |
 | Audit log format | ✓ (spec) | capture wrapper | kernel-level audit (Linux `auditd`, macOS endpoint security) |
-| Kill switch | apply on Linux (container-verified); plan output on macOS | apply on macOS | |
+| Kill switch | apply on Linux as root (verified in the harness container); plan output on macOS | apply on macOS | |
 | Tailscale transport | apply and teardown in a Linux container (join as `tag:agent`, logout on revoke and uninstall; live against a test tailnet needs a test key) | apply on a real machine and a real tailnet | |
 | Cloudflare Tunnel transport | docs | plan and apply | |
 | Claude Code adapter | plan | apply | |
@@ -145,7 +145,7 @@ safely") is W1 → W2 → W3 → W4 → W6 → W8 → W9. Everything else makes 
 6. **Friend invite is the riskiest feature.** A friend's agent on your machine is a remote
    stranger with a shell. It ships last, read-only by default, with mandatory expiry.
 7. **Testing reach.** Tonight's tests prove plans, not effects. Real user and access control list
-   creation is unverified until a container (Linux) or virtual machine (macOS) run exists.
+   creation is verified on Linux in the harness container; it is unverified on a real Linux machine outside it, and on macOS until a run on a real Mac (virtual machine or the owner's check) exists.
 8. **Load on the server.** All builds and tests run on the MacBook; the server only
    coordinates.
 

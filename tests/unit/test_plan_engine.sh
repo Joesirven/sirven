@@ -118,8 +118,9 @@ test_owner_steps_are_shown_but_not_run() {
   assert_no_file "$TEST_TMP/never"
 }
 
-test_real_apply_is_refused_outside_a_container() {
-  if in_container; then
+test_real_apply_is_refused_without_root() {
+  # as root this would really apply to the machine running the tests
+  if [ "$(id -u)" = 0 ]; then
     return 0
   fi
   setup_fake_root
@@ -127,8 +128,116 @@ test_real_apply_is_refused_outside_a_container() {
   add_directory_step /etc/sirven
   plan_evaluate
   assert_status 3 plan_apply
-  assert_contains "$CAPTURED_STDERR" "throwaway container"
+  assert_contains "$CAPTURED_STDERR" "applying needs root"
   assert_no_file "$ROOT/etc/sirven"
+}
+
+# the refusal looks at the user and the operating system only: a container is no longer special.
+test_real_apply_on_linux_is_allowed_for_root() {
+  PLAN_PREFIX=""
+  PLAN_OPERATING_SYSTEM=linux
+  id() { printf '0'; }
+  assert_eq "" "$(plan_real_apply_refusal)"
+  id() { printf '1000'; }
+  assert_contains "$(plan_real_apply_refusal)" "applying needs root"
+}
+
+# stubs for the confirmation gate: where answers could be read from, and a container marker the gate must ignore.
+# shellcheck disable=SC2329 # called by plan_confirm_real_apply in lib/plan.sh
+gate_stubs() {
+  in_container() { return "${STUB_CONTAINER:-1}"; }
+  _setup_terminal() { printf '%s' "${STUB_TERMINAL:-}"; }
+}
+
+test_confirm_gate_needs_yes_flag_or_a_typed_yes_on_a_real_machine() {
+  gate_stubs
+  PLAN_PREFIX=""
+  unset SIRVEN_YES
+  ASSUME_YES=no
+  STUB_TERMINAL=""
+  assert_status 3 plan_confirm_real_apply
+  assert_contains "$CAPTURED_STDERR" "no terminal to confirm"
+  assert_contains "$CAPTURED_STDERR" "with --yes"
+  STUB_TERMINAL=stdin
+  capture plan_confirm_real_apply <<< "no"
+  assert_eq 3 "$CAPTURED_STATUS"
+  assert_contains "$CAPTURED_STDERR" "not confirmed"
+  capture plan_confirm_real_apply <<< "YES"
+  assert_eq 0 "$CAPTURED_STATUS"
+}
+
+test_confirm_gate_is_skipped_only_for_consent_or_a_prefix() {
+  gate_stubs
+  STUB_TERMINAL=""
+  unset SIRVEN_YES
+  PLAN_PREFIX=""
+  ASSUME_YES=yes
+  assert_status 0 plan_confirm_real_apply
+  ASSUME_YES=no
+  SIRVEN_YES=1 assert_status 0 plan_confirm_real_apply
+  PLAN_PREFIX="$TEST_TMP/fake"
+  assert_status 0 plan_confirm_real_apply
+}
+
+test_a_container_is_not_consent() {
+  gate_stubs
+  unset SIRVEN_YES
+  PLAN_PREFIX=""
+  ASSUME_YES=no
+  STUB_CONTAINER=0
+  STUB_TERMINAL=""
+  assert_status 3 plan_confirm_real_apply
+  assert_contains "$CAPTURED_STDERR" "with --yes"
+}
+
+test_a_confirmation_already_given_is_not_asked_again() {
+  gate_stubs
+  STUB_TERMINAL=stdin
+  unset SIRVEN_YES
+  PLAN_PREFIX=""
+  ASSUME_YES=no
+  PLAN_CONFIRMED=yes
+  capture plan_confirm_real_apply < /dev/null
+  assert_eq 0 "$CAPTURED_STATUS"
+  assert_eq "" "$CAPTURED_STDERR" "no second question"
+  PLAN_CONFIRMED=no
+  capture plan_confirm_real_apply <<< "no"
+  assert_eq 3 "$CAPTURED_STATUS"
+}
+
+test_plan_blockers_are_refused_before_asking_for_yes() {
+  setup_fake_root
+  gate_stubs
+  PLAN_PREFIX=""
+  ASSUME_YES=no
+  unset SIRVEN_YES
+  STUB_TERMINAL=stdin
+  # shellcheck disable=SC2329 # called by plan_real_apply_refusal in lib/plan.sh
+  id() { printf '0'; }
+  add_directory_step /one
+  plan_planonly "a later feature" "later-command" "not built yet"
+  plan_evaluate
+  assert_status 3 plan_apply < /dev/null
+  assert_contains "$CAPTURED_STDERR" "not yet"
+  assert_not_contains "$CAPTURED_STDERR" "type yes"
+  assert_no_file "$ROOT/one"
+}
+
+test_an_unconfirmed_plan_changes_nothing() {
+  setup_fake_root
+  gate_stubs
+  PLAN_PREFIX=""
+  ASSUME_YES=no
+  unset SIRVEN_YES
+  STUB_TERMINAL=""
+  # shellcheck disable=SC2329 # called by plan_real_apply_refusal in lib/plan.sh
+  # shellcheck disable=SC2329 # called by plan_real_apply_refusal in lib/plan.sh
+  id() { printf '0'; }
+  add_directory_step /one
+  plan_evaluate
+  assert_status 3 plan_apply
+  assert_contains "$CAPTURED_STDERR" "no terminal to confirm"
+  assert_no_file "$ROOT/one"
 }
 
 test_real_apply_on_macos_is_refused() {
@@ -136,6 +245,37 @@ test_real_apply_on_macos_is_refused() {
   PLAN_PREFIX=""
   PLAN_OPERATING_SYSTEM=macos
   assert_contains "$(plan_real_apply_refusal)" "not verified yet"
+  assert_contains "$(plan_real_apply_refusal)" "switched off"
+}
+
+test_real_apply_on_macos_needs_the_switch_and_root() {
+  setup_fake_root
+  PLAN_PREFIX=""
+  PLAN_OPERATING_SYSTEM=macos
+  # anything but exactly 1 leaves it off
+  assert_contains "$(SIRVEN_MACOS_REAL_APPLY=true plan_real_apply_refusal)" "not verified yet"
+  assert_contains "$(SIRVEN_MACOS_REAL_APPLY=0 plan_real_apply_refusal)" "not verified yet"
+  # switched on but not root
+  # shellcheck disable=SC2329 # called by plan_real_apply_refusal, in place of the real id
+  id() { printf '501'; }
+  assert_contains "$(SIRVEN_MACOS_REAL_APPLY=1 plan_real_apply_refusal)" "needs root"
+  assert_contains "$(SIRVEN_MACOS_REAL_APPLY=1 plan_real_apply_refusal)" "sudo env SIRVEN_MACOS_REAL_APPLY=1"
+  # switched on and root: allowed
+  # shellcheck disable=SC2329 # same
+  id() { printf '0'; }
+  assert_eq "" "$(SIRVEN_MACOS_REAL_APPLY=1 plan_real_apply_refusal)" "allowed with the switch and root"
+  # a fake root is always allowed, switch or not
+  PLAN_PREFIX="$ROOT"
+  assert_eq "" "$(plan_real_apply_refusal)" "a fake root needs no switch"
+}
+
+test_the_macos_switch_does_not_change_the_linux_refusal() {
+  setup_fake_root
+  PLAN_PREFIX=""
+  PLAN_OPERATING_SYSTEM=linux
+  # linux has no container rule any more (v0.2-linux-real-apply), so the switch must change nothing:
+  # the refusal with it set is the refusal without it, whether that is "needs root" or nothing.
+  assert_eq "$(plan_real_apply_refusal)" "$(SIRVEN_MACOS_REAL_APPLY=1 plan_real_apply_refusal)"
 }
 
 test_unknown_step_kind_is_an_error() {

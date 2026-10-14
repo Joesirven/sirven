@@ -14,7 +14,7 @@ FILTER="${1:-}"
 export REPO_DIR TESTS_DIR
 # the setup questions must never wait on whoever runs the tests: tests get no terminal on
 # standard input and none of the caller's answers.
-unset SIRVEN_LEVEL SIRVEN_PATH SIRVEN_YES SIRVEN_INTERACTIVE
+unset SIRVEN_LEVEL SIRVEN_PATH SIRVEN_YES SIRVEN_INTERACTIVE SIRVEN_MACOS_REAL_APPLY
 # nor the Tailscale and bb of the machine running them: the adopt tests point these at fakes.
 SIRVEN_TAILSCALE=none
 SIRVEN_BB=none
@@ -26,7 +26,9 @@ failed_names=""
 
 run_test() {
   local file="$1" name="$2" log status
-  TEST_TMP="$(mktemp -d "${TMPDIR:-/tmp}/sirven-test.XXXXXX")"
+  # /tmp, not TMPDIR: on macOS TMPDIR sits under /var, which the grant policy refuses as a folder
+  # to grant, so a test that grants its own project folder would get no default path there.
+  TEST_TMP="$(mktemp -d /tmp/sirven-test.XXXXXX)"
   log="$TEST_TMP/.log"
   (
     export TEST_TMP

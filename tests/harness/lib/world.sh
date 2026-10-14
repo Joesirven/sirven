@@ -71,6 +71,14 @@ world_files() {
     | grep -v -e '^/etc/[a-z]*- ' -e '^/etc/subuid' -e '^/etc/subgid' -e '^/var/log/\(lastlog\|faillog\|wtmp\)' \
     | sort
 }
+# a content hash of every regular file under /etc, so a file that kept its type, owner, and mode but not its
+# bytes shows too. the account files are left out here because world_accounts compares them without the
+# password hashes' salts moving, and the system's own backup copies and subordinate id files change by themselves.
+world_etc_content() {
+  find /etc -xdev -type f ! -name 'passwd' ! -name 'shadow' ! -name 'group' ! -name 'gshadow' \
+      ! -name '*-' ! -name 'subuid' ! -name 'subgid' ! -name 'ld.so.cache' -print0 2>/dev/null \
+    | sort -z | xargs -0 sha256sum 2>/dev/null
+}
 world_accounts() {
   { cut -d: -f1,3,4,6,7 /etc/passwd; cut -d: -f1,3 /etc/group; cut -d: -f1,2 /etc/shadow | sed 's/:[^*!].*$/:HASH/'; sed 's/^/subuid /' /etc/subuid; sed 's/^/subgid /' /etc/subgid; } | sort
 }

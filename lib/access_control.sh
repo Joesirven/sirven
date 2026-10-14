@@ -6,10 +6,12 @@
 # on linux, each folder the grant changes gets a snapshot step first. lib/access_control_snapshot.sh
 # records the folder's access control lists, and that step's undo puts them back exactly. uninstall,
 # rollback and the kill switch all restore from the same snapshot.
+# on macos there is no snapshot: the service user is made by the install and holds no entry anywhere before
+# the grant (checked first), so the undo removes every entry that names it, with lib/access_control_macos.sh.
 # reads: ROOT_DIR, PREFIX, PACKAGE, OPERATING_SYSTEM, SERVICE_USER, LEVEL, LEVEL_FILE, LEVEL_SUMMARY,
 #        CONFIG_DIR, STAGE_DIR, GRANT_PATHS
 
-ACCESS_CONTROL_MACOS_REASON="macos access control lists are plan output in the alpha cut; apply needs a run in a macos virtual machine"
+ACCESS_CONTROL_MACOS_REASON="removing a grant (rollback) is not verified on macos yet; install and uninstall of a grant are, on a fake root"
 
 grant_compiler() {
   python3 "$ROOT_DIR/lib/grant_compiler.py" "$@"
@@ -75,7 +77,9 @@ _access_control_add_fragment() {
   done < "$fragment"
 }
 
-_access_control_kind() {
+# the removal of a grant for a rollback is checked on linux only. an install and its uninstall are system
+# steps on both operating systems; plan_access_control uses system directly.
+_access_control_removal_kind() {
   if [ "$OPERATING_SYSTEM" = macos ]; then printf 'planonly'; else printf 'system'; fi
 }
 
@@ -98,6 +102,7 @@ plan_access_control() {
   fi
 
   access_control_refuse_existing_lists
+  access_control_refuse_unsafe_macos_folders
   if [ "$OPERATING_SYSTEM" = linux ]; then
     plan_note "undo removes only what this grant adds: the entries for $SERVICE_USER and the folder owner, and the default list on folders. it never changes an owner or a group, never touches the owner and other bits or special bits, and never follows a link, so a chown, a chmod 600 or a setuid made while the grant is in force stays. the group bits end as what the group could really do, so a chmod that widens the group bits during the grant does not outlast it."
   fi
@@ -110,7 +115,7 @@ plan_access_control() {
 
   fragment="$STAGE_DIR/grant-fragment.txt"
   _access_control_run_compiler "$fragment" compile --level "$LEVEL_FILE" --prefix "$PREFIX" --with-undo
-  _access_control_add_fragment "$fragment" "$(_access_control_kind)" "$ACCESS_CONTROL_MACOS_REASON"
+  _access_control_add_fragment "$fragment" system "$ACCESS_CONTROL_MACOS_REASON"
 }
 
 # access_control_refuse_existing_lists: before any change, read the granted folders and the parents the
@@ -146,6 +151,53 @@ nothing was changed."
     *)
       if [ "$DRY_RUN" = yes ] && [ "$(id -u)" != 0 ]; then
         plan_note "the access lists on the granted folders could not all be read as $(id -un), so the check that refuses lists a grant would widen was not complete. a real run, as root, checks every path."
+        return 0
+      fi
+      DIE_STATUS=2 die "the access lists on the granted folders could not be checked, so the grant is refused.
+$output
+nothing was changed."
+      ;;
+  esac
+}
+
+# access_control_refuse_unsafe_macos_folders: before any change, read the granted folders and the parents
+# the agent passes through. a path that is a symbolic link is refused (find -P on a link grants nothing, and
+# the pass-through entry would land on the link), and so is a tree where the agent's account already has an
+# entry, because the removal at the end sweeps every entry of the account and would take that one too.
+# read only, macos only, and only on the real root.
+access_control_refuse_unsafe_macos_folders() {
+  local fragment="$STAGE_DIR/grant-folders.txt" tab kind path status=0 output index=0
+  local own="" arguments=() count=0
+  [ "$OPERATING_SYSTEM" = macos ] && [ -z "$PREFIX" ] || return 0
+  command -v dscl >/dev/null 2>&1 || return 0
+  _access_control_run_compiler "$fragment" folders --level "$LEVEL_FILE"
+  tab="$(printf '\t')"
+  while IFS="$tab" read -r kind path; do
+    arguments[count]="--$kind"
+    arguments[count + 1]="$path"
+    count=$((count + 2))
+  done < "$fragment"
+  # an account an earlier run of this package made (its removal is in the install record) holds its own
+  # entries from that run.
+  if grep -qF -- "dscl . -delete /Users/$SERVICE_USER" "$(layout_record_file)" 2>/dev/null; then
+    own="--allow-own-entries"
+  fi
+  set -- check "$SERVICE_USER" ${own:+"$own"}
+  while [ "$index" -lt "$count" ]; do
+    set -- "$@" "${arguments[index]}"
+    index=$((index + 1))
+  done
+  output="$(bash "$ROOT_DIR/lib/access_control_macos.sh" "$@" 2>&1)" || status=$?
+  case "$status" in
+    0) return 0 ;;
+    3)
+      DIE_STATUS=2 die "refusing this grant:
+$output
+nothing was changed."
+      ;;
+    *)
+      if [ "$DRY_RUN" = yes ] && [ "$(id -u)" != 0 ]; then
+        plan_note "the access lists on the granted folders could not all be read as $(id -un), so the check that refuses a link or an existing entry was not complete. a real run, as root, checks every path."
         return 0
       fi
       DIE_STATUS=2 die "the access lists on the granted folders could not be checked, so the grant is refused.
@@ -260,5 +312,5 @@ plan_access_control_remove_paths() {
   local fragment="$STAGE_DIR/remove-fragment.txt"
   [ "${#GRANT_PATHS[@]}" -gt 0 ] || return 0
   _access_control_run_compiler "$fragment" revoke --level "$LEVEL_FILE" --prefix "$PREFIX"
-  _access_control_add_fragment "$fragment" "$(_access_control_kind)" "$ACCESS_CONTROL_MACOS_REASON"
+  _access_control_add_fragment "$fragment" "$(_access_control_removal_kind)" "$ACCESS_CONTROL_MACOS_REASON"
 }

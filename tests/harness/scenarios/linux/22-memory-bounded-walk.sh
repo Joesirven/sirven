@@ -4,6 +4,10 @@
 # in a second tree, hundreds of thousands of long-named files; the walk keeps no path per open folder and no listing
 # for a folder it let go. peak memory of the largest process must stay under 60 MB (measured: 24 and 18) in the
 # check and in uninstall. at 2211d8f the first tree took about 1 GB and was killed in a 256 MB container.
+# harness-apparmor: unconfined
+# (why: the server ba-sing-se's default AppArmor profile rejects this deliberately deep first tree (about 768,000 bytes of path)
+# with ENAMETOOLONG; Omashu has no AppArmor. the depth must not be lowered. no other isolation changes: no host folder, no network,
+# same capabilities and caps)
 set -uo pipefail
 . "$(dirname "$0")/../../lib/world.sh"
 cd "$SRC" || exit 2
