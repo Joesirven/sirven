@@ -122,6 +122,16 @@ test_peer_verify_clears_the_lock_of_a_process_that_is_gone() {
   assert_no_file "$TEST_TMP/peer/verify.lock"
 }
 
+test_peer_verify_clears_a_lock_written_before_the_last_boot() {
+  have_node || return 0
+  setup_roles
+  attest sign --dir "$TEST_TMP/originator" --audience "$(cat "$TEST_TMP/peer/peer-identifier")" --domain shop.example.com --bytes 100 > "$TEST_TMP/envelope.json"
+  # a live process number on this host, but a boot a day earlier: the number was reused since.
+  printf '{"pid": %s, "host": "%s", "boot": %s, "token": "old-boot"}\n' "$$" "$(this_host)" "$(( $(date +%s) - 86400 ))" > "$TEST_TMP/peer/verify.lock"
+  assert_status 0 attest peer verify --dir "$TEST_TMP/peer" --host shop.example.com --bytes 100 --envelope "$TEST_TMP/envelope.json"
+  assert_no_file "$TEST_TMP/peer/verify.lock"
+}
+
 test_peer_verify_refuses_a_lock_held_on_another_host() {
   have_node || return 0
   setup_roles
