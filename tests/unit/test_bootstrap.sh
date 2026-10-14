@@ -101,6 +101,7 @@ run_bootstrap() {
 piped_bootstrap() {
   local file="$1"
   shift
+  # shellcheck disable=SC2016 # the single-quoted script is run by sh -c, where $1..$5 are its own arguments
   capture sh -c 'script=$1; path=$2; log=$3; fixture=$4; tmp=$5; shift 5
     cat "$script" | env PATH="$path" FAKE_CURL_LOG="$log" FAKE_CURL_FIXTURE="$fixture" TMPDIR="$tmp" bash -s -- "$@"' \
     sh "$file" "$TEST_TMP/bin:$PATH" "$TEST_TMP/curl.log" "$FIXTURE_ARCHIVE" "$TEST_TMP/tmp" "$@"
@@ -336,6 +337,7 @@ make_release_repository() {
   mkdir -p "$repo/bootstrap"
   cp "$RELEASE_SOURCE" "$repo/bootstrap/release.sh"
   cp "$BOOTSTRAP_SOURCE" "$repo/bootstrap/sirven-bootstrap.sh"
+  # shellcheck disable=SC2016 # the $* and ${...} are written into the fixture script, to expand when it runs
   printf '#!/usr/bin/env bash\necho "fixture installer: $*"\necho "package tag: ${SIRVEN_PACKAGE_TAG:-unset}"\n' > "$repo/install.sh"
   git -C "$repo" init -q
   git -C "$repo" add -A
@@ -387,7 +389,9 @@ test_the_bootstrap_and_the_release_step_agree_on_the_repository_and_the_asset() 
   repository="$(sed -n 's/^SIRVEN_REPOSITORY="\(.*\)"$/\1/p' "$BOOTSTRAP_SOURCE")"
   assert_eq "Joesirven/sirven" "$repository"
   assert_contains "$(cat "$RELEASE_SOURCE")" "REPOSITORY=\"$repository\""
+  # shellcheck disable=SC2016 # the text searched for is the literal shell source, with its unexpanded $ names
   asset='archive="sirven-$SIRVEN_PINNED_TAG.tar.gz"'
   assert_contains "$(cat "$BOOTSTRAP_SOURCE")" "$asset"
+  # shellcheck disable=SC2016 # literal shell source again: the release script's own $tag, not this test's
   assert_contains "$(cat "$RELEASE_SOURCE")" 'asset="sirven-$tag.tar.gz"'
 }

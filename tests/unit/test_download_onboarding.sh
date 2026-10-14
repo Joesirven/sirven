@@ -112,6 +112,7 @@ test_download_page_states_requirements_and_signing_honestly() {
 
 test_sample_manifest_has_every_field_the_build_writes() {
   local written sample
+  # shellcheck disable=SC2016 # the sed pattern matches the build script's literal $MANIFEST_PATH text
   written="$(sed -n '/^cat > "\$MANIFEST_PATH" <<JSON$/,/^JSON$/p' "$BUILD" | sed -n 's/^  "\([A-Za-z0-9]*\)":.*/\1/p' | sort | tr '\n' ' ')"
   sample="$(sed -n 's/^  "\([A-Za-z0-9]*\)":.*/\1/p' "$PAGE/release.json" | sort | tr '\n' ' ')"
   assert_contains "$written" "sha256"
