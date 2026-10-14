@@ -143,6 +143,33 @@ final class HelperRulesTests: XCTestCase {
         XCTAssertEqual(setting.disabled, true)
     }
 
+    // the timer, not a direct recheck() call, must assert the setting again during a hold. the interval
+    // here is 50 milliseconds so the test is quick; the shipped interval is 15 seconds.
+    func testTheTimerAssertsTheSettingAgainDuringAHoldWithoutAnyDirectCall() throws {
+        let timed = KeepAwakeHelperCore(guardian: guardian, interval: 0.05, log: { [log] in log!.messages.append($0) })
+        defer { timed.revertAll() }
+        XCTAssertNil(timed.setAsking(ObjectIdentifier(self), true))
+        setting.disabled = false
+        XCTAssertTrue(waitUntil { self.setting.disabled == true }, "the timer must assert the setting again")
+        XCTAssertTrue(log.messages.contains("sleep-disabled was cleared during a hold; asserted again"))
+    }
+
+    func testNoTimerRunsOutsideAHold() throws {
+        let timed = KeepAwakeHelperCore(guardian: guardian, interval: 0.05, log: { [log] in log!.messages.append($0) })
+        XCTAssertNil(timed.setAsking(ObjectIdentifier(self), true))
+        XCTAssertNil(timed.setAsking(ObjectIdentifier(self), false))
+        setting.disabled = false
+        Thread.sleep(forTimeInterval: 0.3)
+        XCTAssertEqual(setting.disabled, false, "with no hold, nothing sets the setting again")
+    }
+
+    /// polls for up to three seconds, so a slow machine does not fail the timer tests.
+    private func waitUntil(_ condition: () -> Bool) -> Bool {
+        let deadline = Date().addingTimeInterval(3)
+        while !condition() && Date() < deadline { Thread.sleep(forTimeInterval: 0.01) }
+        return condition()
+    }
+
     func testTheSettingReadIsUnknownWhenPmsetCannotBeAsked() {
         setting.disabled = nil
         XCTAssertNil(setting.isDisabled())
