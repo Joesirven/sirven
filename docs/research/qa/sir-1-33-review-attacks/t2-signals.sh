@@ -27,4 +27,9 @@ SIRVEN_TAILSCALE_AUTHKEY="$KEY" bash lib/tailscale_node.sh join /var/lib/sirven/
 echo "after a later normal join: $(ls /var/lib/sirven/.tailscale-key.* 2>/dev/null | tr '\n' ' ')"
 bash lib/tailscale_node.sh leave /var/lib/sirven/tailscale-node.json >/dev/null 2>&1
 echo "after leave: $(ls /var/lib/sirven/.tailscale-key.* 2>/dev/null | tr '\n' ' ')"
+check "a later normal join swept the copy a killed join left" bash -c '! ls /var/lib/sirven/.tailscale-key.* 2>/dev/null | grep -q .'
+# and a killed join followed by leave alone, with no record at all
+printf 'stale\n' > /var/lib/sirven/.tailscale-key.999
+bash lib/tailscale_node.sh leave /var/lib/sirven/tailscale-node.json >/dev/null 2>&1
+check "leave with no record at all swept a stale copy" bash -c '! ls /var/lib/sirven/.tailscale-key.* 2>/dev/null | grep -q .'
 finish

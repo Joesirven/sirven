@@ -27,6 +27,7 @@ echo "== D. tailscale too old to read a key file"
 rm -rf $FAKE_TS_DIR /var/lib/sirven /etc/sirven /usr/local/sbin/sirven; world_files > /tmp/empty2.files
 FAKE_TS_OLD=yes SIRVEN_TAILSCALE_AUTHKEY="$KEY" install_ts > /tmp/d.out 2>&1; echo "install exit $?"; grep -E "refused|error" /tmp/d.out | head -3
 echo "files changed before the refusal: $(world_files | diff /tmp/empty2.files - | grep -c '^>')"
+world_unchanged_if 'true' "D: a tailscale too old to read a key file is refused before any change" files /tmp/empty2.files
 echo "== E. second node of the tailnet carries tag:agent too (the fake always lists one as a peer): a join and leave read only our own entry"
 rm -rf $FAKE_TS_DIR /var/lib/sirven /etc/sirven
 SIRVEN_TAILSCALE_AUTHKEY="$KEY" install_ts >/dev/null 2>&1; bash install.sh revoke --all --yes --transport tailscale >/dev/null 2>&1
