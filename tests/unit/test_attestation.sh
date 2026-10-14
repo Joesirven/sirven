@@ -76,7 +76,7 @@ test_peer_accepts_then_refuses_a_replay() {
   assert_contains "$CAPTURED_STDOUT" '"reason": "replayed"'
 }
 
-test_peer_verify_removes_a_lock_left_by_a_dead_process() {
+test_peer_verify_removes_an_unreadable_lock_left_behind() {
   have_node || return 0
   setup_roles
   attest sign --dir "$TEST_TMP/originator" --audience "$(cat "$TEST_TMP/peer/peer-identifier")" --domain shop.example.com --bytes 100 > "$TEST_TMP/envelope.json"
@@ -84,6 +84,53 @@ test_peer_verify_removes_a_lock_left_by_a_dead_process() {
   touch -t 200001010000 "$TEST_TMP/peer/verify.lock"
   assert_status 0 attest peer verify --dir "$TEST_TMP/peer" --host shop.example.com --bytes 100 --envelope "$TEST_TMP/envelope.json"
   assert_no_file "$TEST_TMP/peer/verify.lock"
+}
+
+# a lock owner record: the holder's process number, host name, and token, as the verify lock writes it.
+write_lock_record() {
+  printf '{"pid": %s, "host": "%s", "token": "%s"}\n' "$1" "$2" "$3" > "$TEST_TMP/peer/verify.lock"
+}
+
+this_host() {
+  node -e 'process.stdout.write(require("os").hostname())'
+}
+
+# a process number that belongs to no running process: a child that has already exited.
+gone_pid() {
+  sh -c 'exit 0' &
+  wait "$!"
+  printf '%s' "$!"
+}
+
+test_peer_verify_refuses_a_lock_held_by_a_live_process() {
+  have_node || return 0
+  setup_roles
+  attest sign --dir "$TEST_TMP/originator" --audience "$(cat "$TEST_TMP/peer/peer-identifier")" --domain shop.example.com --bytes 100 > "$TEST_TMP/envelope.json"
+  write_lock_record "$$" "$(this_host)" live-holder
+  export SIRVEN_ATTESTATION_TEST_LOCK_WAIT_MS=300
+  assert_status 3 attest peer verify --dir "$TEST_TMP/peer" --host shop.example.com --bytes 100 --envelope "$TEST_TMP/envelope.json"
+  assert_contains "$CAPTURED_STDOUT" '"reason": "lock_unavailable"'
+  assert_contains "$(cat "$TEST_TMP/peer/verify.lock")" live-holder
+}
+
+test_peer_verify_clears_the_lock_of_a_process_that_is_gone() {
+  have_node || return 0
+  setup_roles
+  attest sign --dir "$TEST_TMP/originator" --audience "$(cat "$TEST_TMP/peer/peer-identifier")" --domain shop.example.com --bytes 100 > "$TEST_TMP/envelope.json"
+  write_lock_record "$(gone_pid)" "$(this_host)" dead-holder
+  assert_status 0 attest peer verify --dir "$TEST_TMP/peer" --host shop.example.com --bytes 100 --envelope "$TEST_TMP/envelope.json"
+  assert_no_file "$TEST_TMP/peer/verify.lock"
+}
+
+test_peer_verify_refuses_a_lock_held_on_another_host() {
+  have_node || return 0
+  setup_roles
+  attest sign --dir "$TEST_TMP/originator" --audience "$(cat "$TEST_TMP/peer/peer-identifier")" --domain shop.example.com --bytes 100 > "$TEST_TMP/envelope.json"
+  write_lock_record "$(gone_pid)" "elsewhere.invalid" other-host
+  export SIRVEN_ATTESTATION_TEST_LOCK_WAIT_MS=300
+  assert_status 3 attest peer verify --dir "$TEST_TMP/peer" --host shop.example.com --bytes 100 --envelope "$TEST_TMP/envelope.json"
+  assert_contains "$CAPTURED_STDOUT" '"reason": "lock_unavailable"'
+  assert_contains "$(cat "$TEST_TMP/peer/verify.lock")" other-host
 }
 
 test_peer_refuses_unsigned_wrong_domain_expired_and_tampered() {

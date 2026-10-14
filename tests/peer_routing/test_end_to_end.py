@@ -46,6 +46,12 @@ def node(*arguments, now=NOW, data=None):
     return json.loads(answer.stdout)
 
 
+def this_host():
+    """the host name the attestation command line sees, which is what a lock owner record names."""
+    answer = subprocess.run(["node", "-e", "process.stdout.write(require('os').hostname())"], capture_output=True, text=True)
+    return answer.stdout
+
+
 def review(root, *arguments):
     answer = subprocess.run([sys.executable, REVIEW, "--root", root] + list(arguments), capture_output=True, text=True)
     if answer.returncode != 0:
@@ -236,6 +242,89 @@ class EndToEnd(unittest.TestCase):
         self.assertEqual(0, first.returncode, first_err.decode())
         self.assertEqual(3, second.returncode, second.stdout.decode())
         self.assertEqual("replayed", json.loads(second.stdout)["reason"])
+
+    def held_verify(self, hold_ms):
+        """a verify of a fresh envelope, held inside its locked step for hold_ms after it has read
+        the nonce memory. returns the peer folder, the command, the envelope bytes, the running
+        process, and the clock environment, once the hold has begun."""
+        state = tempfile.mkdtemp(dir=self.scratch)
+        peer = os.path.join(state, "peer")
+        domains = os.path.join(state, "registry-domains.txt")
+        shutil.copytree(os.path.join(self.state, "peer"), peer)
+        shutil.copy(os.path.join(self.state, "registry-domains.txt"), domains)
+        data = json.dumps(self.envelope()).encode("utf-8")
+        command = ["node", ATTESTATION_COMMAND, "peer", "verify", "--dir", peer, "--host", RIDES,
+                   "--bytes", str(len(REQUEST)), "--request-digest", hashlib.sha256(REQUEST).hexdigest(),
+                   "--allowlist", domains]
+        clock = dict(os.environ, SIRVEN_ATTESTATION_NOW=str(NOW))
+        first = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                 env=dict(clock, SIRVEN_ATTESTATION_TEST_HOLD_MS=str(hold_ms)))
+        first.stdin.write(data)
+        first.stdin.close()
+        marker = os.path.join(peer, "verify.paused")
+        deadline = time.time() + 20
+        while not os.path.exists(marker) and time.time() < deadline:
+            time.sleep(0.01)
+        self.assertTrue(os.path.exists(marker), "the first verify never reached its locked step")
+        return peer, command, data, first, clock
+
+    def finish(self, process):
+        """wait for a verify process and close its pipes; returns its standard error."""
+        error = process.stderr.read()
+        process.wait(timeout=60)
+        process.stdout.close()
+        process.stderr.close()
+        return error.decode()
+
+    def test_a_live_holder_is_not_taken_over_however_old_its_lock_is(self):
+        # the reviewed steal: a holder that outlives the old 30 second stale age, with its lock
+        # made decades old on disk while it is still running. the second verify must not take the
+        # lock. it waits, is refused, and the holder is accepted.
+        peer, command, data, first, clock = self.held_verify(2000)
+        os.utime(os.path.join(peer, "verify.lock"), (1_000_000, 1_000_000))
+        second = subprocess.run(command, input=data, capture_output=True, timeout=60,
+                                env=dict(clock, SIRVEN_ATTESTATION_TEST_LOCK_WAIT_MS="500"))
+        first_error = self.finish(first)
+        self.assertEqual(0, first.returncode, first_error)
+        self.assertEqual(3, second.returncode, second.stdout.decode())
+        self.assertEqual("lock_unavailable", json.loads(second.stdout)["reason"])
+
+    def test_a_release_does_not_remove_a_lock_now_held_by_another_verify(self):
+        # the holder's lock is replaced while it works. its release must leave the other lock alone.
+        peer, command, data, first, clock = self.held_verify(2000)
+        lock = os.path.join(peer, "verify.lock")
+        with open(lock, "w") as handle:
+            json.dump({"pid": os.getpid(), "host": this_host(), "token": "taken-over"}, handle)
+        first_error = self.finish(first)
+        self.assertEqual(0, first.returncode, first_error)
+        with open(lock) as handle:
+            self.assertEqual("taken-over", json.load(handle)["token"])
+
+    def test_two_waiters_on_a_dead_holders_lock_admit_one_verify(self):
+        # a lock whose holder has exited. two verifies of one envelope both find it dead. exactly
+        # one may break it and run; the other must see the nonce and be refused.
+        state = tempfile.mkdtemp(dir=self.scratch)
+        peer = os.path.join(state, "peer")
+        domains = os.path.join(state, "registry-domains.txt")
+        shutil.copytree(os.path.join(self.state, "peer"), peer)
+        shutil.copy(os.path.join(self.state, "registry-domains.txt"), domains)
+        data = json.dumps(self.envelope()).encode("utf-8")
+        command = ["node", ATTESTATION_COMMAND, "peer", "verify", "--dir", peer, "--host", RIDES,
+                   "--bytes", str(len(REQUEST)), "--request-digest", hashlib.sha256(REQUEST).hexdigest(),
+                   "--allowlist", domains]
+        gone = subprocess.Popen([sys.executable, "-c", "pass"])
+        gone.wait()
+        with open(os.path.join(peer, "verify.lock"), "w") as handle:
+            json.dump({"pid": gone.pid, "host": this_host(), "token": "dead-holder"}, handle)
+        clock = dict(os.environ, SIRVEN_ATTESTATION_NOW=str(NOW))
+        waiters = [subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=clock)
+                   for _ in range(2)]
+        results = [(waiter.communicate(data), waiter.returncode) for waiter in waiters]
+        accepted = [code for (_, _), code in results if code == 0]
+        refused = [json.loads(out) for (out, _), code in results if code == 3]
+        self.assertEqual(1, len(accepted), results)
+        self.assertEqual(["replayed"], [verdict["reason"] for verdict in refused])
+        self.assertFalse(os.path.exists(os.path.join(peer, "verify.lock")))
 
     def test_a_key_identifier_that_begins_with_a_dash_is_carried(self):
         # key identifiers are base64url, so about one in 64 begins with "-". the ledger check

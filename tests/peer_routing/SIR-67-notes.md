@@ -20,8 +20,12 @@ against the previous `peer_routing.py`.
 envelope, and wrote both back without a lock. The carrier serves requests on several threads
 and runs one verify process per request. Two verifies of one envelope could both read before
 either writes, and both be accepted. Now the read, check and write run under an exclusive lock
-file (`verify.lock`). A lock older than 30 seconds is removed as left by a dead process. A lock
-that cannot be taken within 10 seconds fails the request.
+file (`verify.lock`) that records its holder's process number, host name, and a random token.
+A lock is removed only when its holder process is gone on this host, never by age while the holder
+lives. Removal is exclusive: one waiter creates a break file named for the dead token, and only that
+waiter removes the lock. Release removes the lock only while it still carries its own token. A lock
+that cannot be taken within 10 seconds refuses the request (`lock_unavailable`); it never runs without
+the lock. The 30-second age rule in the earlier version could take a lock from a live holder.
 
 Could this race explain the flake? No. The end-to-end test has no concurrent carries. The race
 produces a double acceptance, not a refusal of the first carry, so it cannot produce the observed
