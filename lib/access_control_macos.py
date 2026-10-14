@@ -25,6 +25,9 @@ has no list. the service user is created by this install and holds no entry anyw
 grant (check), so every entry that names it was added by the grant, and sweeping them all puts every
 list back exactly as it was. the mode bits are never touched: a macos list lives beside them.
 
+names are listed with ls -b, which writes a newline in a file name as \\n, so no file name can look like a list
+entry or a heading. a granted path that has become a link is refused, not followed.
+
 entries are matched by the account name and, when the directory service answers, by its
 GeneratedUID, which is how a list shows an account that was deleted. run the sweep before the account
 is removed (uninstall reverses the account last).
@@ -40,6 +43,7 @@ CHMOD = "/bin/chmod"
 DSCL = "/usr/bin/dscl"
 BATCH = 200
 ENTRY = re.compile(r"^\s+(\d+): (user|group):(\S+) ")
+HEADING = re.compile(r"^[-dlbcpsw?][-rwxsStT@+ ]")
 
 
 def account_names(user):
@@ -82,7 +86,7 @@ def parse_entries(lines, names):
 
 
 def list_one(path):
-    result = subprocess.run([LS, "-lde", "--", path], capture_output=True, text=True, check=False)
+    result = subprocess.run([LS, "-ldeb", "--", path], capture_output=True, text=True, check=False)
     if result.returncode != 0:
         raise OSError("cannot read the access list of %s: %s" % (path, result.stderr.strip()))
     return result.stdout.split("\n")[1:]
@@ -95,13 +99,13 @@ def matching_entries(paths, names):
     found = {}
     for start in range(0, len(paths), BATCH):
         chunk = paths[start:start + BATCH]
-        result = subprocess.run([LS, "-ldef", "--"] + chunk, capture_output=True, text=True, check=False)
+        result = subprocess.run([LS, "-ldefb", "--"] + chunk, capture_output=True, text=True, check=False)
         groups = []
         for line in result.stdout.split("\n"):
             if ENTRY.match(line):
                 if groups:
                     groups[-1].append(line)
-            elif line:
+            elif HEADING.match(line):
                 groups.append([])
                 groups[-1].append(line)
         if result.returncode == 0 and len(groups) == len(chunk):
@@ -148,6 +152,9 @@ def command_check(arguments):
 
 
 def command_status(user, tree, path):
+    if os.path.islink(path):
+        print("%s is a symbolic link now; it is not followed, so it is not swept" % path, file=sys.stderr)
+        return 1
     errors = []
     names = account_names(user)
     left = matching_entries(walk(path, tree, errors), names) if os.path.lexists(path) else {}
@@ -161,6 +168,9 @@ def command_status(user, tree, path):
 
 
 def command_sweep(user, tree, path):
+    if os.path.islink(path):
+        print("%s is a symbolic link now; it is not followed, so it is not swept" % path, file=sys.stderr)
+        return 1
     if not os.path.lexists(path):
         return 0
     errors = []

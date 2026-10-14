@@ -10,6 +10,9 @@
 # by this package, so the owner looks before deleting it.
 # reads: PREFIX, PACKAGE, OPERATING_SYSTEM, SERVICE_USER
 
+# shellcheck source=lib/service_user_macos.sh
+. "$(dirname "${BASH_SOURCE[0]}")/service_user_macos.sh"
+
 service_user_home() {
   case "$OPERATING_SYSTEM" in
     macos) printf '/Users/%s' "$SERVICE_USER" ;;
@@ -74,15 +77,6 @@ service_user_macos_real_name() {
   printf '%s agent' "$PACKAGE"
 }
 
-# service_user_macos_field USER FIELD: what dscl reads for one field. a value with a space comes on the
-# line after the field name, so the lines are joined.
-service_user_macos_field() {
-  dscl . -read "/Users/$1" "$2" 2>/dev/null | awk '
-    NR == 1 { sub(/^[^:]*:[ ]*/, ""); value = $0; next }
-    { sub(/^[ ]+/, ""); value = (value == "" ? $0 : value " " $0) }
-    END { print value }'
-}
-
 # service_user_macos_complete USER HOME: exit 0 only when the account is whole: a number, the hidden flag,
 # the home folder it names, no password, and the home folder on disk. a half-made account is not done.
 service_user_macos_complete() {
@@ -100,8 +94,10 @@ service_user_macos_complete() {
 service_user_macos_create() {
   local user="$1" number="$2" home="$3" real_name="$4" existed=no existing
   existing="$(service_user_macos_field "$user" UniqueID)"
-  if [ -n "$existing" ]; then
+  if service_user_macos_exists "$user"; then
     existed=yes
+  fi
+  if [ -n "$existing" ]; then
     number="$existing"
   fi
   if ! {
@@ -131,7 +127,7 @@ service_user_macos_refuse_foreign() {
   local user="$SERVICE_USER" real_name
   [ -z "$PREFIX" ] || return 0
   command -v dscl >/dev/null 2>&1 || return 0
-  [ -n "$(service_user_macos_field "$user" UniqueID)" ] || return 0
+  service_user_macos_exists "$user" || return 0
   real_name="$(service_user_macos_field "$user" RealName)"
   [ "$real_name" != "$(service_user_macos_real_name)" ] || return 0
   if [ "${SIRVEN_MACOS_REAL_APPLY:-}" = 1 ]; then
@@ -167,7 +163,8 @@ chmod 0700 $home
 # if any command fails, an account this step started is deleted again: dscl . -delete /Users/$user"
   plan_undo "end every process of $user, then remove the account, keeping $(service_user_home)" \
     "! dscl . -read /Users/$user >/dev/null 2>&1" \
-    "{ pkill -KILL -u $user || true; } && dscl . -delete /Users/$user"
+    "bash $(rooted "$STATE_DIR/package/lib/service_user_macos.sh") remove $user $(shell_quote "$real_name")" \
+    "{ pkill -KILL -u $user || true; } && dscl . -delete /Users/$user   # only while its real name is still '$real_name'"
   plan_step system "confirm $user is not in the admin group" "" \
     "service_user_refuse_admin $user" \
     "id -nG $user   # must not list admin"

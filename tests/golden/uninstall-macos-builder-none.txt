@@ -35,7 +35,7 @@ undo: service user
    13. remove the SSH folder of agent if nothing else is inside (to do, recorded not run under --prefix)
        $ rmdir <prefix>/Users/agent/.ssh   # kept if anything else is inside
    14. end every process of agent, then remove the account, keeping /Users/agent (to do, recorded not run under --prefix)
-       $ { pkill -KILL -u agent || true; } && dscl . -delete /Users/agent
+       $ { pkill -KILL -u agent || true; } && dscl . -delete /Users/agent   # only while its real name is still 'sirven agent'
 
 undo: audit log
      note: kept, not reversed: remove the audit log /var/log/sirven/audit.jsonl and every entry in it. add --remove-audit-log to remove it too.

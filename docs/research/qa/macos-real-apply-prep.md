@@ -24,6 +24,7 @@ switched off (below).
 | Folder and key file | plan only | two real steps, `install -d` and `install -m 0600`, each with its undo. |
 | Folder access | plan only | `chmod -h +a` through `find -P`, as compiled by `lib/grant_compiler.py` (unchanged output). |
 | Undo of folder access | subtraction of the rights added | a sweep (`lib/access_control_macos.sh sweep`, run from the pinned copy): removes every entry that names the service user from the granted folder and everything inside it, highest index first, never following a link. |
+| Sweep and account undo guards | none | file names are listed with `ls -b`, so a newline in a name cannot forge a list entry or heading; a granted path that became a link is refused by sweep and status; the account undo (`lib/service_user_macos.sh remove`) deletes only while the real name is still `sirven agent`; existence is judged by `RecordName`, so a record with no number is never deleted by cleanup and counts as a foreign account. |
 | Refusals before any change | none on macos | a granted path or pass-through parent that is a link (find -P on a link grants nothing); an existing entry for the account in the tree; an account of that name this package did not make (its real name is not `sirven agent`). Read only; real root only. |
 | Real apply | refused always | refused unless `SIRVEN_MACOS_REAL_APPLY=1` is set **and** the user is root. Off by default. |
 
@@ -151,6 +152,10 @@ real-account checks skipped). `tests/unit/test_macos_apply.sh` runs the refusal 
 - **`uninstall.sh` mode check on a record with a list.** `ls -ln` shows a `+` after the mode on a file
   with an access list; the code takes the first ten characters, so it should be fine, and the check script
   reads the record's mode itself.
+- **`--allow-own-entries` sweeps hand-made entries.** On a re-run of an install this package made, the
+  refusal for existing entries is skipped (they are the earlier run's). The uninstall sweeps every entry
+  naming the service account, so an entry the owner added by hand for that account between runs is
+  removed too.
 - **Account numbers are reused.** `checkbuilder` gets the same number the deleted `checkobserver` had, so
   it owns `/Users/checkobserver`. The same will happen to a kept `/Users/agent` in production: a new
   service user can inherit an old home folder. Not addressed here.

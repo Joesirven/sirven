@@ -40,6 +40,7 @@ fake_directory_service() {
         ;;
       -read)
         [ -f "$FAKE_DS/$name" ] || return 1
+        if [ "$field" = RecordName ]; then printf 'RecordName: %s\n' "$name"; return 0; fi
         if [ -n "$field" ]; then grep "^$field:" "$FAKE_DS/$name"; else cat "$FAKE_DS/$name"; fi
         ;;
       -delete) rm -f "$FAKE_DS/$name" ;;
@@ -125,6 +126,45 @@ test_a_foreign_account_is_only_a_note_while_the_switch_is_off() {
   plan_evaluate
   capture plan_print
   assert_contains "$CAPTURED_STDOUT" "a real apply would stop here and ask for another --user NAME"
+}
+
+test_a_record_with_no_number_is_not_deleted_by_a_failed_create() {
+  fake_directory_service
+  : > "$FAKE_DS/agent"
+  printf 'RealName: Somebody Else\n' >> "$FAKE_DS/agent"
+  # the plan refuses it first: a record with no number counts as an account that is there, and not ours
+  PREFIX=""
+  SERVICE_USER=agent
+  SIRVEN_MACOS_REAL_APPLY=1
+  assert_status 2 service_user_macos_refuse_foreign
+  # and if a create ran on it anyway, a failure does not delete it
+  FAKE_DS_FAIL_ON=Password
+  assert_status 1 service_user_macos_create agent 601 "$FAKE_HOME" "sirven agent"
+  assert_file_exists "$FAKE_DS/agent"
+}
+
+test_the_account_undo_only_deletes_the_account_this_package_made() {
+  fake_directory_service
+  # shellcheck disable=SC2329 # called by service_user_macos_remove
+  pkill() { return 0; }
+  : > "$FAKE_DS/agent"
+  printf 'UniqueID: 601\nRealName: sirven agent\n' >> "$FAKE_DS/agent"
+  assert_status 0 service_user_macos_remove agent "sirven agent"
+  assert_no_file "$FAKE_DS/agent"
+  # renamed or replaced since: kept, with a plain note
+  : > "$FAKE_DS/agent"
+  printf 'UniqueID: 601\nRealName: Somebody Else\n' >> "$FAKE_DS/agent"
+  assert_status 0 service_user_macos_remove agent "sirven agent"
+  assert_file_exists "$FAKE_DS/agent"
+  assert_contains "$CAPTURED_STDERR" "kept the account agent"
+  # nothing there: nothing to do
+  rm -f "$FAKE_DS/agent"
+  assert_status 0 service_user_macos_remove agent "sirven agent"
+}
+
+test_the_account_undo_in_the_record_is_the_guarded_helper() {
+  assert_status 0 env SIRVEN_OS_OVERRIDE=macos "$REPO_DIR/install.sh" --prefix "$TEST_TMP/root" --transport none --yes --owner example
+  assert_contains "$(cat "$TEST_TMP/root/var/lib/sirven/install-record.tsv")" "service_user_macos.sh remove agent "
 }
 
 # --- the access control list steps, for real, inside TEST_TMP (macos only) -------------------------------
@@ -233,6 +273,39 @@ test_check_refuses_a_link_and_an_existing_entry() {
   assert_status 0 bash "$MACOS_HELPER" check "$user" --allow-own-entries --tree "$project"
   # but a link is refused either way
   assert_status 3 bash "$MACOS_HELPER" check "$user" --allow-own-entries --tree "$TEST_TMP/link"
+}
+
+test_a_file_name_cannot_forge_a_list_entry() {
+  macos_only || return 0
+  local user name
+  user="$(id -un)"
+  mkdir -p "$TEST_TMP/tree"
+  name="$(printf 'x\n 0: user:%s allow read ' "$user")"
+  : > "$TEST_TMP/tree/$name"
+  /bin/chmod +a "everyone deny delete" "$TEST_TMP/tree/$name"
+  printf 'y\n' > "$TEST_TMP/tree/plain"
+  /bin/chmod +a "$user allow read" "$TEST_TMP/tree/plain"
+  assert_status 0 bash "$MACOS_HELPER" sweep "$user" yes "$TEST_TMP/tree"
+  assert_contains "$(/bin/ls -le "$TEST_TMP/tree/plain" "$TEST_TMP/tree/"x*)" "group:everyone deny delete" "the entry of somebody else on the odd name is still there"
+  assert_not_contains "$(/bin/ls -le "$TEST_TMP/tree/plain")" "user:$user"
+  assert_status 0 bash "$MACOS_HELPER" status "$user" yes "$TEST_TMP/tree"
+  # and a check does not see the forged line as an entry
+  rm -f "$TEST_TMP/tree/plain"
+  assert_status 0 bash "$MACOS_HELPER" check "$user" --tree "$TEST_TMP/tree"
+}
+
+test_sweep_and_status_refuse_a_granted_path_that_became_a_link() {
+  macos_only || return 0
+  local user
+  user="$(id -un)"
+  mkdir -p "$TEST_TMP/elsewhere"
+  printf 'x\n' > "$TEST_TMP/elsewhere/file"
+  /bin/chmod +a "$user allow read" "$TEST_TMP/elsewhere/file"
+  ln -s elsewhere "$TEST_TMP/was-a-folder"
+  assert_status 1 bash "$MACOS_HELPER" sweep "$user" yes "$TEST_TMP/was-a-folder"
+  assert_contains "$CAPTURED_STDERR" "is a symbolic link now"
+  assert_status 1 bash "$MACOS_HELPER" status "$user" yes "$TEST_TMP/was-a-folder"
+  assert_contains "$(/bin/ls -le "$TEST_TMP/elsewhere/file")" "user:$user allow read" "nothing behind the link was touched"
 }
 
 test_sweep_never_follows_a_link_and_tolerates_an_item_with_no_list() {
