@@ -156,7 +156,14 @@ test_the_account_undo_only_deletes_the_account_this_package_made() {
   printf 'UniqueID: 601\nRealName: Somebody Else\n' >> "$FAKE_DS/agent"
   assert_status 0 service_user_macos_remove agent "sirven agent"
   assert_file_exists "$FAKE_DS/agent"
-  assert_contains "$CAPTURED_STDERR" "kept the account agent"
+  assert_contains "$CAPTURED_STDERR" "kept the account agent on purpose, and this is not a failure"
+  assert_contains "$CAPTURED_STDERR" "no longer the account this package made"
+  # the undo check calls that done, and an account that is ours is not
+  assert_status 0 service_user_macos_gone agent "sirven agent"
+  printf 'RealName: sirven agent\n' > "$FAKE_DS/agent.new"
+  grep -v '^RealName' "$FAKE_DS/agent" >> "$FAKE_DS/agent.new"; mv "$FAKE_DS/agent.new" "$FAKE_DS/agent"
+  assert_status 1 service_user_macos_gone agent "sirven agent"
+  printf 'UniqueID: 601\nRealName: Somebody Else\n' > "$FAKE_DS/agent"
   # nothing there: nothing to do
   rm -f "$FAKE_DS/agent"
   assert_status 0 service_user_macos_remove agent "sirven agent"

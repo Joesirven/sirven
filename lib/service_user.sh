@@ -162,7 +162,7 @@ createhomedir -c -u $user
 chmod 0700 $home
 # if any command fails, an account this step started is deleted again: dscl . -delete /Users/$user"
   plan_undo "end every process of $user, then remove the account, keeping $(service_user_home)" \
-    "! dscl . -read /Users/$user >/dev/null 2>&1" \
+    "bash $(rooted "$STATE_DIR/package/lib/service_user_macos.sh") gone $user $(shell_quote "$real_name")" \
     "bash $(rooted "$STATE_DIR/package/lib/service_user_macos.sh") remove $user $(shell_quote "$real_name")" \
     "{ pkill -KILL -u $user || true; } && dscl . -delete /Users/$user   # only while its real name is still '$real_name'"
   plan_step system "confirm $user is not in the admin group" "" \

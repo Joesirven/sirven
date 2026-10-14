@@ -26,16 +26,25 @@ service_user_macos_remove() {
   local user="$1" real_name="$2"
   service_user_macos_exists "$user" || return 0
   if [ "$(service_user_macos_field "$user" RealName)" != "$real_name" ]; then
-    printf '       kept the account %s: its real name is no longer %s, so this package did not make this account\n' "$user" "$real_name" >&2
+    printf '       kept the account %s on purpose, and this is not a failure: its real name is no longer %s, so it is no longer the account this package made, and this package only removes what it made\n' "$user" "$real_name" >&2
     return 0
   fi
   { pkill -KILL -u "$user" || true; } && dscl . -delete "/Users/$user"
+}
+
+# service_user_macos_gone USER REAL_NAME: exit 0 when there is nothing left for the undo to do: no such
+# account, or an account that is no longer the one this package made (kept on purpose).
+service_user_macos_gone() {
+  service_user_macos_exists "$1" || return 0
+  [ "$(service_user_macos_field "$1" RealName)" != "$2" ]
 }
 
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   case "${1:-}" in
     remove) [ "$#" -eq 3 ] || { echo "usage: service_user_macos.sh remove USER REAL_NAME" >&2; exit 64; }
       service_user_macos_remove "$2" "$3" ;;
+    gone) [ "$#" -eq 3 ] || exit 64
+      service_user_macos_gone "$2" "$3" ;;
     *) echo "usage: service_user_macos.sh remove USER REAL_NAME" >&2; exit 64 ;;
   esac
 fi
