@@ -30,7 +30,7 @@ check_exit "the second revoke applies" 0 bash install.sh revoke --all --yes --tr
 second="$LAST_OUTPUT"
 second_ran() { [ "$(grep -c "\"event\": \"revoke_finished\"" /var/log/sirven/audit.jsonl)" = 2 ]; }
 check "it skipped the lock and the key removal as already done" bash -c '
-  printf "%s\n" "$0" | grep -A1 "end every process of agent and lock" | grep -q "already done" &&
+  printf "%s\n" "$0" | grep -A1 "lock and expire agent and turn its shell off" | grep -q "already done" &&
   printf "%s\n" "$0" | grep -A1 "remove every authorized key of agent" | grep -q "already done"' "$second"
 world_unchanged_if second_ran "the second revoke changed no file, owner or mode" files /tmp/one.files
 world_unchanged_if second_ran "the second revoke changed no account" accounts /tmp/one.accounts
