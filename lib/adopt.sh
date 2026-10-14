@@ -352,7 +352,9 @@ _adopt_tailscale_line() {
   [ "$TRANSPORT" = tailscale ] || unused=" not used by this plan."
   case "$ADOPT_TAILSCALE" in
     agent_node)
-      if [ "$ADOPT_TAILSCALE_BACKEND" = Stopped ]; then
+      if [ "$TRANSPORT" = tailscale ] && tailscale_joined_by_us; then
+        printf '%s, logged in; this machine is already the agent node (tag:agent), joined by an earlier run of this installer. kept as it is: not re-keyed or re-tagged. the kill switch and uninstall log it out, because this installer joined it.' "$version"
+      elif [ "$ADOPT_TAILSCALE_BACKEND" = Stopped ]; then
         printf '%s, logged in and stopped; this machine is already the agent node (tag:agent).%s kept as it is: never logged out, re-keyed, re-tagged, or started.' "$version" "$unused"
       else
         printf '%s, logged in; this machine is already the agent node (tag:agent).%s kept as it is: never logged out, re-keyed, or re-tagged.' "$version" "$unused"
@@ -365,7 +367,7 @@ _adopt_tailscale_line() {
       if [ -n "$unused" ]; then
         printf '%s, installed and not logged in.%s kept as it is.' "$version" "$unused"
       else
-        printf '%s, installed and not logged in. the install is kept, never reinstalled. there is no login to adopt, so the join below is the fresh setup, as plan only.' "$version"
+        printf '%s, installed and not logged in. the install is kept, never reinstalled. there is no login to adopt, so the join below is the fresh setup.' "$version"
       fi
       ;;
     unanswered)

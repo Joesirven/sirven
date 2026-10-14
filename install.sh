@@ -562,6 +562,7 @@ main() {
   trap 'rm -rf "$STAGE_DIR"' EXIT
 
   adopt_refuse_conflicts
+  tailscale_refuse_before_apply
 
   PLAN_PREFIX="$PREFIX"
   PLAN_OPERATING_SYSTEM="$OPERATING_SYSTEM"

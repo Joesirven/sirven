@@ -494,9 +494,31 @@ kill_switch_state_file_name() {
   printf '%s/%s' "$STATE_DIR" "$1"
 }
 
+# plan_kill_switch_tailscale_logout: undo exactly what the installer's join did. only when this installer joined (its record
+# is there), whatever transport this revoke names: the record says what to log out, and the script logs out that node
+# only, so a login the owner made, or any other node of the tailnet, is never touched.
+plan_kill_switch_tailscale_logout() {
+  local marker script
+  tailscale_joined_by_us || return 0
+  marker="$(rooted "$(tailscale_marker_file)")"
+  script="$(rooted "$(tailscale_node_script)")"
+  if [ "$OPERATING_SYSTEM" = linux ]; then
+    plan_step system "log this machine out of the tailnet: the node this installer joined, and only it" \
+      "[ ! -e $marker ]" \
+      "bash $script leave $marker" \
+      "tailscale logout   # via lib/tailscale_node.sh leave, only when this machine's login is still the node recorded in $(tailscale_marker_file)"
+    plan_tag verify
+    plan_continue
+  else
+    plan_planonly "log this machine out of the tailnet: the node this installer joined, and only it" \
+      "bash $script leave $marker" "$KILL_SWITCH_REASON" "[ ! -e $marker ]"
+  fi
+}
+
 plan_kill_switch_transport() {
   local key_file
   plan_section "kill switch: transport"
+  plan_kill_switch_tailscale_logout
   case "$TRANSPORT" in
     tailscale)
       key_file="$(rooted "$(tailscale_auth_key_file)")"
@@ -505,7 +527,7 @@ plan_kill_switch_transport() {
         plan_continue
       fi
       plan_owner "remove the agent rule from your tailnet policy" \
-        "tailscale admin console: delete the tag:agent rule and any unused auth key for it. the keys and the account above already refuse the agent; this closes the way in."
+        "tailscale admin console: delete the tag:agent rule and any unused auth key for it. the keys and the account above already refuse the agent; this closes the way in. a node joined with an ephemeral key left the tailnet when it logged out; otherwise delete the machine there too."
       ;;
     cloudflare)
       if [ "$OPERATING_SYSTEM" = linux ]; then

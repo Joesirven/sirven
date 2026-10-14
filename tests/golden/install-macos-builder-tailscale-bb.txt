@@ -92,23 +92,22 @@ transport: tailscale
        # write <prefix>/etc/sirven/tailscale-policy-snippet.hujson (mode 0644): tag:agent, reachable only from your login, only on port 22
    25. paste the policy snippet into your tailnet policy (owner, by hand)
        tailscale admin console, access controls: merge /etc/sirven/tailscale-policy-snippet.hujson and put your login in place of you@example.com.
-   26. make one tagged auth key, once, in the browser (owner, by hand)
-       tailscale admin console, settings, keys: generate an auth key with tag:agent, pre-approved, not reusable.
-       save it as /etc/sirven/tailscale-auth-key, owned by root, mode 0600. this is the only interactive step.
+   26. give the installer one tagged auth key, once (owner, by hand)
+       tailscale admin console, settings, keys: generate an auth key with tag:agent, pre-approved. ephemeral is the better choice: the node then leaves the tailnet by itself when it logs out.
+       hand it over one of two ways, and it is the only interactive step:
+         in the environment: sudo --preserve-env=SIRVEN_TAILSCALE_AUTHKEY, with the variable set in your shell (SIRVEN_TAILSCALE_AUTHKEY, or TAILSCALE_AUTHKEY)
+         or in a file: save it as /etc/sirven/tailscale-auth-key, owned by root, mode 0600; it is removed after the join.
    27. join the tailnet as a tagged device with that key (plan only)
-       $ tailscale up --auth-key=file:<prefix>/etc/sirven/tailscale-auth-key --advertise-tags=tag:agent
-       not yet: tailscale apply is plan output in the alpha cut; it is never run against a real tailnet yet
-   28. remove the used auth key from disk (plan only)
-       $ rm -f <prefix>/etc/sirven/tailscale-auth-key
-       not yet: tailscale apply is plan output in the alpha cut; it is never run against a real tailnet yet
+       $ tailscale up --auth-key=file:<a private copy of the key> --advertise-tags=tag:agent --hostname=agent-<this machine's name> --ssh=false --accept-dns=false --accept-routes=false --reset
+       not yet: applying to a macos machine is not verified yet; the join runs only on linux, inside a throwaway container
      note: the agent client connects with: ssh agent@<this machine's tailnet name>. tailscale ssh stays off; the machine's own SSH server and keys are used.
 
 phone to agent channel
-   29. install bb for agent (plan only)
+   28. install bb for agent (plan only)
        # no command yet. alpha relies on bb or the runtime's own remote mode, over the transport above.
        not yet: --with-bb is plan only in the alpha cut; the orca install is not specified yet
 
-summary: 29 steps. 14 to do, 0 already done, 4 by the owner, 11 plan only.
+summary: 28 steps. 14 to do, 0 already done, 4 by the owner, 10 plan only.
 dry run: nothing was changed. run the same command without --dry-run to apply this plan.
 applying would stop before any change: the plan has plan-only steps the alpha cut does not apply yet.
 to cut the agent off later: sudo /usr/local/sbin/sirven revoke --all --dry-run to read the plan; to remove everything: sudo /usr/local/sbin/sirven uninstall --dry-run

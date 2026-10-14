@@ -36,7 +36,7 @@ kill switch: transport
    11. remove the tailscale auth key from disk, if one is left (already done)
        $ rm -f <prefix>/etc/sirven/tailscale-auth-key
    12. remove the agent rule from your tailnet policy (owner, by hand)
-       tailscale admin console: delete the tag:agent rule and any unused auth key for it. the keys and the account above already refuse the agent; this closes the way in.
+       tailscale admin console: delete the tag:agent rule and any unused auth key for it. the keys and the account above already refuse the agent; this closes the way in. a node joined with an ephemeral key left the tailnet when it logged out; otherwise delete the machine there too.
 
 kill switch: check the result
    13. look at the machine: no process of agent, locked and expired, no service, no keys, every folder put back (to do, recorded not run under --prefix)

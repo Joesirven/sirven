@@ -352,7 +352,7 @@ the kill switch reads it to know what to remove.
   `<user>.json.revoked` (an earlier revoked record is kept beside it under a time stamp; the rename is recorded in the
   install record so uninstall removes it; left in place if any restore failed, so the next run still knows what to take back);
   (7) the install's own marker `agent-quiesce.json` is deleted; (8) the transport is closed (a tunnel service is uninstalled,
-  an unused Tailscale auth key is removed; the tailnet policy and the Cloudflare service token are the owner's, by hand);
+  a node this installer joined to the tailnet is logged out, and only that node; an unused Tailscale auth key is removed; the tailnet policy and the Cloudflare service token are the owner's, by hand);
   (9) last, the machine is looked at, not the exit statuses: no process of the agent (one that comes back, because
   something of the owner's starts it, is ended again up to six times, then the run fails loudly and says how to find what starts it),
   the account locked and expired, no service, no keys, every folder put back. the install record, the audit log, the revoke

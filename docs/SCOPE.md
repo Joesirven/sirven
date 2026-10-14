@@ -117,7 +117,7 @@ safely") is W1 → W2 → W3 → W4 → W6 → W8 → W9. Everything else makes 
 | Per-path access control lists on macOS | plan output | apply verification needs a macOS virtual machine | |
 | Audit log format | ✓ (spec) | capture wrapper | kernel-level audit (Linux `auditd`, macOS endpoint security) |
 | Kill switch | apply on Linux (container-verified); plan output on macOS | apply on macOS | |
-| Tailscale transport | plan and docs | apply on a real tailnet | |
+| Tailscale transport | apply and teardown in a Linux container (join as `tag:agent`, logout on revoke and uninstall; live against a test tailnet needs a test key) | apply on a real machine and a real tailnet | |
 | Cloudflare Tunnel transport | docs | plan and apply | |
 | Claude Code adapter | plan | apply | |
 | Codex, Pi adapters | | ✓ | |

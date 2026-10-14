@@ -1,17 +1,57 @@
 # shellcheck shell=bash
-# tailscale transport, the first path. plan and documentation in the alpha cut: the plan writes
-# a policy snippet you paste yourself and shows the one tailscale up it would run. nothing here
-# runs against a real tailnet.
+# tailscale transport, the first path. the plan writes a policy snippet you paste yourself, then joins this
+# machine to your tailnet as the tagged agent node, and records the join so the kill switch and uninstall can
+# undo exactly that and nothing else. the work is in lib/tailscale_node.sh, run from the pinned copy of this
+# package, so the install record's undo line works without this file.
 #
 # interactive once: you log in to the tailscale admin console in a browser and make one tagged
 # auth key. after that the machine joins with that key, and the agent client connects over
-# SSH with its own key.
-# reads: PREFIX, PACKAGE, CONFIG_DIR, SERVICE_USER, ADOPT_TAILSCALE
+# SSH with its own key. the key is read from the environment (SIRVEN_TAILSCALE_AUTHKEY or
+# TAILSCALE_AUTHKEY) or from the key file below, never written anywhere by sirven, and removed from disk
+# after the join when it came from the file.
+# reads: PREFIX, PACKAGE, CONFIG_DIR, STATE_DIR, SERVICE_USER, ADOPT_TAILSCALE, OPERATING_SYSTEM
 
-TAILSCALE_REASON="tailscale apply is plan output in the alpha cut; it is never run against a real tailnet yet"
+TAILSCALE_MACOS_REASON="applying to a macos machine is not verified yet; the join runs only on linux, inside a throwaway container"
 
 tailscale_auth_key_file() {
   printf '%s/tailscale-auth-key' "$CONFIG_DIR"
+}
+
+# the record of the join: this node's id, host name and tag, never the key. kill switch and uninstall log out only that node.
+tailscale_marker_file() {
+  printf '%s/tailscale-node.json' "$STATE_DIR"
+}
+
+# the script that joins and logs out, in the pinned copy of this package (the path an install record can rely on)
+tailscale_node_script() {
+  printf '%s/package/lib/tailscale_node.sh' "$STATE_DIR"
+}
+
+# true when a key is there to join with: in the environment, or in the key file.
+tailscale_key_available() {
+  [ -n "${SIRVEN_TAILSCALE_AUTHKEY:-}" ] || [ -n "${TAILSCALE_AUTHKEY:-}" ] || [ -s "${PREFIX}$(tailscale_auth_key_file)" ]
+}
+
+# true when an earlier run of this package joined this machine to the tailnet (the record is there).
+tailscale_joined_by_us() {
+  [ -f "${PREFIX}$(tailscale_marker_file)" ]
+}
+
+# tailscale_refuse_before_apply: a real apply that cannot join stops before its first change, with what to do. a dry run and a
+# fake root never join, so they are not stopped. a machine that is already the agent node needs no key.
+tailscale_refuse_before_apply() {
+  [ "$COMMAND" = install ] && [ "$TRANSPORT" = tailscale ] && [ "$DRY_RUN" != yes ] && [ -z "$PREFIX" ] || return 0
+  [ "$OPERATING_SYSTEM" = linux ] && [ "$ADOPT_TAILSCALE" != agent_node ] || return 0
+  if [ "$ADOPT_TAILSCALE" = unanswered ]; then
+    printf 'error: refused: tailscale is installed, but tailscaled does not answer, so this machine cannot join the tailnet. nothing was changed.\n' >&2
+    printf 'you can: start it (systemctl enable --now tailscaled) and run again, or run again with --transport none.\n' >&2
+    exit 2
+  fi
+  if ! tailscale_key_available; then
+    printf 'error: refused: there is no Tailscale auth key to join the tailnet with. nothing was changed.\n' >&2
+    printf 'you can: make a key in the Tailscale admin console (settings, keys: tagged tag:agent, pre-approved, ephemeral if you can), then run again with it in the environment: sudo --preserve-env=SIRVEN_TAILSCALE_AUTHKEY ... or saved as %s, owned by root, mode 0600. or run again with --transport none.\n' "$(tailscale_auth_key_file)" >&2
+    exit 2
+  fi
 }
 
 # policy snippet in the tailscale policy file syntax, which allows comments.
@@ -36,8 +76,10 @@ END
 }
 
 plan_tailscale() {
-  local key_file staged
+  local key_file marker script staged
   key_file="$(rooted "$(tailscale_auth_key_file)")"
+  marker="$(rooted "$(tailscale_marker_file)")"
+  script="$(rooted "$(tailscale_node_script)")"
   plan_section "transport: tailscale"
   staged="$(tailscale_policy_snippet | stage_file tailscale-policy-snippet.hujson)"
   layout_write_file "write the tailnet policy snippet" "$CONFIG_DIR/tailscale-policy-snippet.hujson" 0644 "$staged" \
@@ -47,21 +89,41 @@ plan_tailscale() {
   # a machine already logged in with tag:agent is adopted as it is: no key, no join, no
   # tailscale up, which could re-key it or reset its settings. see lib/adopt.sh.
   if [ "${ADOPT_TAILSCALE:-none}" = agent_node ]; then
-    plan_note "this machine is already the agent node, adopted above: no auth key and no join. sirven never runs tailscale up on it."
+    if tailscale_joined_by_us; then
+      plan_note "this machine is already the agent node, joined by an earlier run of this installer and recorded in $(tailscale_marker_file): no auth key and no new join. the kill switch and uninstall log out that node, and only it."
+    else
+      plan_note "this machine is already the agent node, adopted above: no auth key and no join. sirven never runs tailscale up on it."
+    fi
+    if [ -e "${PREFIX}$(tailscale_auth_key_file)" ]; then
+      plan_note "an auth key is still saved at $(tailscale_auth_key_file) and is not needed: delete it."
+    fi
     plan_note "the agent client connects with: ssh $SERVICE_USER@<this machine's tailnet name>. tailscale ssh stays off; the machine's own SSH server and keys are used."
     return 0
   fi
-  plan_owner "make one tagged auth key, once, in the browser" \
-    "tailscale admin console, settings, keys: generate an auth key with tag:agent, pre-approved, not reusable.
-save it as $(tailscale_auth_key_file), owned by root, mode 0600. this is the only interactive step." \
-    "[ -f $key_file ]"
-  plan_planonly "join the tailnet as a tagged device with that key" \
-    "tailscale up --auth-key=file:$key_file --advertise-tags=tag:agent" \
-    "$TAILSCALE_REASON" \
-    "adopt_tailscale_is_agent_node"
-  plan_planonly "remove the used auth key from disk" \
-    "rm -f $key_file" \
-    "$TAILSCALE_REASON" \
-    "[ ! -e $key_file ]"
+  plan_owner "give the installer one tagged auth key, once" \
+    "tailscale admin console, settings, keys: generate an auth key with tag:agent, pre-approved. ephemeral is the better choice: the node then leaves the tailnet by itself when it logs out.
+hand it over one of two ways, and it is the only interactive step:
+  in the environment: sudo --preserve-env=SIRVEN_TAILSCALE_AUTHKEY, with the variable set in your shell (SIRVEN_TAILSCALE_AUTHKEY, or TAILSCALE_AUTHKEY)
+  or in a file: save it as $(tailscale_auth_key_file), owned by root, mode 0600; it is removed after the join." \
+    "tailscale_key_available"
+  if [ "$OPERATING_SYSTEM" = macos ]; then
+    plan_planonly "join the tailnet as a tagged device with that key" \
+      "tailscale up --auth-key=file:<a private copy of the key> --advertise-tags=tag:agent --hostname=$SERVICE_USER-<this machine's name> --ssh=false --accept-dns=false --accept-routes=false --reset" \
+      "$TAILSCALE_MACOS_REASON" \
+      "adopt_tailscale_is_agent_node"
+  else
+    plan_step system "join the tailnet as a tagged device with that key" \
+      "adopt_tailscale_is_agent_node" \
+      "bash $script join $marker $SERVICE_USER $key_file" \
+      "# runs lib/tailscale_node.sh join; the key comes from the environment or from $key_file and is never put on a command line.
+# it records the node in $(tailscale_marker_file), and refuses with nothing changed if there is no key, no tailscale, or a login that is not ours.
+tailscale up --auth-key=file:<a private copy of the key> --advertise-tags=tag:agent --hostname=$SERVICE_USER-<this machine's name> --ssh=false --accept-dns=false --accept-routes=false --reset --timeout=60s"
+    plan_undo "log this machine out of the tailnet, if this installer joined it" "[ ! -e $marker ]" \
+      "bash $script leave $marker" \
+      "tailscale logout   # via lib/tailscale_node.sh leave, only when this machine's login is still the node recorded in $(tailscale_marker_file)"
+    plan_step run "remove the used auth key from disk, if one was saved" \
+      "[ ! -e $key_file ]" \
+      "rm -f $key_file"
+  fi
   plan_note "the agent client connects with: ssh $SERVICE_USER@<this machine's tailnet name>. tailscale ssh stays off; the machine's own SSH server and keys are used."
 }

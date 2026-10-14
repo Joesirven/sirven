@@ -1,0 +1,276 @@
+#!/usr/bin/env bash
+# tailscale_node.sh: join this machine to a tailnet as the tagged agent node, and log it out again.
+# called by the installer's plan (join), by the kill switch and by the install record's undo line (leave),
+# from the pinned copy of this package (see lib/tailscale.sh). one file, because the install record stores
+# command text and uninstall.sh does not read lib/tailscale.sh.
+#
+#   tailscale_node.sh join  MARKER USER KEY_FILE
+#   tailscale_node.sh leave MARKER
+#
+# join: names the node USER-<short host name> (SIRVEN_TAILSCALE_HOSTNAME replaces the host name part),
+# runs 'tailscale up' with the auth key and the tag, then writes MARKER, a root-only file that says
+# this run joined and which node it is (node id, host name, tag; never the key). leave: logs out only the node
+# MARKER names, and only when this machine's login is still that node with the tag. a login sirven did not
+# make is never logged out, and no other node of the tailnet is touched: logout acts on this machine only.
+#
+# the auth key comes from the environment, SIRVEN_TAILSCALE_AUTHKEY or TAILSCALE_AUTHKEY, or else from
+# KEY_FILE. it is never put on a command line: tailscale reads it from a private temporary file. whatever
+# tailscale prints is shown with the key blanked out.
+#
+# the tailscale command is found on the search path. SIRVEN_TAILSCALE names another one for the tests (not honored as root).
+# exit status: 0 done (or nothing to do), 1 failed, 2 refused before any change.
+
+set -uo pipefail
+
+TAILSCALE_NODE_TAG="tag:agent"
+TAILSCALE_NODE_WAIT="${SIRVEN_TAILSCALE_WAIT:-60}"
+PRIVATE_KEY_FILE=""
+
+refuse() {
+  printf 'error: refused: %s nothing was changed.\n' "$1" >&2
+  exit 2
+}
+
+fail() {
+  printf 'error: %s\n' "$1" >&2
+  exit 1
+}
+
+# the tailscale command, or nothing. SIRVEN_TAILSCALE is a seam for the tests ('none' means not installed), and root ignores it:
+# root runs only the tailscale that the search path, vetted by the root gate, finds.
+node_command() {
+  local seam="${SIRVEN_TAILSCALE:-}"
+  [ "$(id -u)" -ne 0 ] || seam=""
+  case "$seam" in
+    none) return 0 ;;
+    '') command -v tailscale 2>/dev/null || true ;;
+    *) printf '%s' "$seam" ;;
+  esac
+}
+
+# status_fields COMMAND: key=value lines from 'tailscale status --json': readable, backend, id, tags, name.
+# only this machine's own entry is read, so no other device can answer for it.
+status_fields() {
+  local output
+  output="$("$1" status --json 2>/dev/null)" || true
+  printf '%s\n' "$output" | python3 -I -c '
+import json, re, sys
+try:
+    status = json.load(sys.stdin)
+except ValueError:
+    status = None
+if not isinstance(status, dict):
+    print("readable=no")
+    sys.exit(0)
+me = status.get("Self")
+me = me if isinstance(me, dict) else {}
+backend = status.get("BackendState")
+if not isinstance(backend, str) or not re.match(r"^[A-Za-z]+$", backend):
+    backend = "unknown"
+node_id = me.get("I" "D")
+if not isinstance(node_id, str) or not re.match(r"^[A-Za-z0-9_-]{1,64}$", node_id):
+    node_id = ""
+name = me.get("HostName")
+if not isinstance(name, str) or not re.match(r"^[A-Za-z0-9._-]{1,253}$", name):
+    name = ""
+tags = me.get("Tags") or []
+tags = [t for t in tags if isinstance(t, str) and re.match(r"^tag:[A-Za-z0-9-]+$", t)] if isinstance(tags, list) else []
+print("readable=yes")
+print("backend=" + backend)
+print("id=" + node_id)
+print("name=" + name)
+print("tags=" + " ".join(tags))
+' 2>/dev/null || printf 'readable=no\n'
+}
+
+read_status() {
+  local key value
+  S_READABLE=no S_BACKEND="" S_ID="" S_NAME="" S_TAGS=""
+  while IFS='=' read -r key value; do
+    case "$key" in
+      readable) S_READABLE="$value" ;;
+      backend) S_BACKEND="$value" ;;
+      id) S_ID="$value" ;;
+      name) S_NAME="$value" ;;
+      tags) S_TAGS="$value" ;;
+    esac
+  done <<END
+$(status_fields "$1")
+END
+}
+
+has_tag() {
+  case " $S_TAGS " in *" $TAILSCALE_NODE_TAG "*) return 0 ;; esac
+  return 1
+}
+
+# marker_field MARKER NAME: one validated field of the marker, nothing when unreadable.
+marker_field() {
+  python3 -I -c '
+import json, re, sys
+try:
+    with open(sys.argv[1]) as handle:
+        data = json.load(handle)
+    value = data[sys.argv[2]]
+except Exception:
+    sys.exit(1)
+if not isinstance(value, str) or not re.match(r"^[A-Za-z0-9._:-]{1,253}$", value):
+    sys.exit(1)
+print(value)
+' "$1" "$2" 2>/dev/null
+}
+
+write_marker() {
+  local marker="$1" node_id="$2" name="$3" now temporary
+  now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  temporary="$marker.new.$$"
+  ( umask 077
+    printf '{"node_id": "%s", "host_name": "%s", "tag": "%s", "joined_at": "%s"}\n' \
+      "$node_id" "$name" "$TAILSCALE_NODE_TAG" "$now" > "$temporary" ) || return 1
+  mv -f "$temporary" "$marker"
+}
+
+# show OUTPUT with KEY blanked out.
+safe_print() {
+  local text="$1" key="$2"
+  [ -z "$key" ] || text="${text//"$key"/[key hidden]}"
+  [ -z "$text" ] || printf '%s\n' "$text" >&2
+}
+
+install_hint() {
+  printf 'install it from https://tailscale.com/download (on Debian or Ubuntu, add the Tailscale package repository from that page and run: apt install tailscale), then run this again.'
+}
+
+# node_hostname USER: USER-<short host name> as one plain lowercase host name.
+node_hostname() {
+  local host="${SIRVEN_TAILSCALE_HOSTNAME:-$(hostname -s 2>/dev/null || hostname)}" name
+  name="$(printf '%s-%s' "$1" "$host" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9\n' '-' | sed 's/--*/-/g; s/^-//; s/-$//' | cut -c1-63 | sed 's/-$//')"
+  printf '%s' "${name:-agent}"
+}
+
+# logout_node COMMAND: tailscale logout, given a minute at most (a kill switch must not hang on a network that is down).
+logout_node() {
+  if command -v timeout >/dev/null 2>&1; then
+    timeout 60 "$1" logout >/dev/null 2>&1 || true
+  else
+    "$1" logout >/dev/null 2>&1 || true
+  fi
+}
+
+node_join() {
+  local marker="${1:-}" user="${2:-}" key_file="${3:-}" hostname command key="" origin="" output status=0 waited=0
+  [ -n "$marker" ] && [ -n "$user" ] || refuse "join needs a marker path and the account name."
+  hostname="$(node_hostname "$user")"
+  case "$hostname" in -* | *[!a-z0-9-]*) refuse "the host name '$hostname' is not a plain lowercase name (letters, digits, hyphens)." ;; esac
+  [ -d "$(dirname "$marker")" ] || refuse "the folder for the record, $(dirname "$marker"), is not there."
+  command="$(node_command)"
+  [ -n "$command" ] || refuse "tailscale is not installed on this machine. $(install_hint)"
+  if [ -n "${SIRVEN_TAILSCALE_AUTHKEY:-}" ]; then
+    key="$SIRVEN_TAILSCALE_AUTHKEY"; origin="SIRVEN_TAILSCALE_AUTHKEY"
+  elif [ -n "${TAILSCALE_AUTHKEY:-}" ]; then
+    key="$TAILSCALE_AUTHKEY"; origin="TAILSCALE_AUTHKEY"
+  elif [ -n "$key_file" ] && [ -f "$key_file" ] && [ ! -L "$key_file" ]; then
+    key="$(head -n 1 "$key_file")"; origin="$key_file"
+  fi
+  [ -n "$key" ] || refuse "there is no Tailscale auth key. put one in the environment as SIRVEN_TAILSCALE_AUTHKEY (sudo --preserve-env=SIRVEN_TAILSCALE_AUTHKEY ...), or save it as ${key_file:-the key file}, owned by root, mode 0600. make it in the Tailscale admin console, settings, keys: tagged $TAILSCALE_NODE_TAG, pre-approved."
+  unset SIRVEN_TAILSCALE_AUTHKEY TAILSCALE_AUTHKEY
+  case "$key" in *[!A-Za-z0-9_-]*) refuse "the auth key in $origin has characters a Tailscale key never has; it is not used." ;; esac
+
+  read_status "$command"
+  [ "$S_READABLE" = yes ] || refuse "tailscale is installed but tailscaled does not answer. start it (systemctl enable --now tailscaled) and run this again."
+  "$command" up --help 2>&1 | grep -q 'file:' || refuse "this tailscale cannot read an auth key from a file, which is the only way sirven passes one (a key on the command line shows in the process list). update tailscale from https://tailscale.com/download and run this again."
+  case "$S_BACKEND" in
+    NeedsLogin | NoState) ;;
+    Running | Starting | Stopped | NeedsMachineAuth)
+      if has_tag; then
+        printf 'this machine is already logged in to Tailscale as %s. kept as it is: no join, nothing recorded.\n' "$TAILSCALE_NODE_TAG"
+        return 0
+      fi
+      refuse "this machine is already logged in to Tailscale without $TAILSCALE_NODE_TAG, and sirven never changes a login it did not make."
+      ;;
+    *) refuse "tailscale reports the state '$S_BACKEND'; sirven joins only from a machine that is logged out." ;;
+  esac
+
+  PRIVATE_KEY_FILE="$(dirname "$marker")/.tailscale-key.$$"
+  trap 'rm -f "$PRIVATE_KEY_FILE"' EXIT
+  ( umask 077; printf '%s\n' "$key" > "$PRIVATE_KEY_FILE" ) || fail "could not write a private copy of the auth key next to $marker."
+  output="$("$command" up --auth-key="file:$PRIVATE_KEY_FILE" --advertise-tags="$TAILSCALE_NODE_TAG" --hostname="$hostname" \
+    --ssh=false --accept-dns=false --accept-routes=false --reset --timeout="${TAILSCALE_NODE_WAIT}s" 2>&1)" || status=$?
+  rm -f "$PRIVATE_KEY_FILE"
+  safe_print "$output" "$key"
+
+  # read the machine as it is now, whatever 'up' said: a login that exists must be recorded, so it can be undone.
+  while :; do
+    read_status "$command"
+    [ "$S_BACKEND" = Running ] && [ -n "$S_ID" ] && break
+    waited=$((waited + 1))
+    [ "$waited" -lt 5 ] || break
+    sleep 1
+  done
+  if [ "$S_READABLE" = yes ] && [ -n "$S_ID" ] && has_tag; then
+    write_marker "$marker" "$S_ID" "${S_NAME:-$hostname}" || fail "joined the tailnet as $S_NAME, but could not write $marker. log out by hand: tailscale logout"
+    if [ "$S_BACKEND" != Running ]; then
+      fail "tailscale up ended in the state '$S_BACKEND', not Running (exit $status). the login is recorded in $marker; fix the cause and run again."
+    fi
+    printf 'joined the tailnet as %s (node %s), tagged %s. recorded in %s.\n' "${S_NAME:-$hostname}" "$S_ID" "$TAILSCALE_NODE_TAG" "$marker"
+    return 0
+  fi
+  if [ "$S_READABLE" = yes ] && [ "$S_BACKEND" != NeedsLogin ] && [ "$S_BACKEND" != NoState ]; then
+    # a login that cannot be recorded (no tag:agent, or no node number to record) is one sirven just made and could not undo later:
+    # take it back out now.
+    logout_node "$command"
+    if [ -n "$S_ID" ]; then
+      fail "the machine joined without $TAILSCALE_NODE_TAG (the key is not tagged, or $TAILSCALE_NODE_TAG is not owned in your tailnet policy), so sirven logged it out again. make the key with $TAILSCALE_NODE_TAG and run again."
+    fi
+    fail "the machine joined, but tailscale did not report a node number to record, so sirven logged it out again. nothing is recorded."
+  fi
+  fail "tailscale up failed (exit $status) and the machine is not logged in. nothing is recorded; the key was not kept. fix the cause above and run again."
+}
+
+node_leave() {
+  local marker="${1:-}" command recorded
+  [ -n "$marker" ] || refuse "leave needs a marker path."
+  if [ ! -e "$marker" ]; then
+    printf 'no Tailscale join of ours is recorded: nothing to log out.\n'
+    return 0
+  fi
+  if [ -L "$marker" ] || [ ! -f "$marker" ]; then
+    fail "$marker is not a plain file, so it is not trusted. remove it by hand once you have checked it, and log out by hand if sirven joined: tailscale logout"
+  fi
+  recorded="$(marker_field "$marker" node_id)" || fail "$marker cannot be read. nothing was logged out. if sirven joined this machine, check it with: tailscale status, then: tailscale logout"
+  command="$(node_command)"
+  if [ -z "$command" ]; then
+    rm -f "$marker"
+    printf 'tailscale is not installed on this machine, so there is no login to log out. the machine entry in the admin console goes when it expires; you can delete it there.\n'
+    return 0
+  fi
+  read_status "$command"
+  [ "$S_READABLE" = yes ] || fail "tailscaled does not answer, so the login of node $recorded could not be checked or logged out. start it (systemctl start tailscaled) and run this again; the record stays."
+  case "$S_BACKEND" in
+    NeedsLogin | NoState)
+      rm -f "$marker"
+      printf 'this machine is already logged out of Tailscale: record removed.\n'
+      return 0
+      ;;
+  esac
+  if [ "$S_ID" != "$recorded" ] || ! has_tag; then
+    rm -f "$marker"
+    printf 'this machine is logged in to Tailscale as something sirven did not join (node %s, tags: %s; sirven joined node %s). left alone, never logged out. record removed.\n' \
+      "${S_ID:-unknown}" "${S_TAGS:-none}" "$recorded"
+    return 0
+  fi
+  logout_node "$command"
+  read_status "$command"
+  case "$S_BACKEND" in
+    NeedsLogin | NoState) ;;
+    *) fail "tailscale logout did not end the login (state $S_BACKEND, node $recorded). the record stays; run this again, or log out by hand: tailscale logout" ;;
+  esac
+  rm -f "$marker"
+  printf 'logged this machine (node %s) out of the tailnet: record removed. an ephemeral key drops the node from the tailnet at once; otherwise delete the machine in the admin console.\n' "$recorded"
+}
+
+case "${1:-}" in
+  join) shift; node_join "$@" ;;
+  leave) shift; node_leave "$@" ;;
+  *) printf 'usage: tailscale_node.sh join MARKER USER KEY_FILE | leave MARKER\n' >&2; exit 64 ;;
+esac

@@ -10,7 +10,7 @@ sirven is built for people who already have a personal agent or muse running (a 
 
 The installer checks first and adopts what it finds instead of installing it again:
 
-- **Tailscale.** Installed, logged in, and this machine's own tags are read from `tailscale status --json`. A machine already logged in with `tag:agent` is the agent node: the plan skips the auth key and the join, and never runs `tailscale up` on it. A machine that is installed but not logged in has no login to adopt: its install is kept, and the join is the usual fresh setup step, which stays plan only. sirven never logs Tailscale in or out, re-keys it, re-tags it, or changes its settings in an adopt path.
+- **Tailscale.** Installed, logged in, and this machine's own tags are read from `tailscale status --json`. A machine already logged in with `tag:agent` is the agent node: the plan skips the auth key and the join, and never runs `tailscale up` on it. A machine that is installed but not logged in has no login to adopt: its install is kept, and the join is the usual fresh setup step (see the next section). sirven never logs Tailscale in or out, re-keys it, re-tags it, or changes its settings in an adopt path; the one login it ever logs out is a node its own join made and recorded.
 - **bb.** Found on the path, it is kept as it is, and `--with-bb` has nothing left to install.
 - **An earlier sirven run.** The grant in force, the policy copy, the audit log, and the install record are kept. A level or path you leave open is taken from the grant in force, so a plain re-run keeps what you set up before.
 
@@ -20,6 +20,18 @@ Each thing it keeps gets an `adopted:` line at the top of the plan, and `--dry-r
 - a grant is in force and you asked to grant no path (keep it, or use the kill switch);
 - the installed policy for your level differs from the one in `levels/` (sirven will not overwrite a hand edit);
 - the grant record cannot be read, or the audit log belongs to a different owner than `--owner`.
+
+## The Tailscale join, and how it is undone
+
+With `--transport tailscale` (the default) a real apply on Linux, inside a throwaway container, brings the machine onto your tailnet as the tagged agent node. You make one auth key in the Tailscale admin console (settings, keys): tagged `tag:agent`, pre-approved, and ephemeral if you can, because an ephemeral node leaves the tailnet by itself when it logs out. Give it to the installer in the environment as `SIRVEN_TAILSCALE_AUTHKEY` (or `TAILSCALE_AUTHKEY`; with sudo, `sudo --preserve-env=SIRVEN_TAILSCALE_AUTHKEY`), or save it as `/etc/sirven/tailscale-auth-key`, owned by root, mode 0600; a saved file is removed after the join. The key is never put on a command line (tailscale reads it from a private temporary file), never written to the audit log, the install record, or any other file, and blanked out of anything tailscale prints.
+
+What the join runs: `tailscale up --auth-key=file:<private copy> --advertise-tags=tag:agent --hostname=agent-<this machine's name> --ssh=false --accept-dns=false --accept-routes=false --reset --timeout=60s`. Tailscale SSH stays off (no level grants it), no exit node is used, and no routes or name resolution settings are accepted. It then records the node it joined (node number, host name, tag, never the key) in `/var/lib/sirven/tailscale-node.json`, root only.
+
+Refused before any change, with what to do: no key; tailscale not installed (the message names the download page and the Debian package repository); tailscaled not answering; a tailscale too old to read a key from a file. A second apply finds the node already logged in with `tag:agent` and does nothing, and needs no key. A machine already logged in without `tag:agent` is refused, never re-tagged.
+
+Undo, by `install.sh revoke --all` and by `uninstall.sh` (the install record carries the same undo): `tailscale logout`, and only when this machine's login is still the exact node the record names and it still has `tag:agent`. A login someone else made, or any other node of your tailnet, is never touched; the stale record is dropped and the run says so. With an ephemeral key the node leaves the tailnet at once; with any other key the machine entry stays listed (expired) in the admin console until you delete it, and the revoke plan says so. If tailscaled does not answer, the logout fails loudly, the record stays, and the run can be repeated. If tailscale is gone, there is nothing to log out and the record is dropped. Revoke then uninstall works: uninstall finds the record already gone.
+
+Real macOS machines and Linux machines outside a container stay plan only for the install (the installer refuses to apply there); the kill switch logout runs on a real Linux machine like the rest of the kill switch.
 
 Asking for a different level or path on purpose is not a conflict: the plan says the grant in force changes, and `sirven grant rollback` reverses it.
 
