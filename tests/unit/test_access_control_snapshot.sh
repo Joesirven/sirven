@@ -87,3 +87,36 @@ back = h.access_without_grant(now, agent, owner, blob)
 assert back == [(h.USER_OBJ, 6, h.NO_ID), (h.USER, 4, agent), (h.GROUP_OBJ, 0, h.NO_ID), (h.MASK, 4, h.NO_ID), (h.OTHER, 0, h.NO_ID)], back
 print("ok")')"
 }
+
+test_granting_a_plain_file_adds_the_agent_and_a_mask_like_setfacl() {
+  # a 644 file, builder rwX: agent rw-, X adds nothing on a file with no execute bit, the mask is the group class union.
+  assert_eq "ok" "$(snapshot_python '
+agent = 1002
+wanted = h.access_with_grant(None, 0o644, False, agent, "rwX")
+assert wanted == [(h.USER_OBJ, 6, h.NO_ID), (h.USER, 6, agent), (h.GROUP_OBJ, 4, h.NO_ID), (h.MASK, 6, h.NO_ID), (h.OTHER, 4, h.NO_ID)], wanted
+# a folder gets execute from X; an already executable file gets it too; observer rX is read only
+assert h.access_with_grant(None, 0o755, True, agent, "rX")[1] == (h.USER, 5, agent)
+assert h.access_with_grant(None, 0o755, False, agent, "rX")[1] == (h.USER, 5, agent)
+assert h.access_with_grant(None, 0o600, False, agent, "rX")[1] == (h.USER, 4, agent)
+# a pass-through parent: execute only
+assert h.access_with_grant(None, 0o700, True, agent, "x")[1] == (h.USER, 1, agent)
+# granting twice changes nothing
+once = h.access_with_grant(None, 0o644, False, agent, "rwX")
+assert h.access_with_grant(once, 0o664, False, agent, "rwX") == once
+print("ok")')"
+}
+
+test_the_default_list_gives_group_and_other_nothing_and_the_owner_the_grant() {
+  assert_eq "ok" "$(snapshot_python '
+agent, owner = 1002, 1001
+wanted = h.default_with_grant(None, None, 0o755, agent, owner, "rwX")
+assert wanted == [(h.USER_OBJ, 7, h.NO_ID), (h.USER, 7, owner), (h.USER, 7, agent), (h.GROUP_OBJ, 0, h.NO_ID), (h.MASK, 7, h.NO_ID), (h.OTHER, 0, h.NO_ID)], wanted
+# an owner of root or the agent itself is not added
+assert not [e for e in h.default_with_grant(None, None, 0o755, agent, 0, "rwX") if e[0] == h.USER and e[2] == 0]
+assert len([e for e in h.default_with_grant(None, None, 0o755, agent, agent, "rwX") if e[0] == h.USER]) == 1
+# an earlier base-only default list keeps its owner entry but loses group and other
+earlier = [(h.USER_OBJ, 7, h.NO_ID), (h.GROUP_OBJ, 5, h.NO_ID), (h.OTHER, 5, h.NO_ID)]
+after = h.default_with_grant(earlier, None, 0o755, agent, owner, "rX")
+assert (h.GROUP_OBJ, 0, h.NO_ID) in after and (h.OTHER, 0, h.NO_ID) in after and (h.USER, 5, agent) in after, after
+print("ok")')"
+}

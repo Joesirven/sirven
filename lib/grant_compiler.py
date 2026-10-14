@@ -329,13 +329,6 @@ def linux_default_check(user, target, entry):
         % (user, target, listing, entry, entry))
 
 
-def linux_default_command(user, target, grant):
-    return (
-        "a=$(id -u %s) && o=$(stat -c %%u %s) && e=\"u:$a:%s\" && "
-        "{ [ \"$o\" = 0 ] || [ \"$o\" = \"$a\" ] || e=\"$e,u:$o:%s\"; } && "
-        "setfacl -R -P -d -m \"g::---,o::---,$e\" %s" % (user, target, grant, grant, target))
-
-
 def compile_linux(level, user, prefix, paths, with_undo=False, package="sirven"):
     grant = level["access_control"]["linux"]["grant"]
     traverse = level["access_control"]["linux"]["traverse"]
@@ -347,7 +340,7 @@ def compile_linux(level, user, prefix, paths, with_undo=False, package="sirven")
     # every snapshot comes before the first change, so a path nested in a granted path is recorded
     # before its parent's grant reaches it. a traverse folder is recorded without its contents.
     targets = [(parent, False) for parent in parents] + [(path, True) for path in paths]
-    lines = []
+    records = []
     if with_undo:
         for path, recursive in targets:
             target = shlex.quote(prefix + path)
@@ -357,32 +350,54 @@ def compile_linux(level, user, prefix, paths, with_undo=False, package="sirven")
                 user, target, snapshot, shlex.quote(prefix + helper), recursive,
                 "put back the access control lists of %s as they were before the grant, removing only what the grant added" % path,
                 audit)
-            lines.append(fragment_line(
+            records.append(fragment_line(
                 "record the access control lists of %s before the grant" % path,
                 "[ -s %s ]" % snapshot,
                 "bash %s record %s %s %s %s" % (shlex.quote(prefix + helper), snapshot, target, word, user),
                 undo))
+    # the grants are done by the helper, by file descriptor, never following a link (see
+    # lib/access_control_snapshot.py). each names its snapshot, so the folder it changes is checked
+    # to be the one that was recorded. the agent's account is ended and locked around them.
+    helper_word = shlex.quote(prefix + helper)
+    marker = shlex.quote(prefix + "%s/agent-quiesce.json" % state_dir)
+    grants = []
     for parent in parents:
         target = shlex.quote(prefix + parent)
-        lines.append(fragment_line(
+        snapshot = " --snapshot " + shlex.quote(prefix + linux_snapshot(state_dir, parent)) if with_undo else ""
+        grants.append(fragment_line(
             "let %s pass through %s" % (user, parent),
             "getfacl --absolute-names --omit-header %s 2>/dev/null | grep -q '^user:%s:..x$'" % (target, user),
-            "setfacl -m u:%s:%s %s" % (user, traverse, target)))
+            "bash %s grant-access %s no %s %s%s" % (helper_word, target, user, traverse, snapshot)))
     for path in paths:
         target = shlex.quote(prefix + path)
-        lines.append(fragment_line(
+        snapshot = " --snapshot " + shlex.quote(prefix + linux_snapshot(state_dir, path)) if with_undo else ""
+        grants.append(fragment_line(
             "grant %s %s on %s and everything inside" % (user, grant, path),
             "getfacl --absolute-names --omit-header %s 2>/dev/null | grep -qx 'user:%s:%s'" % (target, user, entry),
-            "setfacl -R -P -m u:%s:%s %s" % (user, grant, target)))
+            "bash %s grant-access %s yes %s %s%s" % (helper_word, target, user, grant, snapshot)))
         # the default list gives group and other nothing, whatever the owner's umask. the agent and
         # the folder owner get the grant on new files. both are written by account number, looked up
         # when the step runs, so an owner with no account name (a deleted account, a mounted volume)
         # works, and root and the agent are not added as the owner.
-        lines.append(fragment_line(
+        grants.append(fragment_line(
             "make new files in %s inherit the grant, with group and other kept out" % path,
             linux_default_check(user, target, entry),
-            linux_default_command(user, target, grant),
+            "bash %s grant-default %s %s %s%s" % (helper_word, target, user, grant, snapshot),
             linux_stop_agent_removal(user) if with_undo else None))
+    # the account is stopped only when a grant step has work to do: a re-run that finds every grant in
+    # place leaves a running agent alone. a rollback marks its steps as always to do, so it always stops.
+    everything_in_place = " && ".join("{ %s; }" % line.split("\t")[1] for line in grants)
+    lines = []
+    lines.append(fragment_line(
+        "end every process of %s and lock its account while the access changes" % user,
+        everything_in_place,
+        "bash %s quiesce %s %s" % (helper_word, user, marker)))
+    lines.extend(records)
+    lines.extend(grants)
+    lines.append(fragment_line(
+        "give %s its account back" % user,
+        everything_in_place,
+        "bash %s release %s %s" % (helper_word, user, marker)))
     return lines
 
 

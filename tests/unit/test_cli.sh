@@ -67,7 +67,7 @@ test_rollback_dry_run_changes_nothing() {
   assert_contains "$CAPTURED_STDOUT" "after: level observer on 1 path(s)"
   assert_contains "$CAPTURED_STDOUT" "access_control_snapshot.sh restore"
   assert_contains "$CAPTURED_STDOUT" "$ROOT/home/example/project yes agent"
-  assert_contains "$CAPTURED_STDOUT" "setfacl -R -P -m u:agent:rX $ROOT/srv/app"
+  assert_contains "$CAPTURED_STDOUT" "grant-access $ROOT/srv/app yes agent rX"
   assert_contains "$CAPTURED_STDOUT" "forced-command wrapper, built after alpha"
   assert_eq "$before" "$(cat "$ROOT/etc/sirven/grants/agent.json" "$ROOT/var/log/sirven/audit.jsonl")"
 }

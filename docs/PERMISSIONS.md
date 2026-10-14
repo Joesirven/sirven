@@ -132,17 +132,28 @@ reach the path without listing anything on the way. a parent that is itself gran
 alone, so a pass-through entry never downgrades a grant.
 
 on linux, for builder on `/home/you/project`, with a snapshot line before each change (see
-"how a grant changes" below for what the snapshot does):
+"how a grant changes" below for what the snapshot does). the grant is done by the helper in
+`lib/access_control_snapshot.py`, by file descriptor, never by path and never following a link:
 
 ```
-setfacl -m u:agent:x /home
-setfacl -m u:agent:x /home/you
-setfacl -R -P -m u:agent:rwX /home/you/project
-setfacl -R -P -d -m g::---,o::---,u:AGENT_NUMBER:rwX,u:OWNER_NUMBER:rwX /home/you/project
+access_control_snapshot.sh quiesce agent /var/lib/sirven/agent-quiesce.json
+access_control_snapshot.sh grant-access /home yes|no agent x --snapshot ...        (no: this folder only)
+access_control_snapshot.sh grant-access /home/you no agent x --snapshot ...
+access_control_snapshot.sh grant-access /home/you/project yes agent rwX --snapshot ...
+access_control_snapshot.sh grant-default /home/you/project agent rwX --snapshot ...
+access_control_snapshot.sh release agent /var/lib/sirven/agent-quiesce.json
 ```
 
-`-P` keeps the walk from following symbolic links out of the granted folder. capital `X` gives
-execute on folders only, not on every file.
+`grant-access` does what `setfacl -R -P -m u:agent:rwX` does: the agent's entry on every folder, file, pipe
+and socket in the tree, links skipped, the mask recalculated, capital `X` giving execute on folders and on
+files that already have an execute bit only. it opens the start folder one component at a time without
+following links, checks it is the folder the snapshot recorded (same device and inode), and walks down by
+descriptor, so a link the agent swaps in cannot redirect it. an earlier version ran `setfacl` by path.
+`quiesce` ends every process of the agent and locks and expires its account, writing what the account was to
+`agent-quiesce.json`; `release` puts it back as it was (an account that was already locked stays locked). they
+wrap the grant steps only when a grant step has work to do, so an install that finds everything in place
+leaves a running agent alone; a rollback always runs them. if a step fails in between, the account stays
+locked, which is the safe state, and running the same command again finishes the job.
 
 the `-d` line makes new files inherit the grant, and it is the one that needs care. a default
 list overrides the umask of whoever creates a file, and its group and other entries come from
@@ -260,9 +271,8 @@ the kill switch reads it to know what to remove.
   then walks down by file descriptor and reads and writes the list on the open descriptor, so there is
   no path to swap under it. a folder the agent replaced with a link is skipped, and a warning
   event goes to the audit log. before the first list is put back, undo expires the agent's account and
-  ends its processes, so nothing the agent runs can change the folders meanwhile (rollback keeps the
-  account running, and relies on the descriptor method alone, for the removal half only: the grant it
-  applies again afterwards still runs `setfacl` by path, see known limits).
+  ends its processes, so nothing the agent runs can change the folders meanwhile (rollback's removal half keeps the
+  account running and relies on the descriptor method alone; its re-grant half ends the agent first, see above).
 
   **a missing or unusable snapshot.** undo does not treat that as done. the step's check is the state
   of the folder (an entry of the agent left, or the snapshot still there), not whether the snapshot
@@ -323,11 +333,12 @@ revoke <invite>
   still 600 and `ls -le` of every path matches the listing from step 1. (5) make a link inside the
   granted folder that points at a folder outside it (`ln -s ~/.ssh /granted/link`) before apply, and
   confirm `ls -le ~/.ssh` is the same after apply and after revoke.
-- the grant itself (the first install, and the re-grant half of a rollback or a level change) runs
-  `setfacl` by path. undo is descriptor based, the grant is not: an agent that is running while a
-  rollback re-grants can race a link swap against `setfacl -R -P`. whether the `setfacl` walk is
-  descriptor based on the supported systems is not established. first installs have no agent process
-  yet; closing the rollback case means a descriptor based grant in the helper (not built).
+- the grant, the check and the undo are all descriptor based, so no path is followed after the start
+  folder is opened. who could race a first install: no agent process exists yet, and the folder owner or a
+  collaborator who can write in the tree could plant a link, but the grant does not follow it, so they gain
+  nothing from root's grant. what is still by path is read only: the plan's `getfacl` and `stat` probes (which
+  decide a step is already done), and the first `realpath` of the granted folder, which is checked against the
+  snapshot's device and inode before anything is changed.
 - a grant over a tree that already has named entries for other accounts, or a mask, is refused, not
   merged. nested grants by two different folder owners are refused for the same reason (the second
   owner's entries look like foreign lists).

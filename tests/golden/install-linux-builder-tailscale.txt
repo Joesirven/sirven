@@ -55,38 +55,42 @@ access to paths, level builder
      note: undo removes only what this grant adds: the entries for agent and the folder owner, and the default list on folders. it never changes an owner or a group, never touches the owner and other bits or special bits, and never follows a link, so a chown, a chmod 600 or a setuid made while the grant is in force stays. the group bits end as what the group could really do, so a chmod that widens the group bits during the grant does not outlast it.
    17. record the grant for agent (to do)
        # write <prefix>/etc/sirven/grants/agent.json (mode 0644): level builder on the paths below, no expiry, cannot grant further
-   18. record the access control lists of /home before the grant (to do, recorded not run under --prefix)
+   18. end every process of agent and lock its account while the access changes (to do, recorded not run under --prefix)
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh quiesce agent <prefix>/var/lib/sirven/agent-quiesce.json
+   19. record the access control lists of /home before the grant (to do, recorded not run under --prefix)
        $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh record <prefix>/var/lib/sirven/access-lists/2cc974af6afc822c.txt <prefix>/home no agent
-   19. record the access control lists of /home/example before the grant (to do, recorded not run under --prefix)
+   20. record the access control lists of /home/example before the grant (to do, recorded not run under --prefix)
        $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh record <prefix>/var/lib/sirven/access-lists/67a166d2c72af6bb.txt <prefix>/home/example no agent
-   20. record the access control lists of /home/example/project before the grant (to do, recorded not run under --prefix)
+   21. record the access control lists of /home/example/project before the grant (to do, recorded not run under --prefix)
        $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh record <prefix>/var/lib/sirven/access-lists/867467bcb77869b9.txt <prefix>/home/example/project yes agent
-   21. let agent pass through /home (to do, recorded not run under --prefix)
-       $ setfacl -m u:agent:x <prefix>/home
-   22. let agent pass through /home/example (to do, recorded not run under --prefix)
-       $ setfacl -m u:agent:x <prefix>/home/example
-   23. grant agent rwX on /home/example/project and everything inside (to do, recorded not run under --prefix)
-       $ setfacl -R -P -m u:agent:rwX <prefix>/home/example/project
-   24. make new files in /home/example/project inherit the grant, with group and other kept out (to do, recorded not run under --prefix)
-       $ a=$(id -u agent) && o=$(stat -c %u <prefix>/home/example/project) && e="u:$a:rwX" && { [ "$o" = 0 ] || [ "$o" = "$a" ] || e="$e,u:$o:rwX"; } && setfacl -R -P -d -m "g::---,o::---,$e" <prefix>/home/example/project
+   22. let agent pass through /home (to do, recorded not run under --prefix)
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh grant-access <prefix>/home no agent x --snapshot <prefix>/var/lib/sirven/access-lists/2cc974af6afc822c.txt
+   23. let agent pass through /home/example (to do, recorded not run under --prefix)
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh grant-access <prefix>/home/example no agent x --snapshot <prefix>/var/lib/sirven/access-lists/67a166d2c72af6bb.txt
+   24. grant agent rwX on /home/example/project and everything inside (to do, recorded not run under --prefix)
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh grant-access <prefix>/home/example/project yes agent rwX --snapshot <prefix>/var/lib/sirven/access-lists/867467bcb77869b9.txt
+   25. make new files in /home/example/project inherit the grant, with group and other kept out (to do, recorded not run under --prefix)
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh grant-default <prefix>/home/example/project agent rwX --snapshot <prefix>/var/lib/sirven/access-lists/867467bcb77869b9.txt
+   26. give agent its account back (to do, recorded not run under --prefix)
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh release agent <prefix>/var/lib/sirven/agent-quiesce.json
 
 transport: tailscale
-   25. write the tailnet policy snippet (to do)
+   27. write the tailnet policy snippet (to do)
        # write <prefix>/etc/sirven/tailscale-policy-snippet.hujson (mode 0644): tag:agent, reachable only from your login, only on port 22
-   26. paste the policy snippet into your tailnet policy (owner, by hand)
+   28. paste the policy snippet into your tailnet policy (owner, by hand)
        tailscale admin console, access controls: merge /etc/sirven/tailscale-policy-snippet.hujson and put your login in place of you@example.com.
-   27. make one tagged auth key, once, in the browser (owner, by hand)
+   29. make one tagged auth key, once, in the browser (owner, by hand)
        tailscale admin console, settings, keys: generate an auth key with tag:agent, pre-approved, not reusable.
        save it as /etc/sirven/tailscale-auth-key, owned by root, mode 0600. this is the only interactive step.
-   28. join the tailnet as a tagged device with that key (plan only)
+   30. join the tailnet as a tagged device with that key (plan only)
        $ tailscale up --auth-key=file:<prefix>/etc/sirven/tailscale-auth-key --advertise-tags=tag:agent
        not yet: tailscale apply is plan output in the alpha cut; it is never run against a real tailnet yet
-   29. remove the used auth key from disk (plan only)
+   31. remove the used auth key from disk (plan only)
        $ rm -f <prefix>/etc/sirven/tailscale-auth-key
        not yet: tailscale apply is plan output in the alpha cut; it is never run against a real tailnet yet
      note: the agent client connects with: ssh agent@<this machine's tailnet name>. tailscale ssh stays off; the machine's own SSH server and keys are used.
 
-summary: 29 steps. 24 to do, 0 already done, 3 by the owner, 2 plan only.
+summary: 31 steps. 26 to do, 0 already done, 3 by the owner, 2 plan only.
 dry run: nothing was changed. run the same command without --dry-run to apply this plan.
 applying would stop before any change: the plan has plan-only steps the alpha cut does not apply yet.
 to undo later: ./install.sh revoke --all --dry-run, or ./uninstall.sh --dry-run

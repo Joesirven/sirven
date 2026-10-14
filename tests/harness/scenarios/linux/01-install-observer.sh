@@ -9,7 +9,7 @@ useradd -m neighbor
 mkdir -p /srv/app && echo hello > /srv/app/file.txt
 
 check_exit "install observer on /srv/app applies" 0 bash install.sh --yes --level observer --transport none --path /srv/app
-check "install says it applied 21 steps" grep -q 'applied 21 steps' <<< "$LAST_OUTPUT"
+check "install says it applied 23 steps (21 and the two that stop and give back the agent's account)" grep -q 'applied 23 steps' <<< "$LAST_OUTPUT"
 
 check "service user agent exists" id -u agent
 check "service user is not an administrator" bash -c '! id -nG agent | tr " " "\n" | grep -qx -e sudo -e wheel -e admin'
@@ -30,12 +30,14 @@ check "its group and other entries are empty" \
   bash -c 'getfacl --omit-header /srv/app/private | grep -qx "group::---" && getfacl --omit-header /srv/app/private | grep -qx "other::---"'
 check "another account cannot read it" bash -c '! runuser -u neighbor -- cat /srv/app/private 2>/dev/null'
 check "the agent can read it" runuser -u agent -- cat /srv/app/private
+check "after the install the account is back as it was: password login off, never expires" \
+  bash -c '[ "$(getent shadow agent | cut -d: -f2)" = "*" ] && [ -z "$(getent shadow agent | cut -d: -f8)" ]'
 check "grant record exists" test -s /etc/sirven/grants/agent.json
 check "install record exists, root only" bash -c '[ "$(stat -c "%a %U" /var/lib/sirven/install-record.tsv)" = "600 root" ]'
 check "pinned copy exists" test -f /var/lib/sirven/package/PINNED-COPY
 check "audit log has an install entry" grep -q '"outcome": *"finished"' /var/log/sirven/audit.jsonl
 
 check_exit "re-run is idempotent" 0 bash install.sh --yes --level observer --transport none --path /srv/app
-check "re-run skipped the finished steps" grep -q 'skipped 20 already done' <<< "$LAST_OUTPUT"
+check "re-run skipped the finished steps" grep -q 'skipped 22 already done' <<< "$LAST_OUTPUT"
 
 finish

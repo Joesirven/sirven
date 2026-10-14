@@ -15,6 +15,7 @@ evidence that each new harness assertion fails at 66e31fe.
 | 4 newline and backslash names | Names are handled as bytes end to end, no text round trip. |
 | 5 missing snapshot | The undo check is the state of the folder, not the snapshot file. With no snapshot undo still removes the grant's entries, warns loudly and writes an audit warning, and exits 0 (non-zero would stop uninstall before the account is removed). `repair` covers installs made before snapshots. |
 | 6 owner with no account name | The agent and the owner are written by number, looked up when the step runs. |
+| grant direction (parent decision after the review) | The grant itself moved into the helper (`grant-access`, `grant-default`), by descriptor, no link followed. `quiesce` and `release` end the agent's processes and lock and expire its account around any grant step that has work to do, then give the account back as it was. Scenario 15. |
 | macOS (from the reviewer's final report) | `chmod -h +a` and `-h -a`, and `find -P`. Plan only, not run on a Mac. |
 
 ## Evidence: new assertions at 66e31fe and at this branch
@@ -32,6 +33,7 @@ and then against this branch. Container: Docker on the Mac, no network.
 | 11 numeric owner | install exit 0 (was 4 at step 22); owner entry by number | agent can write; uninstall exact (nothing half-applied was left to undo) |
 | 12 rollback | chmod 600 and chmod 700 kept after rollback and after uninstall; other account still blocked | the three installs and rollback exit 0; earlier level back; no list left |
 | 13 nested and repeated grants | none (a regression guard, passes at both) | all |
+| 15 re-grant while the agent runs | link target unchanged after a rollback with a swapping agent; agent ended during the re-grant; audit warning | installs and rollback exit 0; precondition; account back; observer level back |
 | 14 repair command | repair exits 0 (was 2: no such command); no entry left; exact | owner's chmod; uninstall exit 0 |
 
 At this branch: `bash tests/harness/run-linux.sh` exit 0, 14 scenarios, 0 failed, 4 known defects (all SIR-32, the kill
@@ -41,9 +43,9 @@ switch, unchanged).
 
 - Anything on macOS: the `-h` change, `find -P`, and the manual check in `docs/PERMISSIONS.md`.
 - A filesystem without access list support, and Linux filesystems other than the container's overlay.
-- Rollback's removal half is protected by the descriptor method alone, with the agent's account running (one probe with the agent
-  swapping a folder in a loop during rollback and during uninstall left the target untouched; a single probe is not proof). Its
-  re-grant half, and a level-change re-install, still run `setfacl -R -P` by path: whether that walk is descriptor based on Debian 12
-  is not established, and an agent running at that moment could race a link swap in the grant direction. Outside this brief; the
-  parent was told.
+- Rollback's removal half runs with the agent's account still running and relies on the descriptor method alone
+  (probes with the agent swapping a folder in a loop left the target untouched; a probe is not proof). The re-grant
+  half, a level-change re-install, and a first install now use the same descriptor based helper and end and lock the
+  agent first, so no path is followed in the grant direction either. What is still by path is read only (probes that
+  decide a step is already done).
 - That `usermod --expiredate 1 --lock` stops SSH key logins: the harness runs no SSH server.

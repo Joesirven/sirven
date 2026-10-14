@@ -17,6 +17,15 @@ standard library python, started by lib/access_control_snapshot.sh. linux only.
       read only. exit 0 when the undo has nothing left to do: no snapshot and no entry of the agent.
   repair  FOLDER yes|no USER [--audit FILE]
       restore with no snapshot, for installs made before snapshots existed.
+  grant-access  FOLDER yes|no USER PERMISSIONS [--snapshot FILE]
+      give USER the permissions (letters r, w, x, X) on the folder and, when yes, everything inside it. the
+      same walk as undo: by descriptor, never following a link. the mask is recalculated, as setfacl does.
+  grant-default FOLDER USER PERMISSIONS [--snapshot FILE]
+      on every folder in the tree, the default list that makes new files inherit the grant: the agent and
+      the folder owner get the permissions, group and other get nothing, whatever the creator's umask.
+  quiesce USER MARKER / release USER MARKER
+      end every process of USER and lock and expire its account, remembering what it was in MARKER;
+      release puts the account back as MARKER says. install and rollback wrap a re-grant in these.
 
 what undo changes, and nothing else: the named entries of the agent (and of the folder owner, where
 the agent's entry is there too), and on folders the default list when it carries the agent's entry.
@@ -26,9 +35,9 @@ become the group entry AND the mask, which is what the group could really do, so
 chmod 600 stays 600. the one deliberate exception: a chmod that widens the group bits while a mask
 exists changes the mask only, so it does not outlast the grant (644 to 664 ends 644).
 
-nothing is done by path. every folder and file is opened one step at a time with O_NOFOLLOW, from
-the file descriptor of the folder above it, and the attribute is read and written on the open
-descriptor. a symbolic link is never followed; the start folder must still be the folder the
+nothing is done by path, the grant and the check included. every folder and file is opened one step at
+a time with O_NOFOLLOW, from the file descriptor of the folder above it, and the attribute is read and
+written on the open descriptor. a symbolic link is never followed; the start folder must still be the folder the
 snapshot recorded (same device and inode), or it is skipped with a warning.
 """
 
@@ -41,6 +50,7 @@ import os
 import pwd
 import stat
 import struct
+import subprocess
 import sys
 
 ACCESS = "system.posix_acl_access"
@@ -274,6 +284,172 @@ def print_refusals(refusals):
         sys.stdout.write("  %s (%s)\n" % (printable(path), reason))
     if len(refusals) > LISTED:
         sys.stdout.write("  and %d more\n" % (len(refusals) - LISTED))
+
+
+# ---- the grant, by descriptor ----
+
+def parse_permissions(text):
+    """letters r, w, x, X -> (bits, execute_only_when_already_executable)."""
+    bits = (4 if "r" in text else 0) | (2 if "w" in text else 0) | (1 if "x" in text else 0)
+    return bits, "X" in text
+
+
+def mode_entries(mode):
+    return [(USER_OBJ, (mode >> 6) & 7, NO_ID), (GROUP_OBJ, (mode >> 3) & 7, NO_ID), (OTHER, mode & 7, NO_ID)]
+
+
+def mask_of(entries):
+    """the mask setfacl calculates: every permission the group class can use."""
+    mask = 0
+    for tag, perm, _ in entries:
+        if tag in (GROUP_OBJ, USER, GROUP):
+            mask |= perm
+    return mask
+
+
+def with_entry(entries, tag, number, perm):
+    return [entry for entry in entries if not (entry[0] == tag and entry[2] == number)] + [(tag, perm, number)]
+
+
+def access_with_grant(current, mode, is_folder, agent, spec):
+    """the access list after the agent gets the permissions. pure."""
+    bits, conditional = parse_permissions(spec)
+    entries = list(current) if current else mode_entries(mode)
+    if conditional and (is_folder or any(perm & 1 for _, perm, _ in entries)):
+        bits |= 1
+    entries = with_entry(entries, USER, agent, bits)
+    entries = [entry for entry in entries if entry[0] != MASK]
+    entries.append((MASK, mask_of(entries), NO_ID))
+    return sorted(entries, key=lambda e: (e[0], e[2] if e[0] in (USER, GROUP) else 0))
+
+
+def default_with_grant(default, access, mode, agent, owner, spec):
+    """the default list of a folder after the grant: the agent and the owner get the permissions, group and
+    other get nothing. a folder with no default list starts from its own access list. pure."""
+    bits, conditional = parse_permissions(spec)
+    if conditional:
+        bits |= 1  # a default list is on a folder, and X gives a folder execute
+    source = default if default else [entry for entry in (access or mode_entries(mode)) if entry[0] in (USER_OBJ, GROUP_OBJ, OTHER)]
+    entries = [entry for entry in source if entry[0] != MASK]
+    entries = [(tag, 0, number) if tag in (GROUP_OBJ, OTHER) else (tag, perm, number) for tag, perm, number in entries]
+    entries = with_entry(entries, USER, agent, bits)
+    if owner not in (0, agent):
+        entries = with_entry(entries, USER, owner, bits)
+    entries.append((MASK, mask_of(entries), NO_ID))
+    return sorted(entries, key=lambda e: (e[0], e[2] if e[0] in (USER, GROUP) else 0))
+
+
+def start_checked(arguments, recursive, visit, errors):
+    """open the start folder like undo does and, when a snapshot is named, check it is the recorded one."""
+    agent = account_number(arguments.user)
+    if agent is None:
+        raise Failure("the account %s does not exist" % arguments.user)
+    resolved = os.path.realpath(arguments.folder)
+    descriptor = open_folder(resolved)
+    try:
+        info = os.fstat(descriptor)
+    finally:
+        os.close(descriptor)
+    if arguments.snapshot:
+        try:
+            with open(arguments.snapshot, encoding="utf-8") as handle:
+                context = json.load(handle)["context"]
+        except (OSError, ValueError, KeyError) as error:
+            raise Failure("no usable snapshot at %s (%s), so %s is not changed" % (arguments.snapshot, error, arguments.folder))
+        if (context["dev"], context["ino"], context["resolved"]) != (info.st_dev, info.st_ino, resolved):
+            raise Failure("%s is not the folder that was recorded before the grant; it was not changed" % arguments.folder)
+    start(resolved, recursive, visit, errors)
+    return agent, info
+
+
+def finish_changes(errors):
+    for path, reason in errors[:LISTED]:
+        say("error: %s: %s" % (printable(path), reason))
+    return EXIT_FAILED if errors else 0
+
+
+def command_grant_access(arguments):
+    recursive = arguments.recursive == "yes"
+    errors = []
+
+    def visit(handle, item, path, is_folder):
+        try:
+            current = read_list(handle, ACCESS)
+            wanted = access_with_grant(current, stat.S_IMODE(item.st_mode), is_folder, agent, arguments.permissions)
+            if wanted != current:
+                os.setxattr(handle, ACCESS, build(wanted))
+        except OSError as error:
+            errors.append((path, error.strerror))
+
+    agent = account_number(arguments.user)
+    start_checked(arguments, recursive, visit, errors)
+    return finish_changes(errors)
+
+
+def command_grant_default(arguments):
+    errors = []
+    owner = []
+
+    def visit(handle, item, path, is_folder):
+        if not is_folder:
+            return
+        try:
+            if not owner:
+                owner.append(item.st_uid)
+            access = read_list(handle, ACCESS)
+            wanted = default_with_grant(read_list(handle, DEFAULT), access, stat.S_IMODE(item.st_mode),
+                                        agent, owner[0], arguments.permissions)
+            if wanted != read_list(handle, DEFAULT):
+                os.setxattr(handle, DEFAULT, build(wanted))
+        except OSError as error:
+            errors.append((path, error.strerror))
+
+    agent = account_number(arguments.user)
+    start_checked(arguments, True, visit, errors)
+    return finish_changes(errors)
+
+
+# ---- the agent's account while access changes ----
+
+def shadow_fields(user):
+    result = subprocess.run(["getent", "shadow", user], capture_output=True, text=True)
+    fields = result.stdout.strip().split(":")
+    if result.returncode != 0 or len(fields) < 8:
+        return None
+    return fields
+
+
+def command_quiesce(arguments):
+    fields = shadow_fields(arguments.user)
+    if fields is None:
+        return 0
+    if not os.path.exists(arguments.marker):
+        os.makedirs(os.path.dirname(arguments.marker), mode=0o700, exist_ok=True)
+        descriptor = os.open(arguments.marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            json.dump({"locked": fields[1].startswith("!"), "expire": fields[7]}, handle)
+    if not fields[1].startswith("!"):
+        subprocess.run(["usermod", "--lock", arguments.user], check=True)
+    subprocess.run(["usermod", "--expiredate", "1", arguments.user], check=True)
+    subprocess.run(["pkill", "-KILL", "-u", arguments.user])
+    return 0
+
+
+def command_release(arguments):
+    try:
+        with open(arguments.marker, encoding="utf-8") as handle:
+            before = json.load(handle)
+    except FileNotFoundError:
+        return 0
+    if shadow_fields(arguments.user) is not None:
+        if not before["locked"]:
+            subprocess.run(["usermod", "--unlock", arguments.user], check=True)
+        expire = ""
+        if before["expire"]:
+            expire = (datetime.date(1970, 1, 1) + datetime.timedelta(days=int(before["expire"]))).isoformat()
+        subprocess.run(["usermod", "--expiredate", expire, arguments.user], check=True)
+    os.unlink(arguments.marker)
+    return 0
 
 
 # ---- commands ----
@@ -521,6 +697,20 @@ def parser():
         if name != "status":
             command.add_argument("--audit", default="")
 
+    for name in ("grant-access", "grant-default"):
+        command = commands.add_parser(name)
+        command.add_argument("folder")
+        if name == "grant-access":
+            command.add_argument("recursive", choices=("yes", "no"))
+        command.add_argument("user")
+        command.add_argument("permissions")
+        command.add_argument("--snapshot", default="")
+
+    for name in ("quiesce", "release"):
+        command = commands.add_parser(name)
+        command.add_argument("user")
+        command.add_argument("marker")
+
     repair = commands.add_parser("repair")
     repair.add_argument("folder")
     repair.add_argument("recursive", choices=("yes", "no"))
@@ -539,9 +729,11 @@ def main(argv):
         arguments.snapshot = ""
         arguments.command = "restore"
     try:
-        return {"check": command_check, "record": command_record,
-                "restore": command_restore, "status": command_status}[arguments.command](arguments)
-    except (OSError, Failure) as error:
+        return {"check": command_check, "record": command_record, "restore": command_restore,
+                "status": command_status, "grant-access": command_grant_access,
+                "grant-default": command_grant_default, "quiesce": command_quiesce,
+                "release": command_release}[arguments.command](arguments)
+    except (OSError, Failure, subprocess.CalledProcessError) as error:
         say("error: %s" % error)
         return EXIT_FAILED
 

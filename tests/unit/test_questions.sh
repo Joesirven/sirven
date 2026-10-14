@@ -63,7 +63,7 @@ test_enter_twice_accepts_the_shown_defaults() {
   assert_contains "$CAPTURED_STDERR" "2/2 path to grant [$here]: "
   assert_contains "$CAPTURED_STDOUT" "level: observer (write allowed: false)"
   assert_contains "$CAPTURED_STDOUT" "paths: $here"
-  assert_contains "$CAPTURED_STDOUT" "setfacl -R -P -m u:agent:rX $TEST_TMP/root$here"
+  assert_contains "$CAPTURED_STDOUT" "grant-access $TEST_TMP/root$here yes agent rX"
 }
 
 test_answers_shape_the_plan() {
@@ -72,7 +72,7 @@ test_answers_shape_the_plan() {
 " "$(project)"
   assert_contains "$CAPTURED_STDOUT" "level: builder (write allowed: true)"
   assert_contains "$CAPTURED_STDOUT" "paths: /srv/app"
-  assert_contains "$CAPTURED_STDOUT" "setfacl -R -P -m u:agent:rwX $TEST_TMP/root/srv/app"
+  assert_contains "$CAPTURED_STDOUT" "grant-access $TEST_TMP/root/srv/app yes agent rwX"
 }
 
 test_questions_come_before_the_plan() {

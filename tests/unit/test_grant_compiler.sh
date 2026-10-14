@@ -28,18 +28,18 @@ END
 test_traverse_never_downgrades_a_granted_parent() {
   capture compiler compile --level "$LEVEL_BUILDER" --os linux --path /srv/app --path /srv/app/sub
   assert_not_contains "$CAPTURED_STDOUT" "u:agent:x /srv/app"
-  assert_contains "$CAPTURED_STDOUT" "setfacl -m u:agent:x /srv"
+  assert_contains "$CAPTURED_STDOUT" "grant-access /srv no agent x"
 }
 
 test_paths_with_spaces_are_quoted() {
   capture compiler compile --level "$LEVEL_BUILDER" --os linux --path "/srv/my app"
-  assert_contains "$CAPTURED_STDOUT" "setfacl -R -P -m u:agent:rwX '/srv/my app'"
+  assert_contains "$CAPTURED_STDOUT" "grant-access '/srv/my app' yes agent rwX"
 }
 
 test_prefix_goes_in_commands_not_in_titles() {
   capture compiler compile --level "$LEVEL_BUILDER" --os linux --prefix /tmp/fake --path /srv/app
   assert_contains "$CAPTURED_STDOUT" "grant agent rwX on /srv/app and everything inside"
-  assert_contains "$CAPTURED_STDOUT" "setfacl -R -P -m u:agent:rwX /tmp/fake/srv/app"
+  assert_contains "$CAPTURED_STDOUT" "grant-access /tmp/fake/srv/app yes agent rwX"
 }
 
 test_compile_needs_a_path() {
