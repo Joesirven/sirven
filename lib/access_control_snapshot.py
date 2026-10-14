@@ -360,6 +360,8 @@ def describe_user(number):
 
 def printable(path):
     path = resolve(path)
+    if len(path) > 400:  # a path an agent made very deep: show its two ends
+        path = path[:150] + b"...(%d bytes)..." % (len(path) - 300) + path[-150:]
     return os.fsdecode(path).encode("utf-8", "backslashreplace").decode("utf-8").replace("\n", "\\n").replace("\t", "\\t")
 
 

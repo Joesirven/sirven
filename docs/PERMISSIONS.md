@@ -261,7 +261,7 @@ the kill switch reads it to know what to remove.
   **exactly what undo changes**, and nothing else: on every path in the tree, the named entries for the
   agent (and for the folder owner, where the agent's entry is also there); on folders, the default list
   when it carries the agent's entry, replaced by the one recorded before the grant (if there was one).
-  when no named entry is left on a path, its list collapses to a plain mode: the group bits become the
+  when a path had named entries before the grant, its recorded mask comes back (not the wider one the grant raised it to). when no named entry is left on a path, its list collapses to a plain mode: the group bits become the
   group entry AND the mask, which is what the group could really do. it **never changes an owner or a
   group, and never touches the owner bits, the other bits or the special bits** (setuid, setgid, sticky).
   so a `chmod 600` the owner made during the grant, a `chown` or `chmod` by root, a setuid bit, and a
@@ -270,6 +270,14 @@ the kill switch reads it to know what to remove.
   (644 to 664) does not survive undo (the file ends 644, which is what the group could do all along).
   using the mask as the group bits would have widened access nobody granted.
   this holds for uninstall, rollback and the kill switch alike.
+
+  **memory.** the walk keeps no path per open folder and no listing for a folder it let go of: a folder is a
+  few small values and its own name, the path is built only when something is printed, and a let-go folder is
+  listed again (sorted, resuming after the last name read) when it is reopened. problems are counted and only
+  the first ten are kept. so 3,000 levels of 255-character names, or 240,000 long-named files, stay under about
+  25 MB in the install-time check and in uninstall, and a tree of 301,001 entries takes about 11.5 s and 61 MB to
+  install and 4.4 s and 88 MB to uninstall. a folder lost from under the walk (moved, replaced or removed after it
+  was let go) is an error with a recovery hint, never a silent skip.
 
   **depth and descriptors.** the walk is iterative and keeps the deepest 48 folders open, whatever the depth,
   so a chain of 12,000 folders made by the agent undoes under an open-file limit of 1,024. a folder let
@@ -285,8 +293,8 @@ the kill switch reads it to know what to remove.
   then walks down by file descriptor and reads and writes the list on the open descriptor, so there is
   no path to swap under it. a folder the agent replaced with a link is skipped, and a warning
   event goes to the audit log. before the first list is put back, undo expires the agent's account and
-  ends its processes, so nothing the agent runs can change the folders meanwhile (rollback's removal half keeps the
-  account running and relies on the descriptor method alone; its re-grant half ends the agent first, see above).
+  ends its processes, so nothing the agent runs can change the folders meanwhile (a rollback ends the agent first too, at the start of its removal, and gives the account back at the end,
+  also when it goes back to no grant).
 
   **a missing or unusable snapshot.** undo does not treat that as done. the step's check is the state
   of the folder (an entry of the agent left, or the snapshot still there), not whether the snapshot

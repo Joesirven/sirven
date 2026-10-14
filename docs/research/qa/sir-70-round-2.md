@@ -82,3 +82,16 @@ survives one kill pass in some runs only), 20 fails 6, 21 fails 3. A randomised 
 `setfacl` on 48 random trees (modes, special bits, pipes, five permission sets) matched exactly. Not done from the nice-to-have list:
 the openssh-server image change (so the lock-and-expire claim stays unproven in this harness), the hard-link sysctl warning, and
 the narrower default-list removal.
+
+# Round 4 (re-review 3 of 2211d8f)
+
+| Item | Change | Scenario |
+| --- | --- | --- |
+| C memory grows with depth times name length | A folder in the walk is a few small values and its own name; the path is built only when printed (`Where`); the listing is kept only while the folder is held open and is read again, sorted, after the last name read, when it is reopened; problems are counted and only the first ten kept; the install-time check no longer builds snapshot records. | 22: 3,000 levels of 255-character names and 240,000 long-named files, peak 24 MB in the check and 18 MB in uninstall (limit 60 MB). At 2211d8f the check was killed (214 MB, exit -9 in a 256 MB container) and uninstall was killed. |
+| 301,001-entry baseline | install 11.5 s and 61 MB, uninstall 4.4 s and 88 MB (re-review: 11.6 s and 60 MB, 4.2 s and 87 MB). Unchanged. | probe, not a scenario |
+| D a lost subtree skipped silently | every dropped frame is an error naming the folder ("moved, replaced or removed while it was being read ... run the same command again") plus the recovery line; a rollback now starts with the step that ends the agent's processes and locks its account and ends by giving it back, also when it rolls back to no grant. | 23 (exact-timing hook: a folder moved away from under a 60-level walk; fails loudly, the second run after the tree is put back clears all 20 files), 24 |
+| the 31,000-level case | reported by name with the bound and a recovery hint, the rest of the undo continues, a second uninstall after `rm -r` finishes; long paths are shortened to their two ends when printed | 26 |
+| should fix 1: repair with the account gone leaves the default list | a default list with a mask and no live named entry is an older leftover (the older grant copied the folder's group and other bits into it); `sirven grant repair --path` works without a grant record | 25 |
+| should fix 2: the mask comes back wider | the recorded mask is restored when the grant's entries come off a path that had named entries | 25 |
+
+Against 2211d8f: scenario 22 fails 6 assertions, 23 fails 3, 24 fails 5, 25 fails 6, 26 fails 3.
