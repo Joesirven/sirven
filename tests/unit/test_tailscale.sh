@@ -464,3 +464,43 @@ test_an_apply_that_the_join_would_refuse_late_is_refused_before_any_change() {
   assert_status 0 tailscale_refuse_before_apply
   assert_not_contains "$(calls)" "up --auth-key"
 }
+
+# ---- uninstall, with a join the install record does not know about
+
+test_uninstall_logs_out_a_node_a_failed_join_left_behind() {
+  local root="$TEST_TMP/root" record="$TEST_TMP/root/var/lib/sirven/install-record.tsv"
+  assert_status 0 install_sh --prefix "$root" --level observer --transport tailscale
+  # the join logged in but never reached Running: the join's record file is there, the install record has no line for it
+  grep -v 'tailscale_node.sh leave' "$record" > "$TEST_TMP/record.without" || true
+  cp "$TEST_TMP/record.without" "$record"
+  printf '{"node_id": "node-1"}\n' > "$root/var/lib/sirven/tailscale-node.json"
+  assert_status 0 env SIRVEN_OS_OVERRIDE=linux "$REPO_DIR/uninstall.sh" --dry-run --prefix "$root"
+  assert_contains "$CAPTURED_STDOUT" "log this machine out of the tailnet: the node a join left behind, and only it (to do"
+  assert_contains "$CAPTURED_STDOUT" "only when this machine's login is still the node recorded in /var/lib/sirven/tailscale-node.json"
+  # the logout comes before the pinned copy goes
+  local join_line copy_line
+  join_line="$(printf '%s\n' "$CAPTURED_STDOUT" | grep -n 'log this machine out of the tailnet' | cut -d: -f1)"
+  copy_line="$(printf '%s\n' "$CAPTURED_STDOUT" | grep -n 'remove the pinned copy of this package' | cut -d: -f1)"
+  [ "$join_line" -lt "$copy_line" ] || fail "the logout (line $join_line) must come before the pinned copy goes (line $copy_line)"
+}
+
+test_uninstall_also_acts_on_a_stale_key_copy_and_adds_nothing_without_a_join() {
+  local root="$TEST_TMP/root" record="$TEST_TMP/root/var/lib/sirven/install-record.tsv"
+  assert_status 0 install_sh --prefix "$root" --level observer --transport tailscale
+  grep -v 'tailscale_node.sh leave' "$record" > "$TEST_TMP/record.without" || true
+  cp "$TEST_TMP/record.without" "$record"
+  assert_status 0 env SIRVEN_OS_OVERRIDE=linux "$REPO_DIR/uninstall.sh" --dry-run --prefix "$root"
+  assert_not_contains "$CAPTURED_STDOUT" "a join left behind"
+  printf 'stale\n' > "$root/var/lib/sirven/.tailscale-key.77"
+  assert_status 0 env SIRVEN_OS_OVERRIDE=linux "$REPO_DIR/uninstall.sh" --dry-run --prefix "$root"
+  assert_contains "$CAPTURED_STDOUT" "a join left behind"
+}
+
+test_uninstall_does_not_log_out_twice_when_the_install_record_already_does() {
+  local root="$TEST_TMP/root"
+  assert_status 0 install_sh --prefix "$root" --level observer --transport tailscale
+  printf '{"node_id": "node-1"}\n' > "$root/var/lib/sirven/tailscale-node.json"
+  assert_status 0 env SIRVEN_OS_OVERRIDE=linux "$REPO_DIR/uninstall.sh" --dry-run --prefix "$root"
+  assert_contains "$CAPTURED_STDOUT" "log this machine out of the tailnet, if this installer joined it"
+  assert_not_contains "$CAPTURED_STDOUT" "a join left behind"
+}
