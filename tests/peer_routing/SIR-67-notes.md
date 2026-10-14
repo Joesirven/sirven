@@ -74,6 +74,37 @@ percent. The base-code zeros therefore do not confirm that the flake was absent,
 unexplained by the dash cause alone. The lock-fix build recorded 3 failures in 200 runs, all
 with the dash cause. This discrepancy is not resolved.
 
+## Review round (commits `c865d68` to `263a267`)
+
+Response to the strict review of `ff686fc`.
+
+- M1: the notes named the time zones in full. `make test` no longer fails on `test_no_acronyms`.
+- M2: the lock moved to `lib/attestation/verify-lock.mjs` and the age rule was removed. An owner
+  record (process number, host name, boot time, random token) marks each lock. A lock is dead only
+  when its holder is gone on this host, or was written before the last boot. Removal is exclusive
+  by dead token. Release checks the token. A lock that cannot be taken within 10 seconds refuses
+  the request (`lock_unavailable`), recorded in the audit log.
+- S1: the nonce is written before the carried envelope and the ledger.
+- S2: release never throws over the result of the work.
+- S3: `record_transfer` reports `reciprocity_record_failed` instead of returning nothing, and its
+  dash-leading identifier case is tested.
+- S4: the ten-second wait is tested, the refusal is audited, and a carry that cannot take the lock
+  is refused as `attestation_verifier_unavailable`.
+- N1: the clock is read under the lock, so an envelope cannot be accepted after its expiry by
+  the length of the wait.
+
+Not done, and left open:
+
+- N2: `SIRVEN_ATTESTATION_TEST_HOLD_MS` is still honoured by the production verify path. A process
+  that controls the environment of a verify can already run the program, so the risk is low.
+- N4: `peer init` still rewrites `ledger.json` and `nonces.json` without the lock.
+- N5: some reciprocity arguments are still separate values. None can begin with `-` today.
+
+Residual window, documented in `verify-lock.mjs`: a waiter that dies between creating a break file
+and removing the lock leaves the break file behind. A later waiter removes it by renaming it. Two
+recoveries of the same abandoned break file racing each other would need two crashes inside
+microsecond windows.
+
 ## Reproducing
 
 `tests/peer_routing/stress.sh COUNT [PATTERN]` runs the suite COUNT times and keeps the logs of
