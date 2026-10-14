@@ -55,15 +55,15 @@ access to paths, level observer
    17. record the grant for agent (to do)
        # write <prefix>/etc/sirven/grants/agent.json (mode 0644): level observer on the paths below, no expiry, cannot grant further
    18. record the access control lists of /home before the grant (to do, recorded not run under --prefix)
-       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh record <prefix>/var/lib/sirven/access-lists/2cc974af6afc822c.txt <prefix>/home no
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh record <prefix>/var/lib/sirven/access-lists/2cc974af6afc822c.txt <prefix>/home no agent
    19. record the access control lists of /home/example before the grant (to do, recorded not run under --prefix)
-       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh record <prefix>/var/lib/sirven/access-lists/67a166d2c72af6bb.txt <prefix>/home/example no
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh record <prefix>/var/lib/sirven/access-lists/67a166d2c72af6bb.txt <prefix>/home/example no agent
    20. record the access control lists of /srv before the grant (to do, recorded not run under --prefix)
-       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh record <prefix>/var/lib/sirven/access-lists/a3d9ac4fdee9c242.txt <prefix>/srv no
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh record <prefix>/var/lib/sirven/access-lists/a3d9ac4fdee9c242.txt <prefix>/srv no agent
    21. record the access control lists of /home/example/notes before the grant (to do, recorded not run under --prefix)
-       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh record <prefix>/var/lib/sirven/access-lists/e5e8e5d743b78051.txt <prefix>/home/example/notes yes
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh record <prefix>/var/lib/sirven/access-lists/e5e8e5d743b78051.txt <prefix>/home/example/notes yes agent
    22. record the access control lists of /srv/app before the grant (to do, recorded not run under --prefix)
-       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh record <prefix>/var/lib/sirven/access-lists/dae668e4084f07b6.txt <prefix>/srv/app yes
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh record <prefix>/var/lib/sirven/access-lists/dae668e4084f07b6.txt <prefix>/srv/app yes agent
    23. let agent pass through /home (to do, recorded not run under --prefix)
        $ setfacl -m u:agent:x <prefix>/home
    24. let agent pass through /home/example (to do, recorded not run under --prefix)

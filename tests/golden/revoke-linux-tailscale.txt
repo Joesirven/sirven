@@ -22,13 +22,13 @@ kill switch: revoke --all
 
 kill switch: access control lists
     5. remove agent from /home/example/project and put back the access control lists it had (plan only)
-       $ if [ -s <prefix>/var/lib/sirven/access-lists/867467bcb77869b9.txt ]; then bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh restore <prefix>/var/lib/sirven/access-lists/867467bcb77869b9.txt <prefix>/home/example/project yes agent; else setfacl -R -P -x u:agent <prefix>/home/example/project && setfacl -R -P -d -x u:agent <prefix>/home/example/project; fi
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh restore <prefix>/var/lib/sirven/access-lists/867467bcb77869b9.txt <prefix>/home/example/project yes agent --audit <prefix>/var/log/sirven/audit.jsonl
        not yet: the kill switch is plan output in the alpha cut; apply comes in alpha + 1
     6. stop agent passing through /home and put back its access control list (plan only)
-       $ if [ -s <prefix>/var/lib/sirven/access-lists/2cc974af6afc822c.txt ]; then bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh restore <prefix>/var/lib/sirven/access-lists/2cc974af6afc822c.txt <prefix>/home no agent; else setfacl -P -x u:agent <prefix>/home; fi
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh restore <prefix>/var/lib/sirven/access-lists/2cc974af6afc822c.txt <prefix>/home no agent --audit <prefix>/var/log/sirven/audit.jsonl
        not yet: the kill switch is plan output in the alpha cut; apply comes in alpha + 1
     7. stop agent passing through /home/example and put back its access control list (plan only)
-       $ if [ -s <prefix>/var/lib/sirven/access-lists/67a166d2c72af6bb.txt ]; then bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh restore <prefix>/var/lib/sirven/access-lists/67a166d2c72af6bb.txt <prefix>/home/example no agent; else setfacl -P -x u:agent <prefix>/home/example; fi
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh restore <prefix>/var/lib/sirven/access-lists/67a166d2c72af6bb.txt <prefix>/home/example no agent --audit <prefix>/var/log/sirven/audit.jsonl
        not yet: the kill switch is plan output in the alpha cut; apply comes in alpha + 1
     8. mark the grant record revoked (plan only)
        $ mv <prefix>/etc/sirven/grants/agent.json <prefix>/etc/sirven/grants/agent.json.revoked

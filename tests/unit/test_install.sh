@@ -148,7 +148,8 @@ test_revoke_reads_the_grant_record() {
   local root="$TEST_TMP/root"
   assert_status 0 install_sh --prefix "$root" --level builder --path /home/example/project --transport none
   assert_status 0 install_sh revoke --all --dry-run --prefix "$root"
-  assert_contains "$CAPTURED_STDOUT" "setfacl -R -P -x u:agent $root/home/example/project"
+  assert_contains "$CAPTURED_STDOUT" "access_control_snapshot.sh restore"
+  assert_contains "$CAPTURED_STDOUT" "$root/home/example/project yes agent"
   assert_contains "$CAPTURED_STDOUT" "usermod --lock --expiredate 1"
   assert_contains "$CAPTURED_STDOUT" "pkill -KILL -u agent"
   assert_contains "$CAPTURED_STDOUT" "revoke_started"

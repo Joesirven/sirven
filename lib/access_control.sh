@@ -96,6 +96,8 @@ plan_access_control() {
     plan_note "macos keeps Desktop, Documents, and Downloads behind privacy prompts a service user cannot answer, so those are refused."
   fi
 
+  access_control_refuse_existing_lists
+
   grant_record="$STAGE_DIR/grant-record.json"
   _access_control_run_compiler "$grant_record" record --level "$LEVEL_FILE"
   layout_write_file "record the grant for $SERVICE_USER" "$(access_control_record_file)" 0644 "$grant_record" \
@@ -105,6 +107,48 @@ plan_access_control() {
   fragment="$STAGE_DIR/grant-fragment.txt"
   _access_control_run_compiler "$fragment" compile --level "$LEVEL_FILE" --prefix "$PREFIX" --with-undo
   _access_control_add_fragment "$fragment" "$(_access_control_kind)" "$ACCESS_CONTROL_MACOS_REASON"
+}
+
+# access_control_refuse_existing_lists: before any change, read the granted folders and the parents the
+# agent passes through. the grant recalculates the mask, which would widen what another account can do
+# where a named entry for that account or a mask already exists, so such a tree is refused. the agent's
+# own entries and the folder owner's own entries (an earlier grant) do not count. read only, linux only,
+# and only on the real root: a fake root has no real folders to read.
+access_control_refuse_existing_lists() {
+  local fragment="$STAGE_DIR/grant-folders.txt" tab kind path status=0 output
+  local arguments=() count=0 index=0
+  [ "$OPERATING_SYSTEM" = linux ] && [ -z "$PREFIX" ] || return 0
+  _access_control_run_compiler "$fragment" folders --level "$LEVEL_FILE"
+  tab="$(printf '\t')"
+  while IFS="$tab" read -r kind path; do
+    arguments[count]="--$kind=$path"
+    count=$((count + 1))
+  done < "$fragment"
+  set -- check "$SERVICE_USER"
+  while [ "$index" -lt "$count" ]; do
+    set -- "$@" "${arguments[index]}"
+    index=$((index + 1))
+  done
+  output="$(python3 -I "$ROOT_DIR/lib/access_control_snapshot.py" "$@" 2>&1)" || status=$?
+  case "$status" in
+    0) return 0 ;;
+    3)
+      DIE_STATUS=2 die "refusing this grant: these paths already have access lists for other accounts, or a mask.
+granting would recalculate the mask and widen what those accounts can do.
+$output
+to go on, remove those lists first (look with: getfacl -R -p FOLDER; remove with: setfacl -R -b FOLDER, only when nobody relies on them), or grant another folder.
+nothing was changed."
+      ;;
+    *)
+      if [ "$DRY_RUN" = yes ] && [ "$(id -u)" != 0 ]; then
+        plan_note "the access lists on the granted folders could not all be read as $(id -un), so the check that refuses lists a grant would widen was not complete. a real run, as root, checks every path."
+        return 0
+      fi
+      DIE_STATUS=2 die "the access lists on the granted folders could not be checked, so the grant is refused.
+$output
+nothing was changed."
+      ;;
+  esac
 }
 
 # removal steps for the kill switch. uses --path when given, otherwise the grant record.

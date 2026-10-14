@@ -63,11 +63,11 @@ access to paths, level builder
    17. record the grant for agent (already done)
        # write <prefix>/etc/sirven/grants/agent.json (mode 0644): level builder on the paths below, no expiry, cannot grant further
    18. record the access control lists of /home before the grant (already done)
-       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh record <prefix>/var/lib/sirven/access-lists/2cc974af6afc822c.txt <prefix>/home no
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh record <prefix>/var/lib/sirven/access-lists/2cc974af6afc822c.txt <prefix>/home no agent
    19. record the access control lists of /home/example before the grant (already done)
-       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh record <prefix>/var/lib/sirven/access-lists/67a166d2c72af6bb.txt <prefix>/home/example no
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh record <prefix>/var/lib/sirven/access-lists/67a166d2c72af6bb.txt <prefix>/home/example no agent
    20. record the access control lists of /home/example/project before the grant (already done)
-       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh record <prefix>/var/lib/sirven/access-lists/867467bcb77869b9.txt <prefix>/home/example/project yes
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh record <prefix>/var/lib/sirven/access-lists/867467bcb77869b9.txt <prefix>/home/example/project yes agent
    21. let agent pass through /home (already done)
        $ setfacl -m u:agent:x <prefix>/home
    22. let agent pass through /home/example (already done)

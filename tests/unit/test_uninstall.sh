@@ -35,7 +35,7 @@ test_dry_run_prints_the_reverse_and_changes_nothing() {
   assert_contains "$CAPTURED_STDOUT" "access_control_snapshot.sh restore $ROOT/var/lib/sirven/access-lists/"
   assert_contains "$CAPTURED_STDOUT" "$ROOT/home/example/project yes agent"
   assert_contains "$CAPTURED_STDOUT" "userdel agent"
-  grant_line="$(printf '%s\n' "$CAPTURED_STDOUT" | grep -n 'restore the access control lists of /home/example/project' | cut -d: -f1)"
+  grant_line="$(printf '%s\n' "$CAPTURED_STDOUT" | grep -n 'put back the access control lists of /home/example/project' | cut -d: -f1)"
   user_line="$(printf '%s\n' "$CAPTURED_STDOUT" | grep -n 'remove the account' | cut -d: -f1)"
   directory_line="$(printf '%s\n' "$CAPTURED_STDOUT" | grep -n 'remove /etc/sirven if' | cut -d: -f1)"
   [ "$grant_line" -lt "$user_line" ] || fail "access is removed before the account"
