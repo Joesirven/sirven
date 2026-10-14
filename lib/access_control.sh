@@ -166,6 +166,20 @@ access_control_report_locked_account() {
     "${PREFIX}${STATE_DIR}" "$SERVICE_USER" "$marker" >&2
 }
 
+# plan_access_control_quiesce / plan_access_control_release: end the agent's processes and lock and expire its
+# account, then give it back, around a removal that runs while the agent may be alive (a rollback). linux only.
+plan_access_control_quiesce() {
+  [ "$OPERATING_SYSTEM" = linux ] || return 0
+  plan_step system "end every process of $SERVICE_USER and lock its account while the access is removed" "false" \
+    "bash $(rooted "$STATE_DIR/package/lib/access_control_snapshot.sh") quiesce $SERVICE_USER $(rooted "$STATE_DIR/agent-quiesce.json")"
+}
+
+plan_access_control_release() {
+  [ "$OPERATING_SYSTEM" = linux ] || return 0
+  plan_step system "give $SERVICE_USER its account back" "false" \
+    "bash $(rooted "$STATE_DIR/package/lib/access_control_snapshot.sh") release $SERVICE_USER $(rooted "$STATE_DIR/agent-quiesce.json")"
+}
+
 # removal steps for the kill switch. uses --path when given, otherwise the grant record.
 plan_access_control_revoke() {
   local record fragment
