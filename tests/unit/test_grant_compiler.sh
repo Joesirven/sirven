@@ -75,16 +75,14 @@ test_revoke_from_record_matches_revoke_from_paths() {
 }
 
 test_with_undo_pairs_every_grant_with_its_removal() {
-  local os with_undo undo_commands revoke_commands
-  for os in macos; do
-    with_undo="$(compiler compile --level "$LEVEL_BUILDER" --os "$os" --with-undo --path /srv/b --path /opt/site/app)"
-    assert_eq "" "$(printf '%s\n' "$with_undo" | grep -v '^#' | awk -F '\t' 'NF != 6')" "six fields on $os"
-    assert_eq "$(compiler compile --level "$LEVEL_BUILDER" --os "$os" --path /srv/b --path /opt/site/app)" \
-      "$(printf '%s\n' "$with_undo" | cut -f1-3)" "the first three fields are the plain compile on $os"
-    undo_commands="$(printf '%s\n' "$with_undo" | grep -v '^#' | cut -f6 | sort)"
-    revoke_commands="$(compiler revoke --level "$LEVEL_BUILDER" --os "$os" --path /srv/b --path /opt/site/app | grep -v '^#' | cut -f3 | sort)"
-    assert_eq "$revoke_commands" "$undo_commands" "undo and revoke agree on $os"
-  done
+  local os=macos with_undo undo_commands revoke_commands
+  with_undo="$(compiler compile --level "$LEVEL_BUILDER" --os "$os" --with-undo --path /srv/b --path /opt/site/app)"
+  assert_eq "" "$(printf '%s\n' "$with_undo" | grep -v '^#' | awk -F '\t' 'NF != 6')" "six fields on $os"
+  assert_eq "$(compiler compile --level "$LEVEL_BUILDER" --os "$os" --path /srv/b --path /opt/site/app)" \
+    "$(printf '%s\n' "$with_undo" | cut -f1-3)" "the first three fields are the plain compile on $os"
+  undo_commands="$(printf '%s\n' "$with_undo" | grep -v '^#' | cut -f6 | sort)"
+  revoke_commands="$(compiler revoke --level "$LEVEL_BUILDER" --os "$os" --path /srv/b --path /opt/site/app | grep -v '^#' | cut -f3 | sort)"
+  assert_eq "$revoke_commands" "$undo_commands" "undo and revoke agree on $os"
 }
 
 test_linux_with_undo_records_a_snapshot_before_any_change() {

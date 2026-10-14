@@ -330,7 +330,7 @@ inspect() {
 # and the pass-through parents, with this package's helper. run it, then the old install's uninstall.sh, then
 # install.sh of this version. with the account already gone it removes what an old undo left instead.
 repair_grant() {
-  local record folders kind path helper status=0 failed=0 flags="" scratch
+  local record kind path helper status=0 failed=0 flags="" scratch
   [ "$OPERATING_SYSTEM" = linux ] || die "repair is for linux access control lists; this machine is $OPERATING_SYSTEM"
   need_python
   record="${PREFIX}$(access_control_record_file)"

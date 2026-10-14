@@ -59,7 +59,6 @@ usage_error() {
 }
 
 parse_arguments() {
-  COMMAND=uninstall
   DRY_RUN=no
   PREFIX=""
   REMOVE_AUDIT_LOG=no

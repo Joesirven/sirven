@@ -20,8 +20,10 @@ seed() {
 snapshot() {
   (cd "$ROOT" && find . | LC_ALL=C sort | while IFS= read -r path; do
     if [ -f "$path" ]; then
+      # shellcheck disable=SC2012 # ls -ld is the portable way to read the mode string on macos and linux, as lib/adopt.sh does
       printf '%s file %s %s\n' "$path" "$(ls -ld "$path" | awk '{print $1}')" "$(cksum < "$path")"
     else
+      # shellcheck disable=SC2012 # same portable mode string as the branch above
       printf '%s %s\n' "$path" "$(ls -ld "$path" | awk '{print $1}')"
     fi
   done)

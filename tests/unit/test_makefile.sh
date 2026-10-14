@@ -11,13 +11,27 @@ test_make_test_runs_the_test_runner() {
   assert_contains "$CAPTURED_STDOUT" "bash tests/run.sh"
 }
 
-test_make_lint_passes_with_or_without_shellcheck() {
+# lint needs shellcheck: without it lint fails, unless SIRVEN_SKIP_SHELLCHECK=1 is set, which
+# passes and says loudly that shellcheck was skipped. the scratch PATH holds only make and bash,
+# so this does not depend on where shellcheck is installed on this machine.
+test_make_lint_needs_shellcheck_unless_it_is_skipped() {
+  local tools="$TEST_TMP/lint-tools"
   have_make || return 0
-  assert_status 0 make -s -C "$REPO_DIR" lint
+  mkdir -p "$tools"
+  ln -s "$(command -v make)" "$tools/make"
+  ln -s "$(command -v bash)" "$tools/bash"
+  assert_status 2 env PATH="$tools" SIRVEN_SKIP_SHELLCHECK= make -s -C "$REPO_DIR" lint
+  assert_contains "$CAPTURED_STDERR" "shellcheck is not installed, so lint cannot pass"
+  assert_status 0 env PATH="$tools" SIRVEN_SKIP_SHELLCHECK=1 make -s -C "$REPO_DIR" lint
   assert_contains "$CAPTURED_STDOUT" "lint: bash -n found no syntax errors"
-  if ! command -v shellcheck >/dev/null 2>&1; then
-    assert_contains "$CAPTURED_STDOUT" "shellcheck not found, so it was skipped"
-  fi
+  assert_contains "$CAPTURED_STDERR" "WARNING: shellcheck is not installed and SIRVEN_SKIP_SHELLCHECK=1 is set"
+}
+
+test_make_lint_runs_the_installed_shellcheck() {
+  have_make || return 0
+  command -v shellcheck >/dev/null 2>&1 || return 0
+  assert_status 0 make -s -C "$REPO_DIR" lint
+  assert_contains "$CAPTURED_STDOUT" "lint: shellcheck passed"
 }
 
 test_make_package_ships_tracked_files_only() {

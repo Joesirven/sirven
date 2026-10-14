@@ -2,7 +2,7 @@
 # make 3.81 that macos ships.
 #
 #   make test       run tests/run.sh
-#   make lint       bash -n on every shell file, then shellcheck when it is installed
+#   make lint       bash -n on every shell file, then shellcheck (required; SIRVEN_SKIP_SHELLCHECK=1 skips it)
 #   make package    a tarball of the files git tracks, in dist/ (or DIST=path)
 #   make runtime    macos only: build the runtime's fetch helper, dist/runtime/sirven-fetch, for
 #                   Apple Silicon and Intel. needs the Xcode command line tools
@@ -22,7 +22,7 @@ SHELL_FILES := install.sh uninstall.sh bin/sirven bootstrap/sirven-bootstrap.sh 
 
 help:
 	@echo "make test      run every test: tests/run.sh"
-	@echo "make lint      bash -n on every shell file, then shellcheck if it is installed"
+	@echo "make lint      bash -n on every shell file, then shellcheck (required; SIRVEN_SKIP_SHELLCHECK=1 skips it)"
 	@echo "make package   $(DIST)/$(PACKAGE)-$(VERSION).tar.gz from the files git tracks"
 	@echo "make runtime   macos: build dist/runtime/sirven-fetch, the runtime's fetch helper"
 	@echo "make keep-awake        build the keep-awake program behind sirven awake (macos)"
@@ -43,13 +43,19 @@ app:
 app-test:
 	swift test --package-path app/macos
 
+# shellcheck is required, so lint fails when it is missing. SIRVEN_SKIP_SHELLCHECK=1 is the one
+# opt-out, for a machine that cannot install it: lint then says loudly that only bash -n ran.
+# the variable is read only when shellcheck is missing, so an installed shellcheck always runs.
 lint:
 	@for file in $(SHELL_FILES); do bash -n "$$file" || exit 1; done
 	@echo "lint: bash -n found no syntax errors in $(words $(SHELL_FILES)) files"
 	@if command -v shellcheck >/dev/null 2>&1; then \
 	  shellcheck -x $(SHELL_FILES) && echo "lint: shellcheck passed"; \
+	elif [ "$(SIRVEN_SKIP_SHELLCHECK)" = 1 ]; then \
+	  echo "lint: WARNING: shellcheck is not installed and SIRVEN_SKIP_SHELLCHECK=1 is set, so shellcheck was SKIPPED. only bash -n ran; shellcheck findings were not checked." >&2; \
 	else \
-	  echo "lint: shellcheck not found, so it was skipped. install it to run it: brew install shellcheck, or apt install shellcheck"; \
+	  echo "lint: shellcheck is not installed, so lint cannot pass. install it: brew install shellcheck, or apt install shellcheck. on a machine that cannot install it, run: make lint SIRVEN_SKIP_SHELLCHECK=1" >&2; \
+	  exit 1; \
 	fi
 
 # only files git tracks go in, so nothing ignored (video/node_modules, .env files, local
