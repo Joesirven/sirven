@@ -20,9 +20,11 @@ standard library python, started by lib/access_control_snapshot.sh. linux only.
 
 what undo changes, and nothing else: the named entries of the agent (and of the folder owner, where
 the agent's entry is there too), and on folders the default list when it carries the agent's entry.
-it never changes an owner, a group, or any mode bit, special bits included. when no named entry is
-left on a path, the list collapses to a plain mode: the group bits become the group entry AND the
-mask, which is what the group could really do, so an owner's later chmod 600 stays 600.
+it never changes an owner or a group, and never touches the owner bits, the other bits or the special
+bits. when no named entry is left on a path, the list collapses to a plain mode: the group bits
+become the group entry AND the mask, which is what the group could really do, so an owner's later
+chmod 600 stays 600. the one deliberate exception: a chmod that widens the group bits while a mask
+exists changes the mask only, so it does not outlast the grant (644 to 664 ends 644).
 
 nothing is done by path. every folder and file is opened one step at a time with O_NOFOLLOW, from
 the file descriptor of the folder above it, and the attribute is read and written on the open

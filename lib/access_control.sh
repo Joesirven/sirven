@@ -98,7 +98,7 @@ plan_access_control() {
 
   access_control_refuse_existing_lists
   if [ "$OPERATING_SYSTEM" = linux ]; then
-    plan_note "undo removes only what this grant adds: the entries for $SERVICE_USER and the folder owner, and the default list on folders. it never changes an owner, a group, or a mode, so a chmod or chown made while the grant is in force stays. it never follows a link."
+    plan_note "undo removes only what this grant adds: the entries for $SERVICE_USER and the folder owner, and the default list on folders. it never changes an owner or a group, never touches the owner and other bits or special bits, and never follows a link, so a chown, a chmod 600 or a setuid made while the grant is in force stays. the group bits end as what the group could really do, so a chmod that widens the group bits during the grant does not outlast it."
   fi
 
   grant_record="$STAGE_DIR/grant-record.json"

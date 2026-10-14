@@ -13,6 +13,7 @@ mkdir -p /srv/work/sub /srv/work/dir2
 chown -R owner:owner /srv/work
 chmod 755 /srv/work /srv/work/sub /srv/work/dir2
 echo doc > /srv/work/doc.txt && echo keep > /srv/work/sub/keep && echo run > /srv/work/suid.txt
+echo wide > /srv/work/wide.txt && chown owner:owner /srv/work/wide.txt && chmod 644 /srv/work/wide.txt
 echo moved > /srv/work/handed.txt && chown owner:owner /srv/work/doc.txt /srv/work/sub/keep /srv/work/suid.txt /srv/work/handed.txt
 chmod 644 /srv/work/doc.txt /srv/work/sub/keep /srv/work/suid.txt /srv/work/handed.txt
 # a pipe and a socket get the grant's entries too (setfacl -R reaches them), so undo must reach them without opening them
@@ -25,6 +26,7 @@ check_exit "install builder on /srv/work applies" 0 bash install.sh --yes --leve
 runuser -u owner -- chmod 600 /srv/work/doc.txt
 runuser -u owner -- chmod g+s,+t /srv/work/dir2
 runuser -u owner -- chmod u+s /srv/work/suid.txt
+runuser -u owner -- chmod 664 /srv/work/wide.txt
 chown neighbor:neighbor /srv/work/handed.txt && chmod 600 /srv/work/handed.txt && chmod u+x /srv/work/handed.txt
 chmod 700 /srv
 check "during the grant the owner's private file is private to another account" bash -c '! runuser -u neighbor -- cat /srv/work/doc.txt 2>/dev/null'
@@ -36,6 +38,10 @@ check "the owner's chmod 600 stayed" bash -c '[ "$(stat -c "%a %U:%G" /srv/work/
 check "another account still cannot read the owner's private file" bash -c '! runuser -u neighbor -- cat /srv/work/doc.txt 2>/dev/null'
 check "setgid and sticky on a folder stayed (3755)" bash -c '[ "$(stat -c "%a %U:%G" /srv/work/dir2)" = "3755 owner:owner" ]'
 check "setuid on a file stayed (4644)" bash -c '[ "$(stat -c "%a %U:%G" /srv/work/suid.txt)" = "4644 owner:owner" ]'
+# the one deliberate exception: with a mask, chmod 664 changes the mask only, so the group never had write. undo
+# ends at 644 (the access the group really had); putting the mask in the group bits would widen a file to 664.
+check "a chmod that widens the group bits during the grant does not outlast it (644)" \
+  bash -c '[ "$(stat -c "%a" /srv/work/wide.txt)" = 644 ]'
 check "root's chown and chmod stayed (700 neighbor)" bash -c '[ "$(stat -c "%a %U:%G" /srv/work/handed.txt)" = "700 neighbor:neighbor" ]'
 check "root's chmod 700 on the pass-through parent stayed" bash -c '[ "$(stat -c "%a %U:%G" /srv)" = "700 root:root" ]'
 check "paths the owner did not touch are as they were (644 and 755)" \

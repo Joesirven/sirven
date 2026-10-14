@@ -9,7 +9,7 @@ evidence that each new harness assertion fails at 66e31fe.
 
 | Must fix | Change |
 | --- | --- |
-| 1 undo changed owner, mode, special bits | `lib/access_control_snapshot.py` removes only the agent's and the folder owner's named entries and the default list that carries the agent's entry. It never calls chown or chmod, and with no named entry left it collapses the list to a plain mode (group bits = group entry AND mask), so an owner's later `chmod 600` stays. |
+| 1 undo changed owner, mode, special bits | `lib/access_control_snapshot.py` removes only the agent's and the folder owner's named entries and the default list that carries the agent's entry. It never calls chown or chmod, and with no named entry left it collapses the list to a plain mode (group bits = group entry AND mask), so an owner's later `chmod 600` stays. The reviewer's text-restore fixes (a line-anchored test, stripping the owner, group and flags comment lines) are superseded: there is no text restore at all. One deliberate exception to "never change a mode": a chmod that widens the group bits during the grant (644 to 664) changes only the mask, and undo ends at 644, the access the group really had; using the mask as the group bits would widen a file nobody granted. Scenario 06 asserts it. |
 | 2 link attack | Nothing is done by path. The start folder is opened one component at a time with `O_NOFOLLOW`, must be the recorded device and inode, and the walk uses descriptors. A folder replaced by a link is skipped with a `warning` event in the audit log. Undo ends the agent's processes and expires its account before the first list is put back. |
 | 3 pre-existing named entries | Refused before any change (`check`), access and default lists, granted paths and pass-through parents, up to ten paths listed. The agent's and the folder owner's own entries (an earlier grant) do not count. |
 | 4 newline and backslash names | Names are handled as bytes end to end, no text round trip. |
@@ -24,7 +24,7 @@ and then against this branch. Container: Docker on the Mac, no network.
 
 | Scenario | Fails at 66e31fe | Also passes at 66e31fe (precondition or guard) |
 | --- | --- | --- |
-| 06 owner changes survive undo | chmod 600 stayed; another account cannot read it; setgid and sticky stayed; setuid stayed; root's chown and chmod stayed; root's chmod 700 on the parent stayed | install and uninstall exit 0; untouched paths unchanged; pipe and socket guard; no list left |
+| 06 owner changes survive undo | chmod 600 stayed; another account cannot read it; setgid and sticky stayed; setuid stayed; root's chown and chmod stayed; root's chmod 700 on the parent stayed | install and uninstall exit 0; untouched paths unchanged; pipe and socket guard; the chmod 664 exception ends 644; no list left |
 | 07 link swap | link target unchanged (owner, mode, lists); still root 700; audit warning; agent ended before the first list is put back | install, the swap, uninstall exit 0; moved folder cleaned; no agent process left |
 | 08 existing lists refused | refusal exit 2 (three cases); messages name the path and why; nothing changed; no account created; bob unchanged; ten listed and the rest counted | preconditions; install applies after the lists are removed |
 | 09 odd names | lists, owners and modes back exactly; oddly named folders kept their default lists | install, agent access and uninstall exit 0 |
@@ -41,5 +41,9 @@ switch, unchanged).
 
 - Anything on macOS: the `-h` change, `find -P`, and the manual check in `docs/PERMISSIONS.md`.
 - A filesystem without access list support, and Linux filesystems other than the container's overlay.
-- Rollback with the agent's account running is protected by the descriptor method alone (a probe with the agent swapping a
-  folder in a loop during rollback and during uninstall left the target untouched), not by ending the agent.
+- Rollback's removal half is protected by the descriptor method alone, with the agent's account running (one probe with the agent
+  swapping a folder in a loop during rollback and during uninstall left the target untouched; a single probe is not proof). Its
+  re-grant half, and a level-change re-install, still run `setfacl -R -P` by path: whether that walk is descriptor based on Debian 12
+  is not established, and an agent running at that moment could race a link swap in the grant direction. Outside this brief; the
+  parent was told.
+- That `usermod --expiredate 1 --lock` stops SSH key logins: the harness runs no SSH server.

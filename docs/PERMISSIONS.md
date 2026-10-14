@@ -246,9 +246,13 @@ the kill switch reads it to know what to remove.
   agent (and for the folder owner, where the agent's entry is also there); on folders, the default list
   when it carries the agent's entry, replaced by the one recorded before the grant (if there was one).
   when no named entry is left on a path, its list collapses to a plain mode: the group bits become the
-  group entry AND the mask, which is what the group could really do. it **never changes an owner, a
-  group, or any mode bit**, special bits included. so a `chmod 600` the owner made during the grant,
-  a `chown` or `chmod` by root, and a `chmod 700` on a pass-through parent all stay.
+  group entry AND the mask, which is what the group could really do. it **never changes an owner or a
+  group, and never touches the owner bits, the other bits or the special bits** (setuid, setgid, sticky).
+  so a `chmod 600` the owner made during the grant, a `chown` or `chmod` by root, a setuid bit, and a
+  `chmod 700` on a pass-through parent all stay. one deliberate exception: while a list has a mask,
+  `chmod` changes the mask, not the group entry, so a chmod that **widens** the group bits during the grant
+  (644 to 664) does not survive undo (the file ends 644, which is what the group could do all along).
+  using the mask as the group bits would have widened access nobody granted.
   this holds for uninstall, rollback and the kill switch alike.
 
   **links.** undo never follows a link. it opens the granted folder one component at a time without
@@ -257,7 +261,8 @@ the kill switch reads it to know what to remove.
   no path to swap under it. a folder the agent replaced with a link is skipped, and a warning
   event goes to the audit log. before the first list is put back, undo expires the agent's account and
   ends its processes, so nothing the agent runs can change the folders meanwhile (rollback keeps the
-  account running, and relies on the descriptor method alone).
+  account running, and relies on the descriptor method alone, for the removal half only: the grant it
+  applies again afterwards still runs `setfacl` by path, see known limits).
 
   **a missing or unusable snapshot.** undo does not treat that as done. the step's check is the state
   of the folder (an entry of the agent left, or the snapshot still there), not whether the snapshot
@@ -318,6 +323,11 @@ revoke <invite>
   still 600 and `ls -le` of every path matches the listing from step 1. (5) make a link inside the
   granted folder that points at a folder outside it (`ln -s ~/.ssh /granted/link`) before apply, and
   confirm `ls -le ~/.ssh` is the same after apply and after revoke.
+- the grant itself (the first install, and the re-grant half of a rollback or a level change) runs
+  `setfacl` by path. undo is descriptor based, the grant is not: an agent that is running while a
+  rollback re-grants can race a link swap against `setfacl -R -P`. whether the `setfacl` walk is
+  descriptor based on the supported systems is not established. first installs have no agent process
+  yet; closing the rollback case means a descriptor based grant in the helper (not built).
 - a grant over a tree that already has named entries for other accounts, or a mask, is refused, not
   merged. nested grants by two different folder owners are refused for the same reason (the second
   owner's entries look like foreign lists).

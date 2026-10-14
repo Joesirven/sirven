@@ -60,7 +60,7 @@ access to paths, level builder
      note: builder: reads and writes inside granted paths. builds and tests there, nothing else.
    16. install the builder level as policy (already done)
        $ cp levels/builder.json <prefix>/etc/sirven/levels/builder.json && chmod 0644 <prefix>/etc/sirven/levels/builder.json
-     note: undo removes only what this grant adds: the entries for agent and the folder owner, and the default list on folders. it never changes an owner, a group, or a mode, so a chmod or chown made while the grant is in force stays. it never follows a link.
+     note: undo removes only what this grant adds: the entries for agent and the folder owner, and the default list on folders. it never changes an owner or a group, never touches the owner and other bits or special bits, and never follows a link, so a chown, a chmod 600 or a setuid made while the grant is in force stays. the group bits end as what the group could really do, so a chmod that widens the group bits during the grant does not outlast it.
    17. record the grant for agent (already done)
        # write <prefix>/etc/sirven/grants/agent.json (mode 0644): level builder on the paths below, no expiry, cannot grant further
    18. record the access control lists of /home before the grant (already done)
