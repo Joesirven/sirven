@@ -55,6 +55,12 @@ check "rollback says to run again with --yes" grep -q 'with --yes' <<< "$LAST_OU
 check "the grant record is unchanged" cmp /tmp/grant.installed /etc/sirven/grants/agent.json
 check "the install record is unchanged" cmp /tmp/record.installed /var/lib/sirven/install-record.tsv
 
+check_exit "grant repair with no terminal and no --yes is refused" 3 bash -c "printf '' | setsid -w bash bin/sirven grant repair"
+check "repair says to run again with --yes" grep -q 'with --yes' <<< "$LAST_OUTPUT"
+check "the grant record is unchanged by the refused repair" cmp /tmp/grant.installed /etc/sirven/grants/agent.json
+check_exit "typing no to grant repair refuses" 3 ON_TERMINAL "type yes" no bash -c "printf '' | bash bin/sirven grant repair"
+check_exit "grant repair with --yes applies" 0 bash bin/sirven grant repair --yes
+
 check_exit "typing yes to uninstall removes everything" 0 ON_TERMINAL "type yes" yes bash -c "printf '' | bash /var/lib/sirven/package/uninstall.sh"
 check "the agent account is gone" bash -c '! getent passwd agent'
 world_unchanged "the content of /etc matches the machine before the install" etc_content /tmp/before.etc
