@@ -41,6 +41,7 @@ command that exits 0 when the step is already done. the command applies the step
 """
 
 import argparse
+import hashlib
 import json
 import posixpath
 import re
@@ -250,22 +251,32 @@ def fragment_line(title, check, command, undo=None):
 # each removal returns (title, check, command). revoke prints them as steps, and compile
 # attaches them as the undo of the line they reverse, so both always agree.
 
-def linux_traverse_removal(user, target, parent):
-    return ("stop %s passing through %s" % (user, parent),
-            "! getfacl --absolute-names --omit-header %s 2>/dev/null | grep -q '^user:%s:'" % (target, user),
-            "setfacl -x u:%s %s" % (user, target))
+def linux_snapshot(state_dir, path):
+    """where the access control lists of one path are recorded before a grant (root only)."""
+    digest = hashlib.sha256(path.encode("utf-8")).hexdigest()[:16]
+    return "%s/access-lists/%s.txt" % (state_dir, digest)
 
 
-def linux_grant_removal(user, target, path):
-    return ("remove %s from %s and everything inside" % (user, path),
-            "! getfacl --absolute-names --omit-header %s 2>/dev/null | grep -q '^user:%s:'" % (target, user),
-            "setfacl -R -P -x u:%s %s" % (user, target))
+def linux_helper(package):
+    """the helper that records and restores the lists, in the pinned copy the install keeps."""
+    return "/var/lib/%s/package/lib/access_control_snapshot.sh" % package
 
 
-def linux_default_removal(user, target, path):
-    return ("stop new files in %s inheriting %s" % (path, user),
-            "! getfacl --absolute-names --omit-header %s 2>/dev/null | grep -q '^default:user:%s:'" % (target, user),
-            "setfacl -R -P -d -x u:%s %s" % (user, target))
+def linux_recursive_word(recursive):
+    return "yes" if recursive else "no"
+
+
+def linux_restore_removal(user, target, snapshot, helper, recursive, title):
+    """restore the lists recorded before the grant, or remove the named entries when none was recorded."""
+    flag = " -R" if recursive else ""
+    fallback = "setfacl%s -P -x u:%s %s" % (flag, user, target)
+    if recursive:
+        fallback += " && setfacl -R -P -d -x u:%s %s" % (user, target)
+    return (title,
+            "[ ! -e %s ] && ! getfacl --absolute-names --omit-header %s 2>/dev/null | grep -q '^user:%s:'"
+            % (snapshot, target, user),
+            "if [ -s %s ]; then bash %s restore %s %s %s %s; else %s; fi"
+            % (snapshot, helper, snapshot, target, linux_recursive_word(recursive), user, fallback))
 
 
 def macos_traverse_removal(rights, user, target, parent):
@@ -288,34 +299,56 @@ def macos_folders_removal(rights, user, target, path):
             % (target, shlex.quote("%s allow %s" % (user, rights["directories"]))))
 
 
-def compile_linux(level, user, prefix, paths, with_undo=False):
+def compile_linux(level, user, prefix, paths, with_undo=False, package="sirven"):
     grant = level["access_control"]["linux"]["grant"]
     traverse = level["access_control"]["linux"]["traverse"]
     entry = linux_entry(grant)
+    state_dir = "/var/lib/%s" % package
+    helper = linux_helper(package)
+    parents = traverse_parents(paths)
+    # every snapshot comes before the first change, so a path nested in a granted path is recorded
+    # before its parent's grant reaches it. a traverse folder is recorded without its contents.
+    targets = [(parent, False) for parent in parents] + [(path, True) for path in paths]
     lines = []
-    for parent in traverse_parents(paths):
+    if with_undo:
+        for path, recursive in targets:
+            target = shlex.quote(prefix + path)
+            snapshot = shlex.quote(prefix + linux_snapshot(state_dir, path))
+            lines.append(fragment_line(
+                "record the access control lists of %s before the grant" % path,
+                "[ -s %s ]" % snapshot,
+                "bash %s record %s %s %s" % (shlex.quote(prefix + helper), snapshot, target, linux_recursive_word(recursive)),
+                ("restore the access control lists of %s as they were before the grant" % path,
+                 "[ ! -e %s ]" % snapshot,
+                 "bash %s restore %s %s %s %s" % (shlex.quote(prefix + helper), snapshot, target,
+                                                 linux_recursive_word(recursive), user))))
+    for parent in parents:
         target = shlex.quote(prefix + parent)
         lines.append(fragment_line(
             "let %s pass through %s" % (user, parent),
             "getfacl --absolute-names --omit-header %s 2>/dev/null | grep -q '^user:%s:..x$'" % (target, user),
-            "setfacl -m u:%s:%s %s" % (user, traverse, target),
-            with_undo and linux_traverse_removal(user, target, parent)))
+            "setfacl -m u:%s:%s %s" % (user, traverse, target)))
     for path in paths:
         target = shlex.quote(prefix + path)
         lines.append(fragment_line(
             "grant %s %s on %s and everything inside" % (user, grant, path),
             "getfacl --absolute-names --omit-header %s 2>/dev/null | grep -qx 'user:%s:%s'" % (target, user, entry),
-            "setfacl -R -P -m u:%s:%s %s" % (user, grant, target),
-            with_undo and linux_grant_removal(user, target, path)))
+            "setfacl -R -P -m u:%s:%s %s" % (user, grant, target)))
+        # the default list gives group and other nothing, whatever the owner's umask. the agent and
+        # the folder owner get the grant on new files; the owner's name is looked up when the step runs.
+        owner_name = "$(stat -c %%U %s)" % target
         lines.append(fragment_line(
-            "make new files in %s inherit the grant" % path,
-            "getfacl --absolute-names --omit-header %s 2>/dev/null | grep -qx 'default:user:%s:%s'" % (target, user, entry),
-            "setfacl -R -P -d -m u:%s:%s %s" % (user, grant, target),
-            with_undo and linux_default_removal(user, target, path)))
+            "make new files in %s inherit the grant, with group and other kept out" % path,
+            "getfacl --absolute-names --omit-header %s 2>/dev/null | grep -qx 'default:user:%s:%s' && "
+            "getfacl --absolute-names --omit-header %s 2>/dev/null | grep -qx \"default:user:%s:%s\" && "
+            "getfacl --absolute-names --omit-header %s 2>/dev/null | grep -qx 'default:other::---' && "
+            "getfacl --absolute-names --omit-header %s 2>/dev/null | grep -qx 'default:group::---'"
+            % (target, user, entry, target, owner_name, entry, target, target),
+            "setfacl -R -P -d -m g::---,o::---,u:%s:%s,u:%s:%s %s" % (user, grant, owner_name, grant, target)))
     return lines
 
 
-def compile_macos(level, user, prefix, paths, with_undo=False):
+def compile_macos(level, user, prefix, paths, with_undo=False, package=None):
     rights = level["access_control"]["macos"]
     lines = []
     for parent in traverse_parents(paths):
@@ -343,18 +376,26 @@ def compile_macos(level, user, prefix, paths, with_undo=False):
     return lines
 
 
-def revoke_linux(level, user, prefix, paths, with_undo=False):
+def revoke_linux(level, user, prefix, paths, with_undo=False, package="sirven"):
+    state_dir = "/var/lib/%s" % package
+    helper = shlex.quote(prefix + linux_helper(package))
     lines = []
     for path in paths:
         target = shlex.quote(prefix + path)
-        lines.append(fragment_line(*linux_grant_removal(user, target, path)))
-        lines.append(fragment_line(*linux_default_removal(user, target, path)))
+        snapshot = shlex.quote(prefix + linux_snapshot(state_dir, path))
+        lines.append(fragment_line(*linux_restore_removal(
+            user, target, snapshot, helper, True,
+            "remove %s from %s and put back the access control lists it had" % (user, path))))
     for parent in traverse_parents(paths):
-        lines.append(fragment_line(*linux_traverse_removal(user, shlex.quote(prefix + parent), parent)))
+        target = shlex.quote(prefix + parent)
+        snapshot = shlex.quote(prefix + linux_snapshot(state_dir, parent))
+        lines.append(fragment_line(*linux_restore_removal(
+            user, target, snapshot, helper, False,
+            "stop %s passing through %s and put back its access control list" % (user, parent))))
     return lines
 
 
-def revoke_macos(level, user, prefix, paths, with_undo=False):
+def revoke_macos(level, user, prefix, paths, with_undo=False, package=None):
     rights = level["access_control"]["macos"]
     lines = []
     for path in paths:
@@ -395,7 +436,7 @@ def fragment(kind, arguments):
         ("revoke", "macos"): revoke_macos,
     }
     with_undo = getattr(arguments, "with_undo", False)
-    lines = builders[(kind, arguments.os)](level, arguments.user, prefix, paths, with_undo)
+    lines = builders[(kind, arguments.os)](level, arguments.user, prefix, paths, with_undo, arguments.package)
     header = [
         "# %s %s for %s on %s" % (kind, level["level"], arguments.user, arguments.os),
         "# paths: %s" % " ".join(paths),

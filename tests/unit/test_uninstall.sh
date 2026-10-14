@@ -32,9 +32,10 @@ test_dry_run_prints_the_reverse_and_changes_nothing() {
   install_on_fake_root
   assert_status 0 uninstall_sh --dry-run --prefix "$ROOT"
   assert_contains "$CAPTURED_STDOUT" "dry run: nothing was changed."
-  assert_contains "$CAPTURED_STDOUT" "setfacl -R -P -x u:agent $ROOT/home/example/project"
+  assert_contains "$CAPTURED_STDOUT" "access_control_snapshot.sh restore $ROOT/var/lib/sirven/access-lists/"
+  assert_contains "$CAPTURED_STDOUT" "$ROOT/home/example/project yes agent"
   assert_contains "$CAPTURED_STDOUT" "userdel agent"
-  grant_line="$(printf '%s\n' "$CAPTURED_STDOUT" | grep -n 'remove agent from /home/example/project' | cut -d: -f1)"
+  grant_line="$(printf '%s\n' "$CAPTURED_STDOUT" | grep -n 'restore the access control lists of /home/example/project' | cut -d: -f1)"
   user_line="$(printf '%s\n' "$CAPTURED_STDOUT" | grep -n 'remove the account' | cut -d: -f1)"
   directory_line="$(printf '%s\n' "$CAPTURED_STDOUT" | grep -n 'remove /etc/sirven if' | cut -d: -f1)"
   [ "$grant_line" -lt "$user_line" ] || fail "access is removed before the account"
@@ -118,7 +119,7 @@ test_install_after_uninstall_records_again() {
   assert_status 0 uninstall_sh --prefix "$ROOT"
   install_on_fake_root
   # the kept audit log was already there, so this install did not create it and does not record it
-  assert_contains "$CAPTURED_STDOUT" "applied 18 steps, skipped 2 already done."
+  assert_contains "$CAPTURED_STDOUT" "applied 21 steps, skipped 2 already done."
   assert_contains "$(cat "$ROOT/var/lib/sirven/install-record.tsv")" "remove /etc/sirven if"
   assert_not_contains "$(cat "$ROOT/var/lib/sirven/install-record.tsv")" "remove the audit log"
 }

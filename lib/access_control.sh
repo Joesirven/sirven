@@ -3,6 +3,9 @@
 #
 # the commands come from lib/grant_compiler.py, which reads the level file and refuses paths
 # the level's policy never grants. this module only turns its plan fragment into steps.
+# on linux, each folder the grant changes gets a snapshot step first. lib/access_control_snapshot.sh
+# records the folder's access control lists, and that step's undo puts them back exactly. uninstall,
+# rollback and the kill switch all restore from the same snapshot.
 # reads: ROOT_DIR, PREFIX, PACKAGE, OPERATING_SYSTEM, SERVICE_USER, LEVEL, LEVEL_FILE, LEVEL_SUMMARY,
 #        CONFIG_DIR, STAGE_DIR, GRANT_PATHS
 

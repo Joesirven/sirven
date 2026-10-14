@@ -34,7 +34,8 @@
   "access_control": {
     "linux": {
       "grant": "rwX",
-      "traverse": "x"
+      "traverse": "x",
+      "note": "new files in a granted folder give group and other no access, whatever the owner's umask. the agent and the folder owner get the grant on new files by name. the grant records the folder's access control lists first, and undo puts them back exactly (lib/access_control_snapshot.sh). see docs/PERMISSIONS.md, how a grant changes, and the linux notes there."
     },
     "macos": {
       "directories": "list,search,add_file,add_subdirectory,delete_child,readattr,writeattr,readextattr,writeextattr,readsecurity,file_inherit,directory_inherit",

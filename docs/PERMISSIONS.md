@@ -131,17 +131,29 @@ for each granted path, every parent folder gets a pass-through entry so the serv
 reach the path without listing anything on the way. a parent that is itself granted is left
 alone, so a pass-through entry never downgrades a grant.
 
-on linux, for builder on `/home/you/project`:
+on linux, for builder on `/home/you/project`, with a snapshot line before each change (see
+"how a grant changes" below for what the snapshot does):
 
 ```
 setfacl -m u:agent:x /home
 setfacl -m u:agent:x /home/you
 setfacl -R -P -m u:agent:rwX /home/you/project
-setfacl -R -P -d -m u:agent:rwX /home/you/project
+setfacl -R -P -d -m g::---,o::---,u:agent:rwX,u:you:rwX /home/you/project
 ```
 
-`-P` keeps the walk from following symbolic links out of the granted folder. the `-d` line makes
-new files inherit the grant. capital `X` gives execute on folders only, not on every file.
+`-P` keeps the walk from following symbolic links out of the granted folder. capital `X` gives
+execute on folders only, not on every file.
+
+the `-d` line makes new files inherit the grant, and it is the one that needs care. a default
+list overrides the umask of whoever creates a file, and its group and other entries come from
+the folder's own mode unless they are written out. so the line writes them out as `---`: a new
+file gets nothing for group and other, whatever the creator's umask. the agent gets the grant
+by name, and so does the folder's owner (looked up when the step runs), because a file the agent
+creates would otherwise be unreadable to the owner. the result is never wider than a umask of
+077 would give. it can be narrower: a creator whose umask is 022 gets a private file here, not
+a group-readable one. `ls -l` and `stat` show the mask in the group position, because the
+mask must admit the named entries. that display is not a grant to the group: `getfacl` shows
+`group::---` and `other::---`, and those are what counts.
 
 on macos, for builder on `/Users/you/code/app`:
 
@@ -158,9 +170,11 @@ does not follow symbolic links.
 
 `revoke` emits the matching removals, the grant first and the pass-through entries last.
 
-`compile --with-undo` adds three more fields to every line: the title, check, and command of
-the removal that reverses it, the same removal `revoke` prints. `install.sh` compiles this way
-so each entry it really applies can go into the install record with its undo.
+`compile --with-undo` adds three more fields to the snapshot line of each folder, the title, check,
+and command that put its access control lists back. `install.sh` compiles this way, so each
+snapshot it really applies goes into the install record with its undo. every snapshot comes
+before the first change, so a path nested inside another granted path is recorded before the
+outer grant reaches it.
 
 ## grant record
 
@@ -209,15 +223,32 @@ the kill switch reads it to know what to remove.
   recorded: the package did not create them.
 - **inspect.** `bin/sirven grant inspect` reads the grant records, says whether the installed
   policy copy still matches `levels/`, and shows the last grant entry from the audit log.
+- **snapshot and restore (linux).** before a grant changes a folder, install records what getfacl
+  shows for it: for a granted folder, the folder and everything inside it; for a parent the agent
+  only passes through, the folder alone. the record is a root-only file in
+  `/var/lib/<package>/access-lists/`, named after a hash of the path. undo runs
+  `lib/access_control_snapshot.sh restore` from the pinned copy: it removes every extended entry
+  under the folder with `setfacl -b`, then puts back the recorded entries of the folders and files
+  that had extended entries before the grant and still exist, and deletes the snapshot. a folder
+  with no list before the grant has none after. a file deleted while the grant was in force is
+  skipped, not an error. files the owner or agent created under the grant keep their contents and
+  lose the grant's entries. their group and other bits go with the entries: `setfacl -b` takes the
+  group bits from the stored group entry, which the default list set to `---`.
+  the snapshot restores modes and extended entries exactly for the paths it recorded, so a chmod
+  the owner made to one of those files during the grant is put back too. a restore with no
+  snapshot only removes the named entry for the agent, which is what grants made before snapshots
+  existed get.
 - **rollback.** `bin/sirven grant rollback` takes the newest `grant` entry, refuses if the grant
   record no longer matches it, removes every current entry, and grants the earlier level and
   paths again. it writes its own `grant` entry with the reason `rollback`, so a second rollback
-  undoes the first. what it grants goes into the install record too.
-- **kill switch.** `install.sh revoke --all` removes the entries and renames the grant record to
-  `<user>.json.revoked`. plan output in the alpha cut.
-- **uninstall.** `uninstall.sh` reverses the install record in reverse order: entries first,
-  then the service user, then files and folders, which are removed only when empty. the audit
-  log stays unless `--remove-audit-log` is given.
+  undoes the first. the removal restores each folder from its snapshot, the same way uninstall
+  does, and the earlier grant takes a new snapshot. what it grants goes into the install record too.
+- **kill switch.** `install.sh revoke --all` restores each folder from its snapshot, or removes the
+  named entry when there is none, and renames the grant record to `<user>.json.revoked`. plan output
+  in the alpha cut.
+- **uninstall.** `uninstall.sh` reverses the install record in reverse order: the snapshots restore
+  each folder first, then the service user, then files and folders, which are removed only when
+  empty. the audit log stays unless `--remove-audit-log` is given.
 
 no step in any of these widens a grant beyond what a level file allows: rollback and uninstall
 only ever apply grants the compiler produced from a level, or remove entries.
@@ -240,7 +271,14 @@ revoke <invite>
 ## known limits in the alpha cut
 
 - macos entries are plan output only. they need a run in a macos virtual machine before apply
-  is turned on.
+  is turned on. the macos entries name the agent only, so no group or other entry is copied and
+  the linux default-list problem has no macos form, as far as the entries show. macos undo is
+  unchanged: it removes the entries it added by their exact text. not run on a Mac. the manual
+  check: on a test Mac, `ls -le` the granted folder before and after apply; `umask 077` then
+  create a file and `ls -le` it, and confirm the agent's inherited entry is the only one for it;
+  then revoke and confirm `ls -le` matches the before listing.
+- the default list makes group and other bits show the mask. no grant with a named entry can show
+  `600` for a new file; the effective access is what to check.
 - on macos, `file_inherit` copies the folder entry onto new files, and folder `list` and
   `search` are the same bits as file `read` and `execute`. new files in an observer grant can
   therefore pick up execute for the agent. it cannot write them.

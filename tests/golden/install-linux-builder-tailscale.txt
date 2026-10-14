@@ -54,32 +54,38 @@ access to paths, level builder
        $ cp levels/builder.json <prefix>/etc/sirven/levels/builder.json && chmod 0644 <prefix>/etc/sirven/levels/builder.json
    17. record the grant for agent (to do)
        # write <prefix>/etc/sirven/grants/agent.json (mode 0644): level builder on the paths below, no expiry, cannot grant further
-   18. let agent pass through /home (to do, recorded not run under --prefix)
+   18. record the access control lists of /home before the grant (to do, recorded not run under --prefix)
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh record <prefix>/var/lib/sirven/access-lists/2cc974af6afc822c.txt <prefix>/home no
+   19. record the access control lists of /home/example before the grant (to do, recorded not run under --prefix)
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh record <prefix>/var/lib/sirven/access-lists/67a166d2c72af6bb.txt <prefix>/home/example no
+   20. record the access control lists of /home/example/project before the grant (to do, recorded not run under --prefix)
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh record <prefix>/var/lib/sirven/access-lists/867467bcb77869b9.txt <prefix>/home/example/project yes
+   21. let agent pass through /home (to do, recorded not run under --prefix)
        $ setfacl -m u:agent:x <prefix>/home
-   19. let agent pass through /home/example (to do, recorded not run under --prefix)
+   22. let agent pass through /home/example (to do, recorded not run under --prefix)
        $ setfacl -m u:agent:x <prefix>/home/example
-   20. grant agent rwX on /home/example/project and everything inside (to do, recorded not run under --prefix)
+   23. grant agent rwX on /home/example/project and everything inside (to do, recorded not run under --prefix)
        $ setfacl -R -P -m u:agent:rwX <prefix>/home/example/project
-   21. make new files in /home/example/project inherit the grant (to do, recorded not run under --prefix)
-       $ setfacl -R -P -d -m u:agent:rwX <prefix>/home/example/project
+   24. make new files in /home/example/project inherit the grant, with group and other kept out (to do, recorded not run under --prefix)
+       $ setfacl -R -P -d -m g::---,o::---,u:agent:rwX,u:$(stat -c %U <prefix>/home/example/project):rwX <prefix>/home/example/project
 
 transport: tailscale
-   22. write the tailnet policy snippet (to do)
+   25. write the tailnet policy snippet (to do)
        # write <prefix>/etc/sirven/tailscale-policy-snippet.hujson (mode 0644): tag:agent, reachable only from your login, only on port 22
-   23. paste the policy snippet into your tailnet policy (owner, by hand)
+   26. paste the policy snippet into your tailnet policy (owner, by hand)
        tailscale admin console, access controls: merge /etc/sirven/tailscale-policy-snippet.hujson and put your login in place of you@example.com.
-   24. make one tagged auth key, once, in the browser (owner, by hand)
+   27. make one tagged auth key, once, in the browser (owner, by hand)
        tailscale admin console, settings, keys: generate an auth key with tag:agent, pre-approved, not reusable.
        save it as /etc/sirven/tailscale-auth-key, owned by root, mode 0600. this is the only interactive step.
-   25. join the tailnet as a tagged device with that key (plan only)
+   28. join the tailnet as a tagged device with that key (plan only)
        $ tailscale up --auth-key=file:<prefix>/etc/sirven/tailscale-auth-key --advertise-tags=tag:agent
        not yet: tailscale apply is plan output in the alpha cut; it is never run against a real tailnet yet
-   26. remove the used auth key from disk (plan only)
+   29. remove the used auth key from disk (plan only)
        $ rm -f <prefix>/etc/sirven/tailscale-auth-key
        not yet: tailscale apply is plan output in the alpha cut; it is never run against a real tailnet yet
      note: the agent client connects with: ssh agent@<this machine's tailnet name>. tailscale ssh stays off; the machine's own SSH server and keys are used.
 
-summary: 26 steps. 21 to do, 0 already done, 3 by the owner, 2 plan only.
+summary: 29 steps. 24 to do, 0 already done, 3 by the owner, 2 plan only.
 dry run: nothing was changed. run the same command without --dry-run to apply this plan.
 applying would stop before any change: the plan has plan-only steps the alpha cut does not apply yet.
 to undo later: ./install.sh revoke --all --dry-run, or ./uninstall.sh --dry-run

@@ -21,33 +21,30 @@ kill switch: revoke --all
        not yet: the kill switch is plan output in the alpha cut; apply comes in alpha + 1
 
 kill switch: access control lists
-    5. remove agent from /home/example/project and everything inside (plan only)
-       $ setfacl -R -P -x u:agent <prefix>/home/example/project
+    5. remove agent from /home/example/project and put back the access control lists it had (plan only)
+       $ if [ -s <prefix>/var/lib/sirven/access-lists/867467bcb77869b9.txt ]; then bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh restore <prefix>/var/lib/sirven/access-lists/867467bcb77869b9.txt <prefix>/home/example/project yes agent; else setfacl -R -P -x u:agent <prefix>/home/example/project && setfacl -R -P -d -x u:agent <prefix>/home/example/project; fi
        not yet: the kill switch is plan output in the alpha cut; apply comes in alpha + 1
-    6. stop new files in /home/example/project inheriting agent (plan only)
-       $ setfacl -R -P -d -x u:agent <prefix>/home/example/project
+    6. stop agent passing through /home and put back its access control list (plan only)
+       $ if [ -s <prefix>/var/lib/sirven/access-lists/2cc974af6afc822c.txt ]; then bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh restore <prefix>/var/lib/sirven/access-lists/2cc974af6afc822c.txt <prefix>/home no agent; else setfacl -P -x u:agent <prefix>/home; fi
        not yet: the kill switch is plan output in the alpha cut; apply comes in alpha + 1
-    7. stop agent passing through /home (plan only)
-       $ setfacl -x u:agent <prefix>/home
+    7. stop agent passing through /home/example and put back its access control list (plan only)
+       $ if [ -s <prefix>/var/lib/sirven/access-lists/67a166d2c72af6bb.txt ]; then bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh restore <prefix>/var/lib/sirven/access-lists/67a166d2c72af6bb.txt <prefix>/home/example no agent; else setfacl -P -x u:agent <prefix>/home/example; fi
        not yet: the kill switch is plan output in the alpha cut; apply comes in alpha + 1
-    8. stop agent passing through /home/example (plan only)
-       $ setfacl -x u:agent <prefix>/home/example
-       not yet: the kill switch is plan output in the alpha cut; apply comes in alpha + 1
-    9. mark the grant record revoked (plan only)
+    8. mark the grant record revoked (plan only)
        $ mv <prefix>/etc/sirven/grants/agent.json <prefix>/etc/sirven/grants/agent.json.revoked
        not yet: the kill switch is plan output in the alpha cut; apply comes in alpha + 1
 
 kill switch: transport
-   10. remove the agent rule from your tailnet policy (owner, by hand)
+    9. remove the agent rule from your tailnet policy (owner, by hand)
        tailscale admin console: delete the tag:agent rule and any unused auth key for it.
 
 kill switch: finish
-   11. write revoke_finished to the audit log (plan only)
+   10. write revoke_finished to the audit log (plan only)
        $ printf '{"time": "%s", "event": "revoke_finished", "user": "agent", "principal": "owner"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> <prefix>/var/log/sirven/audit.jsonl
        not yet: the kill switch is plan output in the alpha cut; apply comes in alpha + 1
      note: undo is a fresh install. nothing here is reversed automatically.
 
-summary: 11 steps. 0 to do, 0 already done, 1 by the owner, 10 plan only.
+summary: 10 steps. 0 to do, 0 already done, 1 by the owner, 9 plan only.
 dry run: nothing was changed. run the same command without --dry-run to apply this plan.
 applying would stop before any change: the plan has plan-only steps the alpha cut does not apply yet.
 exit status: 0
