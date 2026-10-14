@@ -1,0 +1,152 @@
+# shellcheck baseline for integration/2026-10-14-wave-3
+# command: make lint (shellcheck 0.11.0, installed with Homebrew from the Homebrew bottle on 2026-10-14)
+# make lint exit status: 2
+
+lint: bash -n found no syntax errors in 65 files
+
+In uninstall.sh line 62:
+  COMMAND=uninstall
+  ^-----^ SC2034 (warning): COMMAND appears unused. Verify use (or export if used externally).
+
+
+In bin/sirven line 333:
+  local record folders kind path helper status=0 failed=0 flags="" scratch
+               ^-----^ SC2034 (warning): folders appears unused. Verify use (or export if used externally).
+
+
+In bootstrap/sirven-bootstrap.sh line 138:
+  installer="$(ls "$SIRVEN_BOOTSTRAP_DIR"/unpacked/*/install.sh 2>/dev/null | head -n 1 || true)"
+               ^-- SC2012 (info): Use find instead of ls to better handle non-alphanumeric filenames.
+
+
+In lib/access_control.sh line 33:
+      write_allowed) LEVEL_WRITE_ALLOWED="$value" ;;
+                     ^-----------------^ SC2034 (warning): LEVEL_WRITE_ALLOWED appears unused. Verify use (or export if used externally).
+
+
+In lib/adopt.sh line 228:
+  [ "$COMMAND" = install ] && [ "$ADOPT_GRANT" = active ] || return 0
+     ^------^ SC2153 (info): Possible misspelling: COMMAND may not be assigned. Did you mean command?
+
+
+In lib/adopt.sh line 324:
+  wanted="$(shell_quote "$OWNER")"
+                         ^----^ SC2153 (info): Possible misspelling: OWNER may not be assigned. Did you mean owner?
+
+
+In lib/audit.sh line 94:
+  local value="$1" backslash='\' quote='"' newline tab carriage
+                              ^-- SC1003 (info): Want to escape a single quote? echo 'This is how it'\''s done'.
+
+
+In lib/components.sh line 92:
+  SERVICE_USER=agent
+  ^----------^ SC2034 (warning): SERVICE_USER appears unused. Verify use (or export if used externally).
+
+
+In lib/components.sh line 203:
+  PLAN_STEP_HOOK=audit_step_hook
+  ^------------^ SC2034 (warning): PLAN_STEP_HOOK appears unused. Verify use (or export if used externally).
+
+
+In lib/components.sh line 204:
+  AUDIT_OPERATION="$operation"
+  ^-------------^ SC2034 (warning): AUDIT_OPERATION appears unused. Verify use (or export if used externally).
+
+
+In lib/components.sh line 205:
+  AUDIT_PENDING="$STAGE_DIR/audit-pending.jsonl"
+  ^-----------^ SC2034 (warning): AUDIT_PENDING appears unused. Verify use (or export if used externally).
+
+
+In lib/components.sh line 233:
+  PLAN_PREFIX="$PREFIX"
+  ^---------^ SC2034 (warning): PLAN_PREFIX appears unused. Verify use (or export if used externally).
+
+
+In lib/components.sh line 234:
+  PLAN_OPERATING_SYSTEM="$OPERATING_SYSTEM"
+  ^-------------------^ SC2034 (warning): PLAN_OPERATING_SYSTEM appears unused. Verify use (or export if used externally).
+
+
+In lib/components.sh line 256:
+    PLAN_SIMULATION_LOG="$PREFIX$(layout_simulation_log)"
+    ^-----------------^ SC2034 (warning): PLAN_SIMULATION_LOG appears unused. Verify use (or export if used externally).
+
+
+In lib/layout.sh line 12:
+  AUDIT_DIR="/var/log/$PACKAGE"
+  ^-------^ SC2034 (warning): AUDIT_DIR appears unused. Verify use (or export if used externally).
+
+
+In lib/layout.sh line 32:
+  local staged="$STAGE_DIR/$1"
+                ^--------^ SC2153 (info): Possible misspelling: STAGE_DIR may not be assigned. Did you mean STATE_DIR?
+
+
+In lib/questions.sh line 117:
+      "~/"*) SETUP_ANSWER="$HOME/${SETUP_ANSWER#"~/"}" ;;
+       ^-- SC2088 (warning): Tilde does not expand in quotes. Use $HOME.
+
+
+In lib/questions.sh line 194:
+  SETUP_MODE=defaults
+  ^--------^ SC2034 (warning): SETUP_MODE appears unused. Verify use (or export if used externally).
+
+
+In tests/unit/test_adopt.sh line 23:
+      printf '%s file %s %s\n' "$path" "$(ls -ld "$path" | awk '{print $1}')" "$(cksum < "$path")"
+                                          ^------------^ SC2012 (info): Use find instead of ls to better handle non-alphanumeric filenames.
+
+
+In tests/unit/test_adopt.sh line 25:
+      printf '%s %s\n' "$path" "$(ls -ld "$path" | awk '{print $1}')"
+                                  ^------------^ SC2012 (info): Use find instead of ls to better handle non-alphanumeric filenames.
+
+
+In tests/unit/test_bootstrap.sh line 104:
+  capture sh -c 'script=$1; path=$2; log=$3; fixture=$4; tmp=$5; shift 5
+                ^-- SC2016 (info): Expressions don't expand in single quotes, use double quotes for that.
+
+
+In tests/unit/test_bootstrap.sh line 339:
+  printf '#!/usr/bin/env bash\necho "fixture installer: $*"\necho "package tag: ${SIRVEN_PACKAGE_TAG:-unset}"\n' > "$repo/install.sh"
+         ^-- SC2016 (info): Expressions don't expand in single quotes, use double quotes for that.
+
+
+In tests/unit/test_bootstrap.sh line 390:
+  asset='archive="sirven-$SIRVEN_PINNED_TAG.tar.gz"'
+        ^-- SC2016 (info): Expressions don't expand in single quotes, use double quotes for that.
+
+
+In tests/unit/test_bootstrap.sh line 392:
+  assert_contains "$(cat "$RELEASE_SOURCE")" 'asset="sirven-$tag.tar.gz"'
+                                             ^--------------------------^ SC2016 (info): Expressions don't expand in single quotes, use double quotes for that.
+
+
+In tests/unit/test_download_onboarding.sh line 115:
+  written="$(sed -n '/^cat > "\$MANIFEST_PATH" <<JSON$/,/^JSON$/p' "$BUILD" | sed -n 's/^  "\([A-Za-z0-9]*\)":.*/\1/p' | sort | tr '\n' ' ')"
+                    ^-- SC2016 (info): Expressions don't expand in single quotes, use double quotes for that.
+
+
+In tests/unit/test_grant_compiler.sh line 79:
+  for os in macos; do
+            ^---^ SC2043 (warning): This loop will only ever run once. Bad quoting or missing glob/expansion?
+
+
+In tests/unit/test_preflight.sh line 187:
+  printf '#!/bin/sh\n[ "$1" = -p ] || exit 1\nexit %s\n' "$1" > "$TEST_TMP/bin/xcode-select"
+         ^-- SC2016 (info): Expressions don't expand in single quotes, use double quotes for that.
+
+
+In tests/unit/test_questions.sh line 224:
+  capture sh -c 'cd "$1" && SIRVEN_OS_OVERRIDE=linux "$2/install.sh" --yes --prefix "$3" --transport none --owner example' _ "$(project)" "$REPO_DIR" "$root"
+                ^-- SC2016 (info): Expressions don't expand in single quotes, use double quotes for that.
+
+For more information:
+  https://www.shellcheck.net/wiki/SC2034 -- AUDIT_DIR appears unused. Verify ...
+  https://www.shellcheck.net/wiki/SC2043 -- This loop will only ever run once...
+  https://www.shellcheck.net/wiki/SC2088 -- Tilde does not expand in quotes. ...
+make: *** [lint] Error 1
+
+# make lint exit status: 2 (make reported Error 1, shown above)
