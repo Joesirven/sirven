@@ -26,7 +26,7 @@ audit_format_json() {
   "encoding": "JSON lines: one JSON object per line, appended, never rewritten",
   "fields": {
     "time": "universal time with seconds, like 2026-10-10T12:00:00Z",
-    "event": "install, step, grant, adopt, uninstall, component, warning, session_start, command, session_end, revoke_started, revoke_finished, reinstate",
+    "event": "install, step, grant, adopt, uninstall, component, warning, session_start, command, session_end, revoke_started, revoke_detail, revoke_finished, reinstate",
     "user": "the service user, $SERVICE_USER by default",
     "principal": "who acted: owner for the package's own commands, owner-agent, or invite:<name> for a friend's agent",
     "level": "observer, builder, or operator; null when a grant change leaves no grant",

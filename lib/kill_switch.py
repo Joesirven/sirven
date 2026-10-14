@@ -52,11 +52,27 @@ def entry(name, parent):
         return None
 
 
-def count_keys(name, parent):
-    """the number of key lines in a regular file, read without following a link."""
+def unlink_name(name, parent):
+    """remove a name from a folder; a name that is already gone is what was wanted."""
     try:
-        descriptor = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0), dir_fd=parent)
+        os.unlink(name, dir_fd=parent)
+    except FileNotFoundError:
+        pass
+
+
+def count_keys(name, parent):
+    """the number of key lines in a regular file, read without following a link. opened without blocking and
+    checked after opening, so a named pipe swapped in after the check cannot hang the kill switch."""
+    try:
+        descriptor = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0), dir_fd=parent)
     except OSError:
+        return 0
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            os.close(descriptor)
+            return 0
+    except OSError:
+        os.close(descriptor)
         return 0
     with os.fdopen(descriptor, "rb") as handle:
         lines = handle.read(1 << 20).splitlines()
@@ -73,9 +89,11 @@ def command_remove_keys(home):
         if found is None:
             print("no .ssh folder in %s, no keys to remove" % home)
             return 0
-        if stat.S_ISLNK(found.st_mode):
-            os.unlink(".ssh", dir_fd=base)
-            print("removed the link %s/.ssh (it was not a folder); what it pointed at was not opened or changed" % home)
+        if not stat.S_ISDIR(found.st_mode):
+            kind = "link" if stat.S_ISLNK(found.st_mode) else "file or pipe"
+            unlink_name(".ssh", base)
+            print("removed %s/.ssh, which the agent made a %s instead of a folder; what it pointed at was not opened or changed"
+                  % (home, kind))
             return 0
         ssh = open_folder(".ssh", base)
         if ssh is None:
@@ -90,7 +108,7 @@ def command_remove_keys(home):
                     continue
                 keys = count_keys(name, ssh) if stat.S_ISREG(found.st_mode) else 0
                 kind = "link" if stat.S_ISLNK(found.st_mode) else "file"
-                os.unlink(name, dir_fd=ssh)
+                unlink_name(name, ssh)
                 print("removed %s/.ssh/%s (a %s, %d keys); anything it pointed at was not opened or changed"
                       % (home, name, kind, keys))
         finally:
@@ -108,12 +126,9 @@ def command_remove_ssh_folder(home):
         found = entry(".ssh", base)
         if found is None:
             return 0
-        if stat.S_ISLNK(found.st_mode):
-            os.unlink(".ssh", dir_fd=base)
-            print("removed the link %s/.ssh (it was not a folder); what it pointed at was not opened or changed" % home)
-            return 0
         if not stat.S_ISDIR(found.st_mode):
-            print("       kept %s/.ssh: it is not a folder this package created" % home)
+            unlink_name(".ssh", base)
+            print("removed %s/.ssh, which the agent made something other than a folder; what it pointed at was not opened or changed" % home)
             return 0
         try:
             os.rmdir(".ssh", dir_fd=base)
@@ -135,7 +150,7 @@ def command_keys_gone(home):
         found = entry(".ssh", base)
         if found is None:
             return 0
-        if stat.S_ISLNK(found.st_mode):
+        if not stat.S_ISDIR(found.st_mode):
             return 1
         ssh = open_folder(".ssh", base)
         if ssh is None:

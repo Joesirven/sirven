@@ -35,6 +35,8 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$ROOT_DIR/lib/cloudflare.sh"
 # shellcheck source=lib/kill_switch.sh
 . "$ROOT_DIR/lib/kill_switch.sh"
+# shellcheck source=lib/lock.sh
+. "$ROOT_DIR/lib/lock.sh"
 # shellcheck source=lib/questions.sh
 . "$ROOT_DIR/lib/questions.sh"
 # shellcheck source=lib/adopt.sh
@@ -46,7 +48,7 @@ usage() {
   cat <<END
 usage:
   ./install.sh [options]              set up agent access
-  ./install.sh revoke --all [options] the kill switch: revoke everything
+  ./install.sh revoke --all [options] the kill switch: cut the agent off now, keep the records
 
 setup asks at most two questions, the level and the path, each with its default shown. a flag
 or environment variable answers a question ahead of time. with --yes, or with no terminal to
@@ -86,7 +88,9 @@ examples:
   ./install.sh --dry-run --prefix /tmp/fake-root --level observer --path /srv/app --transport none
   ./install.sh revoke --all --dry-run
 
-nothing is applied to a real machine in the alpha cut, except inside a linux container as root.
+nothing is applied to a real machine in the alpha cut, except inside a linux container as root, and
+revoke --all, which only takes access away and also runs on a real linux machine as root. a real revoke asks
+you to type "revoke" first; --yes skips the question.
 END
 }
 
@@ -252,6 +256,7 @@ apply_for_real() {
   local status=0 record before
   PLAN_RECORD_FILE="${PREFIX}$(layout_record_file)"
   PLAN_STEP_HOOK=audit_step_hook
+  if [ "$COMMAND" = revoke ]; then PLAN_RECHECK=yes; fi
   AUDIT_OPERATION="$COMMAND"
   AUDIT_PENDING="$STAGE_DIR/audit-pending.jsonl"
   record="${PREFIX}$(access_control_record_file)"
@@ -313,6 +318,12 @@ finish() {
     fi
     return 0
   fi
+  if [ "$COMMAND" = revoke ]; then
+    kill_switch_confirm
+    lock_take 10 go_on
+  else
+    lock_take 60 refuse
+  fi
   apply_for_real || status=$?
   return "$status"
 }
@@ -331,6 +342,8 @@ main() {
   if [ "$DRY_RUN" != yes ]; then
     PLAN_PREFIX="$PREFIX"
     PLAN_OPERATING_SYSTEM="$OPERATING_SYSTEM"
+    # the kill switch only takes access away, so it runs on a real linux machine too, not only in a container
+    if [ "$COMMAND" = revoke ]; then PLAN_ALLOW_REAL_LINUX=yes; fi
     refusal="$(plan_real_apply_refusal)"
     [ -z "$refusal" ] || DIE_STATUS=3 die "not applied: $refusal"
   fi

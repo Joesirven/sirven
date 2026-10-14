@@ -186,7 +186,7 @@ plan_access_control_release() {
 # come before these steps, so the refusal is kept in KILL_SWITCH_LATE_FAILURE and becomes a step after them.
 # sets KILL_SWITCH_REVOKE_PATHS, the paths this plan removes, for the audit log.
 plan_access_control_revoke() {
-  local record fragment shown key value known index status=0 message
+  local record fragment shown key value known index status=0 message first
   record="${PREFIX}$(access_control_record_file)"
   fragment="$STAGE_DIR/revoke-fragment.txt"
   KILL_SWITCH_REVOKE_PATHS=()
@@ -247,7 +247,14 @@ END
     plan_note "the grant compiler refused the paths to remove. the lock and the keys come first; a step after them stops the run with the reason."
     return 0
   fi
+  first=$PLAN_COUNT
   _access_control_add_fragment "$fragment" system "$KILL_SWITCH_REASON"
+  # each restore is attempted whatever happens to the others, and each is read again at the end
+  index=$first
+  while [ "$index" -lt "$PLAN_COUNT" ]; do
+    if [ "${PLAN_KIND[index]}" = system ]; then PLAN_CONTINUE[index]=yes; PLAN_TAG[index]=verify; fi
+    index=$((index + 1))
+  done
 }
 
 # plan_access_control_remove_paths: removal steps for the paths in GRANT_PATHS only, as system

@@ -296,8 +296,8 @@ adopt_refuse_conflicts() {
   fi
 
   if [ "$REINSTATE" != yes ] && kill_switch_account_cut_off "$SERVICE_USER"; then
-    _adopt_conflict "the account $SERVICE_USER was cut off by the kill switch: it is expired and its shell is $KILL_SWITCH_NOLOGIN. install will not turn it back on by itself." \
-      "to bring it back on purpose, run the same command with --reinstate: it unlocks the account, removes the expiry, gives back the /bin/bash shell, writes audit entries, then goes on with the install. to leave it cut off, do not install."
+    _adopt_conflict "the account $SERVICE_USER was cut off by the kill switch (its revoke marker $STATE_DIR/agent-revoked.json is there, or the account is expired and no install is in the middle of changing it). install will not turn it back on by itself, also when the kill switch stopped before it finished." \
+      "to bring it back on purpose, run the same command with --reinstate: it unlocks the account, removes the expiry and the marker, gives back the /bin/bash shell, writes audit entries, then goes on with the install. to leave it cut off, do not install."
   fi
 
   case "$ADOPT_GRANT" in

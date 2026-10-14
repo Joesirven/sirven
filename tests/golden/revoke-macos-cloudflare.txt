@@ -8,6 +8,7 @@ sirven revoke plan
 
 kill switch: revoke --all
      note: audit log: revoke_started is written before the first step and revoke_finished last, with the outcome. every step writes its own entry too.
+     note: every step is attempted even when an earlier one fails; the run then ends with exit 4 and lists each failure. the account stays locked.
     1. remove every authorized key for agent (plan only)
        $ rm -f <prefix>/Users/agent/.ssh/authorized_keys <prefix>/Users/agent/.ssh/authorized_keys2
        not yet: the kill switch on macos is plan output until a run in a macos virtual machine verifies it
@@ -47,7 +48,7 @@ kill switch: transport
        cloudflare dashboard, access, service auth: revoke the agent client's service token.
 
 kill switch: finish
-     note: kept on purpose: the install record, the audit log, the revoked grant record, and the home folder of agent with whatever the agent left in it.
+     note: kept on purpose: the install record, the audit log, the revoked grant record, the revoke marker, and the home folder of agent with whatever the agent left in it.
      note: the account stays locked and expired, with its shell turned off. to give the agent access again on purpose, run install.sh with --reinstate; nothing here is reversed automatically.
 
 summary: 11 steps. 0 to do, 0 already done, 1 by the owner, 10 plan only.

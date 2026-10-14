@@ -34,6 +34,12 @@
 # PLAN_STEP_HOOK, when set, names a function apply calls after every numbered step with
 # NUMBER KIND TAG TITLE OUTCOME. install.sh points it at the audit log writer.
 #
+# plan_continue: the most recent step may fail without stopping the run. the run goes on, records the failure,
+# and ends with exit 4 listing every failed step. for a plan whose steps each remove access, so one step that
+# cannot finish (a name the agent planted, a unit that will not stop) never leaves a later one undone.
+# PLAN_RECHECK=yes: the check of a step is read again immediately before the step runs, not only once before
+# the first step, so a step judged done earlier (or not done) is judged on the machine as it is now.
+#
 # plain indexed arrays only, walked by index and never expanded whole, so it runs on bash 3.2
 # with set -u, where expanding an empty array is an error.
 
@@ -42,6 +48,9 @@ PLAN_SIMULATION_LOG="${PLAN_SIMULATION_LOG:-}"
 PLAN_OPERATING_SYSTEM="${PLAN_OPERATING_SYSTEM:-linux}"
 PLAN_RECORD_FILE="${PLAN_RECORD_FILE:-}"
 PLAN_STEP_HOOK="${PLAN_STEP_HOOK:-}"
+PLAN_RECHECK="${PLAN_RECHECK:-no}"
+# the kill switch only removes access, so it may run on a real linux machine, not only in a container (set by install.sh)
+PLAN_ALLOW_REAL_LINUX="${PLAN_ALLOW_REAL_LINUX:-no}"
 
 plan_reset() {
   PLAN_KIND=()
@@ -59,6 +68,9 @@ plan_reset() {
   PLAN_UNDO_ACTION=()
   PLAN_UNDO_SHOWN=()
   PLAN_ASSUMED_UNDONE=()
+  PLAN_CONTINUE=()
+  PLAN_FAILURES=0
+  PLAN_FAILED_LIST=""
   PLAN_COUNT=0
   PLAN_CURRENT_SECTION=""
   PLAN_ASSUME_UNDONE=no
@@ -84,6 +96,7 @@ _plan_add() {
   PLAN_UNDO_ACTION[index]=""
   PLAN_UNDO_SHOWN[index]=""
   PLAN_ASSUMED_UNDONE[index]="$PLAN_ASSUME_UNDONE"
+  PLAN_CONTINUE[index]=no
   PLAN_COUNT=$((PLAN_COUNT + 1))
 }
 
@@ -125,6 +138,12 @@ plan_owner() {
 # plan_planonly TITLE SHOWN REASON [CHECK]
 plan_planonly() {
   _plan_add planonly "$1" "${4:-}" "" "$2" "$3"
+}
+
+# plan_continue: the most recent step may fail without stopping the run (see the header).
+plan_continue() {
+  [ "$PLAN_COUNT" -gt 0 ] || die "plan_continue: no step to mark"
+  PLAN_CONTINUE[PLAN_COUNT - 1]=yes
 }
 
 # plan_tag TAG: tag the most recent step.
@@ -320,7 +339,7 @@ plan_real_apply_refusal() {
   fi
   if [ "$PLAN_OPERATING_SYSTEM" != linux ]; then
     printf 'applying to a real macos machine is not verified yet; use --dry-run, or --prefix for a fake root'
-  elif ! in_container; then
+  elif ! in_container && [ "$PLAN_ALLOW_REAL_LINUX" != yes ]; then
     printf 'the alpha cut only applies to a real system inside a throwaway container; use --dry-run, or --prefix for a fake root'
   elif [ "$(id -u)" != 0 ]; then
     printf 'applying needs root; run it with sudo inside the container'
@@ -373,6 +392,17 @@ _plan_hook() {
   "$PLAN_STEP_HOOK" "${PLAN_NUMBER[$1]}" "${PLAN_KIND[$1]}" "${PLAN_TAG[$1]}" "${PLAN_TITLE[$1]}" "$2"
 }
 
+# _plan_recheck INDEX: with PLAN_RECHECK=yes, read the step's check again now, just before the step runs.
+# a step that assumes its end state undone is never rechecked, and a system step on a fake root is judged
+# by the simulation log, as in plan_evaluate.
+_plan_recheck() {
+  local index="$1"
+  [ "$PLAN_RECHECK" = yes ] || return 0
+  [ "${PLAN_ASSUMED_UNDONE[index]}" != yes ] || return 0
+  if [ "${PLAN_KIND[index]}" = system ] && [ -n "$PLAN_PREFIX" ]; then return 0; fi
+  if _plan_check_passes "${PLAN_CHECK[index]}"; then PLAN_STATUS[index]=done; else PLAN_STATUS[index]=todo; fi
+}
+
 # apply the evaluated plan. refuses up front, before any change, if any step cannot run.
 plan_apply() {
   local refusal blockers index=0 kind applied=0 skipped=0
@@ -392,6 +422,7 @@ plan_apply() {
     kind="${PLAN_KIND[index]}"
     case "$kind" in
       run | system)
+        _plan_recheck "$index"
         if [ "${PLAN_STATUS[index]}" = "done" ]; then
           printf '  %3s. skipped, already done\n' "${PLAN_NUMBER[index]}"
           skipped=$((skipped + 1))
@@ -406,8 +437,16 @@ plan_apply() {
         else
           if ! ( eval "${PLAN_ACTION[index]}" ); then
             printf 'error: step %s failed: %s\n' "${PLAN_NUMBER[index]}" "${PLAN_TITLE[index]}" >&2
-            printf 'steps before it stay applied; fix the cause and run again, finished steps are skipped.\n' >&2
             _plan_hook "$index" failed
+            if [ "${PLAN_CONTINUE[index]}" = yes ]; then
+              printf 'the other steps still run: one that cannot finish must not leave a later one undone.\n' >&2
+              PLAN_FAILURES=$((PLAN_FAILURES + 1))
+              PLAN_FAILED_LIST="${PLAN_FAILED_LIST}  step ${PLAN_NUMBER[index]}: ${PLAN_TITLE[index]}
+"
+              index=$((index + 1))
+              continue
+            fi
+            printf 'steps before it stay applied; fix the cause and run again, finished steps are skipped.\n' >&2
             return 4
           fi
           printf '  %3s. done\n' "${PLAN_NUMBER[index]}"
@@ -435,4 +474,8 @@ plan_apply() {
     index=$((index + 1))
   done
   printf '\napplied %s steps, skipped %s already done.\n' "$applied" "$skipped"
+  if [ "$PLAN_FAILURES" -gt 0 ]; then
+    printf '\n%s steps failed, each listed here, and the others ran:\n%s' "$PLAN_FAILURES" "$PLAN_FAILED_LIST" >&2
+    return 4
+  fi
 }

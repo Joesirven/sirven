@@ -26,6 +26,10 @@ standard library python, started by lib/access_control_snapshot.sh. linux only.
   quiesce USER MARKER / release USER MARKER
       end every process of USER and lock and expire its account, remembering what it was in MARKER;
       release puts the account back as MARKER says. install and rollback wrap a re-grant in these.
+      release refuses while the kill switch's own marker (agent-revoked.json, beside MARKER) is there.
+  revoke-lock USER SHELL
+      the kill switch: in one change lock and expire the account and set its shell, then end every process of USER
+      (by effective and real user) until none is left. remembers nothing: the account is not given back.
 
 what undo changes, and nothing else: the named entries of the agent (and of the folder owner, where
 the agent's entry is there too), and on folders the default list when it carries the agent's entry.
@@ -717,6 +721,18 @@ def command_quiesce(arguments):
     return 0
 
 
+def command_revoke_lock(arguments):
+    fields = shadow_fields(arguments.user)
+    if fields is None:
+        return 0
+    options = ["--expiredate", "1", "--shell", arguments.shell]
+    if not fields[1].startswith("!"):
+        options.insert(0, "--lock")
+    subprocess.run(["usermod"] + options + [arguments.user], check=True)
+    end_processes(arguments.user)
+    return 0
+
+
 def end_processes(user):
     """end every process of the user. one pass is not enough for a process that keeps starting others, so
     repeat until none is left, at most 20 times."""
@@ -733,6 +749,10 @@ def end_processes(user):
 
 
 def command_release(arguments):
+    revoked = os.path.join(os.path.dirname(arguments.marker), "agent-revoked.json")
+    if os.path.lexists(revoked):
+        raise Failure("%s was cut off by the kill switch (%s is there), so it is not given back by a grant. "
+                      "only install --reinstate turns it back on" % (arguments.user, revoked))
     try:
         with open(arguments.marker, encoding="utf-8") as handle:
             before = json.load(handle)
@@ -1241,6 +1261,10 @@ def parser():
         command.add_argument("user")
         command.add_argument("marker")
 
+    revoke_lock = commands.add_parser("revoke-lock")
+    revoke_lock.add_argument("user")
+    revoke_lock.add_argument("shell")
+
     repair = commands.add_parser("repair")
     repair.add_argument("folder")
     repair.add_argument("recursive", choices=("yes", "no"))
@@ -1287,6 +1311,7 @@ def main(argv):
         status = {"check": command_check, "record": command_record, "restore": command_restore,
                   "status": command_status, "grant-access": command_grant_access,
                   "grant-default": command_grant_default, "quiesce": command_quiesce,
+                  "revoke-lock": command_revoke_lock,
                   "release": command_release, "verify-access": command_verify_access,
                   "verify-default": command_verify_default}[command](arguments)
     except (OSError, Failure, subprocess.CalledProcessError) as error:
