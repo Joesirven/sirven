@@ -36,8 +36,14 @@ and then against this branch. Container: Docker on the Mac, no network.
 | 15 re-grant while the agent runs | link target unchanged after a rollback with a swapping agent; agent ended during the re-grant; audit warning | installs and rollback exit 0; precondition; account back; observer level back |
 | 14 repair command | repair exits 0 (was 2: no such command); no entry left; exact | owner's chmod; uninstall exit 0 |
 
-At this branch: `bash tests/harness/run-linux.sh` exit 0, 14 scenarios, 0 failed, 4 known defects (all SIR-32, the kill
-switch, unchanged).
+Counted: 45 of the assertions in scenarios 06 to 15 fail at 66e31fe. The others are preconditions (for example "a process of agent is
+running"), the install and uninstall exit statuses that must still be 0, and regression guards (all of scenario 13, the pipe and
+socket check, the chmod 664 exception), so it is not true that every new assertion fails at the first round's tip; the table says
+which do. Scenario 01 also changed its step counts (23 steps, 22 skipped on a re-run) for the two new account steps.
+
+At this branch: `bash tests/harness/run-linux.sh` exit 0, 15 scenarios, 146 assertions passed, 0 failed, 4 known defects (all
+SIR-32, the kill switch, unchanged). `make test` exit 2 with the 3 known macOS installer failures only (446 passed). `make lint`
+exit 0 (the shell linter is not installed, so only syntax was checked).
 
 ## Not verified
 
