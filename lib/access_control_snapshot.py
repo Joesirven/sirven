@@ -48,6 +48,7 @@ import errno
 import json
 import os
 import pwd
+import resource
 import stat
 import struct
 import subprocess
@@ -57,7 +58,7 @@ ACCESS = "system.posix_acl_access"
 DEFAULT = "system.posix_acl_default"
 USER_OBJ, USER, GROUP_OBJ, GROUP, MASK, OTHER = 0x01, 0x02, 0x04, 0x08, 0x10, 0x20
 NO_ID = 0xFFFFFFFF
-FORMAT = 2
+FORMAT = 3
 LISTED = 10
 
 EXIT_FAILED = 1
@@ -118,63 +119,146 @@ def open_folder(path):
         raise
 
 
-def walk(folder_fd, path, visit, errors):
-    """call visit(handle, info, path, is_folder) for the folder and everything below it. the handle is an
-    open descriptor, or for a pipe, device, or socket a /proc/self/fd path naming one. symbolic links are
-    skipped; a path that cannot be opened is reported, not fatal."""
-    info = os.fstat(folder_fd)
-    visit(folder_fd, info, path, True)
+HELD = 48  # the deepest folders kept open at once, so a tree of any depth needs about this many descriptors
+MAX_DEPTH = 30000  # deeper than this is reported by name and skipped
+
+
+class Frame:
+    """one folder being walked: its identity, where it is, what is left to read in it."""
+    __slots__ = ("fd", "ident", "name", "path", "names", "position", "parent")
+
+    def __init__(self, fd, ident, name, path, names, parent):
+        self.fd, self.ident, self.name, self.path = fd, ident, name, path
+        self.names, self.position, self.parent = names, 0, parent
+
+
+def identity(info):
+    return (info.st_dev, info.st_ino)
+
+
+def reopen(frames, index):
+    """a descriptor for frames[index] (its fd was let go): open the names from the nearest folder still held,
+    one at a time with O_NOFOLLOW, checking each is the folder it was. None when the tree changed."""
+    start_at = index
+    while start_at > 0 and frames[start_at].fd is None:
+        start_at -= 1
+    fd = os.dup(frames[start_at].fd)
+    try:
+        for level in range(start_at + 1, index + 1):
+            following = os.open(frames[level].name, FOLDER_FLAGS, dir_fd=fd)
+            os.close(fd)
+            fd = following
+            if identity(os.fstat(fd)) != frames[level].ident:
+                raise OSError(errno.ESTALE, "the folder was moved")
+        return fd
+    except OSError:
+        os.close(fd)
+        return None
+
+
+def walk(folder_fd, path, visit, errors, on_link=None):
+    """call visit(handle, info, path, is_folder, parent) for the folder and everything below it. the handle is
+    an open descriptor, or for a pipe, device, or socket a /proc/self/fd path naming one; parent is the
+    (device, inode) of the folder it is in, None for the start folder. symbolic links are skipped (on_link is
+    told of each one); a path that cannot be opened is reported, not fatal.
+
+    iterative: only the deepest HELD folders are kept open, and a folder let go is opened again from the one
+    below it ("..", checked against the identity recorded when it was first opened), so no depth, however
+    great, needs more descriptors or any recursion."""
+    root_info = os.fstat(folder_fd)
+    visit(folder_fd, root_info, path, True, None)
     try:
         names = os.listdir(folder_fd)
     except OSError as error:
         errors.append((path, "cannot list: %s" % error.strerror))
         return
-    for name in names:
-        child = path.rstrip(b"/") + b"/" + os.fsencode(name)
+    frames = [Frame(folder_fd, identity(root_info), b"", path, names, None)]
+    while frames:
+        top = frames[-1]
+        if top.fd is None:
+            top.fd = reopen(frames, len(frames) - 1)
+            if top.fd is None:
+                frames.pop()  # moved or removed since it was read; what is left in it is not reachable safely
+                continue
+        if top.position >= len(top.names):
+            frames.pop()
+            if len(frames) > 0:
+                if frames[-1].fd is None:
+                    try:
+                        parent_fd = os.open("..", FOLDER_FLAGS, dir_fd=top.fd)
+                        if identity(os.fstat(parent_fd)) == frames[-1].ident:
+                            frames[-1].fd = parent_fd
+                        else:
+                            os.close(parent_fd)
+                    except OSError:
+                        pass
+                os.close(top.fd)
+            continue
+        name = top.names[top.position]
+        top.position += 1
+        raw = os.fsencode(name)
+        child = top.path.rstrip(b"/") + b"/" + raw
         try:
-            before = os.stat(name, dir_fd=folder_fd, follow_symlinks=False)
+            before = os.stat(name, dir_fd=top.fd, follow_symlinks=False)
             if stat.S_ISDIR(before.st_mode):
-                descriptor = os.open(name, FOLDER_FLAGS, dir_fd=folder_fd)
+                descriptor = os.open(name, FOLDER_FLAGS, dir_fd=top.fd)
             elif stat.S_ISREG(before.st_mode):
-                descriptor = os.open(name, FILE_FLAGS, dir_fd=folder_fd)
+                descriptor = os.open(name, FILE_FLAGS, dir_fd=top.fd)
             elif stat.S_ISFIFO(before.st_mode) or stat.S_ISSOCK(before.st_mode) or stat.S_ISCHR(before.st_mode) \
                     or stat.S_ISBLK(before.st_mode):
                 # the grant gave these entries too, but opening a pipe or a device could block or act. an
                 # O_PATH descriptor only names the object, and /proc/self/fd/N reaches its attributes.
-                descriptor = os.open(name, os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=folder_fd)
+                descriptor = os.open(name, os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=top.fd)
             else:
+                if stat.S_ISLNK(before.st_mode) and on_link:
+                    on_link(top.ident, raw, child)
                 continue
         except FileNotFoundError:
             continue
         except OSError as error:
-            if error.errno != errno.ELOOP:
+            if error.errno == errno.ELOOP:
+                if on_link:
+                    on_link(top.ident, raw, child)
+            else:
                 errors.append((child, error.strerror))
             continue
+        keep = False
         try:
             opened = os.fstat(descriptor)
-            if (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino) or \
-                    stat.S_IFMT(opened.st_mode) != stat.S_IFMT(before.st_mode):
+            if identity(opened) != identity(before) or stat.S_IFMT(opened.st_mode) != stat.S_IFMT(before.st_mode):
                 errors.append((child, "changed while it was being read"))
             elif stat.S_ISDIR(opened.st_mode):
-                walk(descriptor, child, visit, errors)
+                if len(frames) >= MAX_DEPTH:
+                    errors.append((child, "deeper than %d levels, so it and everything in it was skipped. remove that "
+                                   "folder (rm -r) and run the same command again" % MAX_DEPTH))
+                else:
+                    visit(descriptor, opened, child, True, top.ident)
+                    frames.append(Frame(descriptor, identity(opened), raw, child, os.listdir(descriptor), top.ident))
+                    keep = True
+                    if len(frames) > HELD + 1:
+                        let_go = frames[len(frames) - 2 - HELD]
+                        if let_go.fd is not None and len(frames) - 2 - HELD > 0:
+                            os.close(let_go.fd)
+                            let_go.fd = None
             elif stat.S_ISREG(opened.st_mode):
-                visit(descriptor, opened, child, False)
+                visit(descriptor, opened, child, False, top.ident)
             else:
-                visit("/proc/self/fd/%d" % descriptor, opened, child, False)
+                visit("/proc/self/fd/%d" % descriptor, opened, child, False, top.ident)
         except OSError as error:
             errors.append((child, error.strerror))
         finally:
-            os.close(descriptor)
+            if not keep:
+                os.close(descriptor)
 
 
-def start(path, recursive, visit, errors):
+def start(path, recursive, visit, errors, on_link=None):
     """open the start folder and visit it, and everything below when recursive."""
     descriptor = open_folder(path)
     try:
         if recursive:
-            walk(descriptor, os.fsencode(path), visit, errors)
+            walk(descriptor, os.fsencode(path), visit, errors, on_link)
         else:
-            visit(descriptor, os.fstat(descriptor), os.fsencode(path), True)
+            visit(descriptor, os.fstat(descriptor), os.fsencode(path), True, None)
     finally:
         os.close(descriptor)
 
@@ -271,7 +355,7 @@ def scan(folder, recursive, user):
     context = {"resolved": resolved, "dev": info.st_dev, "ino": info.st_ino, "agent": agent, "owner": info.st_uid}
     entries, refusals, errors = [], [], []
 
-    def visit(fd, item, path, is_folder):
+    def visit(fd, item, path, is_folder, parent=None):
         access = read_list(fd, ACCESS)
         default = read_list(fd, DEFAULT) if is_folder and recursive else None
         # the agent owns what it made and can put any entry on it itself, so those paths never block a
@@ -285,7 +369,10 @@ def scan(folder, recursive, user):
         if default is not None:
             record["default"] = base64.b64encode(build(default)).decode()
         if is_folder or "access" in record:
-            record.update({"p": path.hex(), "d": item.st_dev, "i": item.st_ino, "k": "d" if is_folder else "f"})
+            # the name and the parent, not the whole path, so a deep tree costs a line per folder, not a path per folder
+            record.update({"n": (path if parent is None else path.rsplit(b"/", 1)[-1]).hex(),
+                           "u": list(parent) if parent else None,
+                           "d": item.st_dev, "i": item.st_ino, "k": "d" if is_folder else "f"})
             entries.append(record)
 
     start(resolved, recursive, visit, errors)
@@ -397,7 +484,7 @@ def command_grant_access(arguments):
     recursive = arguments.recursive == "yes"
     errors = []
 
-    def visit(handle, item, path, is_folder):
+    def visit(handle, item, path, is_folder, parent=None):
         try:
             current = read_list(handle, ACCESS)
             wanted = access_with_grant(current, stat.S_IMODE(item.st_mode), is_folder, agent, arguments.permissions)
@@ -415,7 +502,7 @@ def command_grant_default(arguments):
     errors = []
     owner = []
 
-    def visit(handle, item, path, is_folder):
+    def visit(handle, item, path, is_folder, parent=None):
         if not is_folder:
             return
         try:
@@ -530,10 +617,13 @@ def load_snapshot(path, folder, recursive, warnings):
     try:
         with open(path, encoding="utf-8") as handle:
             document = json.load(handle)
-        if document.get("format") != FORMAT or document.get("folder") != os.fsencode(folder).hex() \
+        if document.get("format") not in (2, FORMAT) or document.get("folder") != os.fsencode(folder).hex() \
                 or document.get("recursive") != recursive:
             raise ValueError("it is not for this folder, or it is in an older format")
         document["by_identity"] = {(item["d"], item["i"]): item for item in document["entries"]}
+        # (parent, name) -> the folder recorded there, to tell a folder replaced by a link or another folder
+        document["by_place"] = {(tuple(item["u"]), item["n"]): item for item in document["entries"]
+                                if item.get("k") == "d" and item.get("u")}
         return document
     except FileNotFoundError:
         warnings.add("could not restore the earlier access control lists of %s: there is no snapshot at %s. "
@@ -634,11 +724,20 @@ def restore_folder(arguments):
         return 0
     owner = snapshot["context"]["owner"] if snapshot else info.st_uid
     recorded = snapshot["by_identity"] if snapshot else {}
-    seen, changes, errors = set(), [], []
+    changes, errors = [], []
+    by_place = snapshot["by_place"] if snapshot else {}
 
-    def visit(fd, item, path, is_folder):
-        seen.add((item.st_dev, item.st_ino))
+    def replaced(parent, name, path, what):
+        item = by_place.get((tuple(parent), name.hex())) if parent else None
+        if item is not None:
+            warnings.add("%s was a folder when the grant was made and is now %s; it was not followed" % (printable(path), what))
+
+    def visit(fd, item, path, is_folder, parent=None):
         earlier = recorded.get((item.st_dev, item.st_ino), {})
+        if is_folder and parent:
+            place = by_place.get((tuple(parent), path.rsplit(b"/", 1)[-1].hex()))
+            if place is not None and (place["d"], place["i"]) != (item.st_dev, item.st_ino):
+                warnings.add("%s is not the folder that was recorded (it was replaced during the grant)" % printable(path))
         try:
             undo_access(fd, agent, owner, earlier.get("access"), changes)
             if is_folder and recursive:
@@ -646,25 +745,12 @@ def restore_folder(arguments):
         except OSError as error:
             errors.append((path, error.strerror))
 
-    start(resolved, recursive, visit, errors)
-    warned = []
-    for item in sorted((item for item in recorded.values() if item["k"] == "d"), key=lambda item: item["p"]):
-        path = bytes.fromhex(item["p"])
-        if any(path.startswith(prefix + b"/") for prefix in warned):
-            continue
-        try:
-            now = os.lstat(path)
-        except OSError:
-            continue
-        if stat.S_ISLNK(now.st_mode):
-            warnings.add("%s was a folder when the grant was made and is now a symbolic link; the link was not followed"
-                         % printable(path))
-            warned.append(path)
-        elif (now.st_dev, now.st_ino) != (item["d"], item["i"]):
-            warnings.add("%s is not the folder that was recorded (it was replaced during the grant)" % printable(path))
-            warned.append(path)
+    start(resolved, recursive, visit, errors,
+          lambda parent, name, path: replaced(parent, name, path, "a symbolic link"))
     for path, reason in errors[:LISTED]:
         say("error: %s: %s" % (printable(path), reason))
+    if len(errors) > LISTED:
+        say("error: and %d more" % (len(errors) - LISTED))
     return EXIT_FAILED if errors else 0
 
 
@@ -690,7 +776,7 @@ def command_status(arguments):
         return 0
     left = []
 
-    def visit(fd, item, path, is_folder):
+    def visit(fd, item, path, is_folder, parent=None):
         for name in (ACCESS, DEFAULT) if is_folder and recursive else (ACCESS,):
             entries = read_list(fd, name)
             if entries and any(tag == USER and number == agent for tag, _, number in entries):
@@ -744,8 +830,31 @@ def parser():
     return top
 
 
+RECOVERY = {
+    "restore": "the account %s may be locked and expired until this finishes. fix the cause above (for a folder it "
+               "names that is too deep or cannot be read, remove it with rm -r), then run the same uninstall, rollback "
+               "or repair command again: it continues where it stopped, and uninstall removes the account at the end.",
+    "grant-access": "the account %s stays locked and expired until a run finishes. fix the cause above, then run the "
+                    "same install or rollback command again: it finishes the grant and gives the account back.",
+    "grant-default": "the account %s stays locked and expired until a run finishes. fix the cause above, then run the "
+                     "same install or rollback command again: it finishes the grant and gives the account back.",
+    "record": "the account %s stays locked and expired until a run finishes. fix the cause above, then run the same "
+              "install or rollback command again: it records the folder and gives the account back.",
+}
+
+
+def raise_descriptor_limit():
+    """a tree is walked with a bounded number of descriptors, but raise the soft limit anyway where allowed."""
+    try:
+        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        if soft != hard:
+            resource.setrlimit(resource.RLIMIT_NOFILE, (hard, hard))
+    except (ValueError, OSError):
+        pass
+
+
 def main(argv):
-    sys.setrecursionlimit(10000)
+    raise_descriptor_limit()
     try:
         arguments = parser().parse_args(argv)
     except SystemExit as stop:
@@ -753,14 +862,21 @@ def main(argv):
     if arguments.command == "repair":
         arguments.snapshot = ""
         arguments.command = "restore"
+    command = arguments.command
     try:
-        return {"check": command_check, "record": command_record, "restore": command_restore,
-                "status": command_status, "grant-access": command_grant_access,
-                "grant-default": command_grant_default, "quiesce": command_quiesce,
-                "release": command_release}[arguments.command](arguments)
+        status = {"check": command_check, "record": command_record, "restore": command_restore,
+                  "status": command_status, "grant-access": command_grant_access,
+                  "grant-default": command_grant_default, "quiesce": command_quiesce,
+                  "release": command_release}[command](arguments)
     except (OSError, Failure, subprocess.CalledProcessError) as error:
         say("error: %s" % error)
-        return EXIT_FAILED
+        status = EXIT_FAILED
+    except Exception as error:  # nothing leaves here as a traceback: the person needs to know what to do next
+        say("error: unexpected %s: %s" % (type(error).__name__, error))
+        status = EXIT_FAILED
+    if status == EXIT_FAILED and command in RECOVERY:
+        say("recovery: " + RECOVERY[command] % getattr(arguments, "user", "agent"))
+    return status
 
 
 if __name__ == "__main__":
