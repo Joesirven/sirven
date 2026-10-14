@@ -149,7 +149,7 @@ PY
 # KIND is install for an install, anything else for the rest. ROOT_DIR is this script's physical folder. as root on linux it
 # either returns, having vetted the folder it will read its libraries from, or runs the kept copy instead, or refuses.
 sirven_gate() {
-  local entry="$1" kind="$2" owner="${SUDO_USER:-root}" kept="" output who dir
+  local entry="$1" kind="$2" owner="${SUDO_USER:-root}" kept="" output who dir real
   shift 2
   [ "$EUID" -eq 0 ] || return 0
   [ "$(/usr/bin/uname -s)" = Linux ] || return 0
@@ -159,10 +159,13 @@ sirven_gate() {
   fi
   # tools under /usr/local (tailscale, cloudflared, bb) are found only if root alone controls the folder and every folder above
   # it, checked now with the same checker; they come after the system folders, and a folder that fails is left out and said so
+  # (the physical path is vetted and the physical path is what goes on PATH: a link at /usr/local/bin that somebody can swap after
+  # the check would otherwise be checked as one folder and searched as another)
   for dir in /usr/local/sbin /usr/local/bin; do
     [ -d "$dir" ] || continue
-    if output="$(sirven_vet "$dir" root 2>&1)"; then
-      PATH="$PATH:$dir"
+    real="$(cd -P "$dir" 2>/dev/null && pwd -P)" || real=""
+    if [ -n "$real" ] && output="$(sirven_vet "$real" root 2>&1)"; then
+      PATH="$PATH:$real"
     else
       printf 'warning: %s is not on root'"'"'s search path: somebody besides root can change it or something in it:\n%s\n' "$dir" "$output" >&2
     fi
