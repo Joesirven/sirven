@@ -6,25 +6,35 @@
 set -uo pipefail
 . "$(dirname "$0")/../../lib/world.sh"
 cd "$SRC" || exit 2
-mkdir -p /tmp/stub
-cat > /tmp/stub/wrap <<'SCRIPT'
+# the wrappers live where root looks for the tools (it resets its search path, so a folder put first on PATH is ignored): each
+# real tool is copied to NAME.real and replaced by a script that counts the calls that change state and kills the installer's
+# process group just before the Kth. a call that does not match passes straight through.
+cat > /tmp/wrap.tpl <<'SCRIPT'
 #!/bin/bash
+# the name it was called by (pkill and pgrep are links to one file), the real tool beside it
 name=$(basename "$0")
-real=$(PATH=${PATH#/tmp/stub:} command -v "$name")
+real=@REAL@
 case "$name" in
-  rm) case "$*" in *agent-quiesce*) ;; *) exec "$real" "$@" ;; esac ;;
-  mv) case "$*" in *.revoked*) ;; *) exec "$real" "$@" ;; esac ;;
-  python3) case "$*" in *kill_switch.py*remove-keys*|*access_control_snapshot.py*restore*) ;; *) exec "$real" "$@" ;; esac ;;
+  usermod | pkill) ;;
+  rm) case "$*" in *agent-quiesce*) ;; *) exec -a "$name" "$real" "$@" ;; esac ;;
+  mv) case "$*" in *.revoked*) ;; *) exec -a "$name" "$real" "$@" ;; esac ;;
+  python3*) case "$*" in *kill_switch.py*remove-keys*|*access_control_snapshot.py*restore*) ;; *) exec -a "$name" "$real" "$@" ;; esac ;;
+  *) exec -a "$name" "$real" "$@" ;;
 esac
 n=$(( $(cat /tmp/kcount 2>/dev/null || echo 0) + 1 )); echo "$n" > /tmp/kcount
-if [ "$n" = "$(cat /tmp/ktarget)" ]; then
+if [ "$n" = "$(cat /tmp/ktarget 2>/dev/null)" ]; then
   echo "before call $n: $name $*" > /tmp/kkill.log
   kill -KILL -- "-$KPGID"; echo "group kill did not stop us (rc $?)" >> /tmp/kkill.log; sleep 5; exit 137
 fi
-exec "$real" "$@"
+exec -a "$name" "$real" "$@"
 SCRIPT
-chmod +x /tmp/stub/wrap
-for c in usermod pkill mv rm python3; do ln -sf wrap /tmp/stub/$c; done
+for c in usermod pkill python3 rm mv; do
+  real="$(readlink -f "$(command -v "$c")")"
+  cp -p "$real" "$real.real"
+  sed -e "s|@REAL@|$real.real|" /tmp/wrap.tpl > "$real.wrapped"
+  chmod 755 "$real.wrapped"
+  mv "$real.wrapped" "$real"
+done
 
 fresh() {
   bash /var/lib/sirven/package/uninstall.sh >/dev/null 2>&1
@@ -41,7 +51,7 @@ state() {
 }
 revoke_killing() {  # K
   echo 0 > /tmp/kcount; echo "$1" > /tmp/ktarget; rm -f /tmp/kkill.log
-  setsid -w bash -c 'export KPGID=$$; PATH=/tmp/stub:$PATH exec bash install.sh revoke --all --yes --transport none' > /tmp/rev.out 2>&1
+  setsid -w bash -c 'export KPGID=$$; exec bash install.sh revoke --all --yes --transport none' > /tmp/rev.out 2>&1
   REV_STATUS=$?
 }
 revoke_plain() { echo 0 > /tmp/ktarget; bash install.sh revoke --all --yes --transport none > /tmp/rev2.out 2>&1; REV2=$?; }
@@ -49,6 +59,7 @@ revoke_plain() { echo 0 > /tmp/ktarget; bash install.sh revoke --all --yes --tra
 echo "== clean run =="
 fresh; revoke_killing 0; echo "exit $REV_STATUS: $(state)"; world_accounts | grep -v '^agent' > /tmp/clean.accounts; world_acls /srv > /tmp/clean.acls
 total="$(cat /tmp/kcount)"; echo "wrapped calls in a clean run: $total"
+[ "$total" -ge 6 ] && pass "the sweep wraps $total state-changing calls in a clean run" || fail "the sweep wraps only $total calls: the wrappers are not where root looks for the tools, so nothing is tested"
 
 echo "== mode A: kill before call K, run revoke again =="
 for k in $(seq 1 $((total + 1))); do

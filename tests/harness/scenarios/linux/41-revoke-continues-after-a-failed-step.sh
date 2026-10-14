@@ -39,8 +39,8 @@ bash install.sh --yes --level builder --transport none --path /srv/app >/dev/nul
 echo 'ssh-ed25519 AAAAkey agent-client' > /home/agent/.ssh/authorized_keys && chown agent:agent /home/agent/.ssh/authorized_keys
 setsid runuser -u agent -- sleep 600 >/dev/null 2>&1 &
 sleep 0.3
-mkdir -p /run/systemd/system /tmp/stub /tmp/units
-cat > /tmp/stub/systemctl <<'SCRIPT'
+mkdir -p /run/systemd/system /tmp/units
+cat > /usr/sbin/systemctl <<'SCRIPT'
 #!/bin/sh
 case "$1" in
   list-unit-files) printf 'sirven-agent.service enabled enabled\n' ;;
@@ -51,15 +51,15 @@ case "$1" in
   stop) echo "stub: cannot stop $2" >&2; exit 1 ;;
 esac
 SCRIPT
-chmod +x /tmp/stub/systemctl; touch /tmp/units/sirven-agent.service.active
-check_exit "a unit will not stop: revoke ends with exit 4" 4 env PATH="/tmp/stub:$PATH" bash install.sh revoke --all --yes --transport none
+chmod +x /usr/sbin/systemctl; touch /tmp/units/sirven-agent.service.active
+check_exit "a unit will not stop: revoke ends with exit 4" 4 bash install.sh revoke --all --yes --transport none
 out="$LAST_OUTPUT"
 check "it lists the failed step and says the others ran" bash -c 'grep -q "steps failed, each listed here, and the others ran" <<< "$0" && grep -q "stop and disable every service" <<< "$0" && grep -q "the other steps still run" <<< "$0"' "$out"
 check "yet the account is locked, no process, no key, no entry of the agent on /srv" bash -c "$(declare -f locked no_entry); locked && ! pgrep -u agent && [ ! -e /home/agent/.ssh/authorized_keys ] && no_entry"
 check "the grant record was left in place for the next run" bash -c '[ -f /etc/sirven/grants/agent.json ] && [ ! -e /etc/sirven/grants/agent.json.revoked ]'
 check "the last check named what is still open" grep -q 'the last check of the machine found what is still open' <<< "$out"
 rm -f /tmp/units/sirven-agent.service.active
-check_exit "once the unit is down the same command finishes" 0 env PATH="/tmp/stub:$PATH" bash install.sh revoke --all --yes --transport none
+check_exit "once the unit is down the same command finishes" 0 bash install.sh revoke --all --yes --transport none
 check "and the record is renamed now" test -f /etc/sirven/grants/agent.json.revoked
 
 finish

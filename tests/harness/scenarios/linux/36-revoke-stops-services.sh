@@ -11,8 +11,9 @@ cd "$SRC" || exit 2
 mkdir -p /srv/app && echo f > /srv/app/f
 bash install.sh --yes --level observer --transport none --path /srv/app >/dev/null 2>&1
 
-mkdir -p /run/systemd/system /tmp/stub /tmp/units
-cat > /tmp/stub/systemctl <<'SCRIPT'
+# root resets its search path, so the stand-ins live where the tools do (/usr/sbin), not in a folder put first on PATH
+mkdir -p /run/systemd/system /tmp/units
+cat > /usr/sbin/systemctl <<'SCRIPT'
 #!/bin/sh
 state=/tmp/units
 case "$1" in
@@ -30,7 +31,7 @@ case "$1" in
   disable) rm -f "$state/$2.enabled"; echo "disable $2" >> /tmp/stub.log ;;
 esac
 SCRIPT
-cat > /tmp/stub/loginctl <<'SCRIPT'
+cat > /usr/sbin/loginctl <<'SCRIPT'
 #!/bin/sh
 case "$1" in
   show-user) case "$3" in
@@ -41,10 +42,9 @@ case "$1" in
   terminate-user) rm -f /tmp/units/session; echo "terminate-user $2" >> /tmp/stub.log ;;
 esac
 SCRIPT
-chmod +x /tmp/stub/systemctl /tmp/stub/loginctl
+chmod +x /usr/sbin/systemctl /usr/sbin/loginctl
 touch /tmp/units/sirven-agent.service.active /tmp/units/sirven-agent.service.enabled /tmp/units/other.service.active /tmp/units/other.service.enabled /tmp/units/linger /tmp/units/session
 touch /tmp/units/sirven-agent.timer.active /tmp/units/sirven-agent.timer.enabled /tmp/units/sirven-agent@agent.service.active /tmp/units/sirven-agent@agent.service.enabled
-export PATH="/tmp/stub:$PATH"
 
 touch /tmp/stub-cannot-stop
 check_exit "revoke fails (exit 4) when a service of the agent cannot be stopped" 4 bash install.sh revoke --all --yes --transport none

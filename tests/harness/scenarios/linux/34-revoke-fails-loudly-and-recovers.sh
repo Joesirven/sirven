@@ -33,8 +33,8 @@ check_exit "revoke fails with exit 4 while a snapshot is locked" 4 env SIRVEN_SN
 out="$LAST_OUTPUT"
 check "it says the snapshot is in use" grep -q 'in use by another process' <<< "$out"
 check "it says the kill switch did not finish, and the account is locked, expired and without a process" grep -q 'the kill switch did not finish every step, but agent is locked, expired, and has no process' <<< "$out"
-check "the hint is to run revoke --all again, from the kept copy" grep -q 'run the same command again: sudo bash /var/lib/sirven/package/install.sh revoke --all' <<< "$out"
-check "the hint does not tell the owner to give the account back" bash -c 'grep -q "run the same command again: sudo bash /var/lib/sirven/package/install.sh revoke --all" <<< "$0" && ! grep -qi "release\|give the account back" <<< "$0"' "$out"
+check "the hint is to run revoke --all again, from the kept copy" grep -q 'run the same command again: sudo /usr/local/sbin/sirven revoke --all' <<< "$out"
+check "the hint does not tell the owner to give the account back" bash -c 'grep -q "run the same command again: sudo /usr/local/sbin/sirven revoke --all" <<< "$0" && ! grep -qi "release\|give the account back" <<< "$0"' "$out"
 check "it lists the failed restore and says the others ran" bash -c 'grep -q "steps failed, each listed here, and the others ran" <<< "$0" && grep -q "the other steps still run" <<< "$0"' "$out"
 check "the account is locked, expired, and on the nologin shell" bash -c '
   [ "$(getent passwd agent | cut -d: -f7)" = /usr/sbin/nologin ] && passwd --status agent | grep -q "^agent L" &&
