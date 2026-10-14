@@ -163,12 +163,13 @@ test_revoke_apply_says_not_yet() {
   assert_no_file "$root"
 }
 
-test_real_apply_is_refused_outside_a_container() {
-  if [ -f /.dockerenv ] || [ -f /run/.containerenv ]; then
+test_real_apply_is_refused_without_root() {
+  # as root this would really apply to the machine running the tests, so only a non-root run is checked here.
+  if [ "$(id -u)" = 0 ]; then
     return 0
   fi
   assert_status 3 "$REPO_DIR/install.sh" --path /srv/app --transport none
-  assert_contains "$CAPTURED_STDERR" "not applied"
+  assert_contains "$CAPTURED_STDERR" "applying needs root"
 }
 
 test_os_override_needs_dry_run_or_prefix() {

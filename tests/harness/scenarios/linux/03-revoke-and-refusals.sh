@@ -14,6 +14,7 @@ sleep 0.3
 check "precondition: a process of agent is running" pgrep -u agent
 
 check_exit "revoke --all refuses to apply while it is plan only" 3 bash install.sh revoke --all --yes --level observer --transport none --path /srv/app
+check "the refusal points to uninstall, the undo that works today" grep -q 'to undo this install today, use ./uninstall.sh' <<< "$LAST_OUTPUT"
 check "a refused revoke changed nothing: agent still exists" id -u agent
 known_defect "revoke --all applies and exits 0" SIR-32 \
   bash -c 'cd "$0" && bash install.sh revoke --all --yes --level observer --transport none --path /srv/app >/dev/null' "$SRC"

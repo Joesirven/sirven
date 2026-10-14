@@ -118,8 +118,9 @@ test_owner_steps_are_shown_but_not_run() {
   assert_no_file "$TEST_TMP/never"
 }
 
-test_real_apply_is_refused_outside_a_container() {
-  if in_container; then
+test_real_apply_is_refused_without_root() {
+  # as root this would really apply to the machine running the tests
+  if [ "$(id -u)" = 0 ]; then
     return 0
   fi
   setup_fake_root
@@ -127,8 +128,21 @@ test_real_apply_is_refused_outside_a_container() {
   add_directory_step /etc/sirven
   plan_evaluate
   assert_status 3 plan_apply
-  assert_contains "$CAPTURED_STDERR" "throwaway container"
+  assert_contains "$CAPTURED_STDERR" "applying needs root"
   assert_no_file "$ROOT/etc/sirven"
+}
+
+test_real_apply_on_linux_is_allowed_for_root_container_or_not() {
+  PLAN_PREFIX=""
+  PLAN_OPERATING_SYSTEM=linux
+  id() { printf '0'; }
+  in_container() { return 1; }
+  assert_eq "" "$(plan_real_apply_refusal)"
+  in_container() { return 0; }
+  assert_eq "" "$(plan_real_apply_refusal)"
+  id() { printf '1000'; }
+  in_container() { return 1; }
+  assert_contains "$(plan_real_apply_refusal)" "applying needs root"
 }
 
 test_real_apply_on_macos_is_refused() {

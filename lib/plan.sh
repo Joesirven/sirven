@@ -313,17 +313,15 @@ plan_summary() {
 }
 
 # why a real (no --prefix) apply is refused, or nothing when it is allowed.
-# the alpha cut only changes a real system inside a linux container, as root.
+# a real linux machine, container or not, is changed only by root. macos stays refused.
 plan_real_apply_refusal() {
   if [ -n "$PLAN_PREFIX" ]; then
     return 0
   fi
   if [ "$PLAN_OPERATING_SYSTEM" != linux ]; then
     printf 'applying to a real macos machine is not verified yet; use --dry-run, or --prefix for a fake root'
-  elif ! in_container; then
-    printf 'the alpha cut only applies to a real system inside a throwaway container; use --dry-run, or --prefix for a fake root'
   elif [ "$(id -u)" != 0 ]; then
-    printf 'applying needs root; run it with sudo inside the container'
+    printf 'applying needs root; run it with sudo'
   fi
 }
 

@@ -84,7 +84,7 @@ examples:
   ./install.sh --dry-run --prefix /tmp/fake-root --level observer --path /srv/app --transport none
   ./install.sh revoke --all --dry-run
 
-nothing is applied to a real machine in the alpha cut, except inside a linux container as root.
+a real linux machine is changed only when run as root. macos is not applied yet.
 END
 }
 
@@ -266,6 +266,26 @@ build_plan() {
   fi
 }
 
+# confirm_real_apply: the first change to a real machine (no --prefix, not a container) is never
+# silent. --yes (or SIRVEN_YES) is the owner's explicit consent; otherwise the plan just printed must be
+# answered with the word yes on a terminal. with no terminal and no --yes, nothing is applied.
+# a container is a throwaway machine, so it is not asked.
+confirm_real_apply() {
+  local terminal answer=""
+  [ -z "$PREFIX" ] || return 0
+  [ "$ASSUME_YES" != yes ] || return 0
+  ! in_container || return 0
+  terminal="$(_setup_terminal)"
+  if [ -z "$terminal" ]; then
+    DIE_STATUS=3 die "not applied: this is a real machine and there is no terminal to confirm the plan on; read the plan above, then run again with --yes"
+  fi
+  printf '\nthis changes the real machine %s. type yes to apply the plan above: ' "$(hostname 2>/dev/null || echo this)" >&2
+  if [ "$terminal" = tty ]; then read -r answer < /dev/tty || true; else read -r answer || true; fi
+  if [ "$(lowercase "$answer")" != yes ]; then
+    DIE_STATUS=3 die "not applied: the plan was not confirmed; nothing was changed"
+  fi
+}
+
 finish() {
   local status=0
   plan_print
@@ -280,7 +300,11 @@ finish() {
     fi
     return 0
   fi
+  confirm_real_apply
   apply_for_real || status=$?
+  if [ "$COMMAND" = revoke ] && [ "$status" -eq 3 ]; then
+    say "revoke is plan only for now. nothing was changed. to undo this install today, use ./uninstall.sh --dry-run to read the removal plan, then ./uninstall.sh to apply it." >&2
+  fi
   return "$status"
 }
 

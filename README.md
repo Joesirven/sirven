@@ -37,15 +37,17 @@ sudo bash install.sh             # answer two questions: level, folder
 bash bin/sirven grant inspect    # see exactly what the agent can touch
 ```
 
-Today the installer applies its plan only inside a Linux container run as root. On any other
-machine it refuses before changing anything, and `--dry-run` still shows the full plan. With the
-npm package (`npm install -g @joesirven/sirven`), `sirven` is on your path directly.
+The installer applies its plan to a real Linux machine when it is run as root (`sudo`). It prints the
+plan first and then asks you to type `yes`; with `--yes` it asks nothing. On macOS it stops before
+any change: use `--dry-run` to read the plan, or `--prefix` for a fake root. `sudo bash uninstall.sh`
+removes what the install created. With the npm package (`npm install -g @joesirven/sirven`),
+`sirven` is on your path directly.
 
 Full walkthrough: [docs/WALKTHROUGH.md](docs/WALKTHROUGH.md).
 
 ## What it does not do yet
 
-Stated plainly so you can trust the rest. Applying the plan to a regular Linux or macOS machine is not verified yet, so there the installer stops before any change: use `--dry-run`, or `--prefix` to apply into a fake root. The audit log covers the install and every grant change. Per-session and per-command logging goes through a forced-command wrapper that is designed and not built yet. Kernel-level auditing is designed and not built. The `operator` level's service restarts and log reads are designed and not built.
+Stated plainly so you can trust the rest. Applying the plan to a macOS machine is not verified yet, so there the installer stops before any change: use `--dry-run`, or `--prefix` to apply into a fake root. The kill switch (`install.sh revoke`) is plan output only; until it is built, `uninstall.sh` is the working way to undo an install. The audit log covers the install and every grant change. Per-session and per-command logging goes through a forced-command wrapper that is designed and not built yet. Kernel-level auditing is designed and not built. The `operator` level's service restarts and log reads are designed and not built.
 
 ## Read more
 

@@ -117,12 +117,13 @@ test_uninstall_reverses_what_a_rollback_granted() {
   assert_contains "$CAPTURED_STDOUT" "$ROOT/srv/app"
 }
 
-test_real_rollback_is_refused_outside_a_container() {
-  if [ -f /.dockerenv ] || [ -f /run/.containerenv ]; then
+test_real_rollback_is_refused_without_root() {
+  # as root this would really apply to the machine running the tests, so only a non-root run is checked here.
+  if [ "$(id -u)" = 0 ]; then
     return 0
   fi
   assert_status 3 "$REPO_DIR/bin/sirven" grant rollback
-  assert_contains "$CAPTURED_STDERR" "not applied"
+  assert_contains "$CAPTURED_STDERR" "applying needs root"
 }
 
 test_runs_through_a_symbolic_link() {

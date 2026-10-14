@@ -106,12 +106,13 @@ test_a_record_not_owned_by_root_is_refused_on_a_real_root() {
   assert_contains "$CAPTURED_STDERR" "does not belong to root"
 }
 
-test_real_apply_is_refused_outside_a_container() {
-  if [ -f /.dockerenv ] || [ -f /run/.containerenv ]; then
+test_real_apply_is_refused_without_root() {
+  # as root this would really apply to the machine running the tests, so only a non-root run is checked here.
+  if [ "$(id -u)" = 0 ]; then
     return 0
   fi
   assert_status 3 "$REPO_DIR/uninstall.sh"
-  assert_contains "$CAPTURED_STDERR" "not applied"
+  assert_contains "$CAPTURED_STDERR" "applying needs root"
 }
 
 test_install_after_uninstall_records_again() {
