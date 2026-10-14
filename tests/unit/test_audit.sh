@@ -25,7 +25,16 @@ test_strings_are_escaped() {
   local tricky line
   tricky="$(printf 'a "quoted" back\\slash\ttab\nnew line\001bell')"
   line="{\"value\": $(audit_json_string "$tricky")}"
-  assert_eq "$(printf 'a "quoted" back\\slash\ttab\nnew linebell')" "$(json_field "$line" value)"
+  assert_eq "$(printf 'a "quoted" back\\slash\ttab\nnew line\001bell')" "$(json_field "$line" value)"
+}
+
+test_the_escaper_output_parses_as_json() {
+  local tricky escaped
+  # a backslash, a double quote, a newline, a tab, a control byte, and a unicode character (é)
+  tricky="$(printf 'b\\s "q" n\nt\tc\001u\303\251')"
+  escaped="$(audit_json_string "$tricky")"
+  printf '{"value": %s}' "$escaped" | python3 -c 'import json, sys; json.load(sys.stdin)' || fail "escaped output is not JSON: $escaped"
+  assert_eq "$(printf 'b\\s "q" n\nt\tc\001u\303\251')" "$(json_field "{\"value\": $escaped}" value)"
 }
 
 test_entries_are_json_and_values_cannot_inject_fields() {

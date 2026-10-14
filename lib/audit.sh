@@ -89,22 +89,32 @@ audit_now() {
 }
 
 # audit_json_string VALUE: VALUE as a JSON string, quotes included. backslash, quote, newline,
-# tab, and carriage return are escaped; other control characters are dropped.
+# tab, and carriage return get their two-character escapes; other control characters become \u00xx.
+# this walks the value one character at a time: bash 5 reads backslashes in the replacement text of
+# ${value//pattern/replacement} as escapes, so a replacement cannot carry a backslash portably.
 audit_json_string() {
-  local value="$1" backslash="\\" quote='"' newline tab carriage
+  local value="$1" out="" i c code backslash="\\" quote='"' newline tab carriage
   newline="
 "
   tab="$(printf '\t')"
   carriage="$(printf '\r')"
-  value=${value//"$backslash"/$backslash$backslash}
-  value=${value//"$quote"/$backslash$quote}
-  value=${value//"$newline"/${backslash}n}
-  value=${value//"$tab"/${backslash}t}
-  value=${value//"$carriage"/${backslash}r}
   case "$value" in
-    *[[:cntrl:]]*) value="$(printf '%s' "$value" | LC_ALL=C tr -d '\001-\037\177')" ;;
+    *"$quote"* | *"$backslash"* | *[[:cntrl:]]*) ;;
+    *) printf '"%s"' "$value"; return 0 ;;
   esac
-  printf '"%s"' "$value"
+  for ((i = 0; i < ${#value}; i++)); do
+    c="${value:i:1}"
+    case "$c" in
+      "$quote") out="$out$backslash$quote" ;;
+      "$backslash") out="$out$backslash$backslash" ;;
+      "$newline") out="$out${backslash}n" ;;
+      "$tab") out="$out${backslash}t" ;;
+      "$carriage") out="$out${backslash}r" ;;
+      [[:cntrl:]]) printf -v code '%02x' "'$c"; out="$out${backslash}u00$code" ;;
+      *) out="$out$c" ;;
+    esac
+  done
+  printf '"%s"' "$out"
 }
 
 # audit_json_array VALUE...: the values as a JSON array of strings.
