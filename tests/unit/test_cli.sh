@@ -65,8 +65,9 @@ test_rollback_dry_run_changes_nothing() {
   assert_status 0 sirven grant rollback --dry-run --prefix "$ROOT"
   assert_contains "$CAPTURED_STDOUT" "now: level builder on 2 path(s)"
   assert_contains "$CAPTURED_STDOUT" "after: level observer on 1 path(s)"
-  assert_contains "$CAPTURED_STDOUT" "setfacl -R -P -x u:agent $ROOT/home/example/project"
-  assert_contains "$CAPTURED_STDOUT" "setfacl -R -P -m u:agent:rX $ROOT/srv/app"
+  assert_contains "$CAPTURED_STDOUT" "access_control_snapshot.sh restore"
+  assert_contains "$CAPTURED_STDOUT" "$ROOT/home/example/project yes agent"
+  assert_contains "$CAPTURED_STDOUT" "grant-access $ROOT/srv/app yes agent rX"
   assert_contains "$CAPTURED_STDOUT" "forced-command wrapper, built after alpha"
   assert_eq "$before" "$(cat "$ROOT/etc/sirven/grants/agent.json" "$ROOT/var/log/sirven/audit.jsonl")"
 }
@@ -112,7 +113,8 @@ test_uninstall_reverses_what_a_rollback_granted() {
   assert_status 0 sirven grant rollback --prefix "$ROOT"
   assert_status 0 "$REPO_DIR/uninstall.sh" --prefix "$ROOT"
   assert_no_file "$ROOT/etc/sirven"
-  assert_contains "$CAPTURED_STDOUT" "setfacl -R -P -x u:agent $ROOT/srv/app"
+  assert_contains "$CAPTURED_STDOUT" "access_control_snapshot.sh restore"
+  assert_contains "$CAPTURED_STDOUT" "$ROOT/srv/app"
 }
 
 test_real_rollback_is_refused_outside_a_container() {

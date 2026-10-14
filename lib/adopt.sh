@@ -286,7 +286,7 @@ _adopt_conflict() {
 # adopt_refuse_conflicts: stop before any change, in a dry run too, when what is on the machine
 # cannot be kept alongside what was asked. prints every conflict and what to do about it.
 adopt_refuse_conflicts() {
-  local copy shipped owner wanted
+  local copy shipped owner wanted record_file
   _ADOPT_CONFLICTS=""
   [ "$COMMAND" = install ] || return 0
 
@@ -310,7 +310,12 @@ adopt_refuse_conflicts() {
 
   copy="${PREFIX}$CONFIG_DIR/levels/$LEVEL.json"
   shipped="$ROOT_DIR/levels/$LEVEL.json"
-  if [ -f "$copy" ] && ! cmp -s "$shipped" "$copy"; then
+  record_file="${PREFIX}$STATE_DIR/install-record.tsv"
+  if [ -f "$copy" ] && ! cmp -s "$shipped" "$copy" && [ -r "$record_file" ] && \
+    grep -q 'access_control_snapshot.sh restore\|setfacl -R -P -x u:' "$record_file" && ! grep -q -- '--audit' "$record_file"; then
+    _adopt_conflict "an install made by an older version of this package is in place (its policy copy $CONFIG_DIR/levels/$LEVEL.json and its undo steps are older than this package's), and an older undo leaves the default list, the mask and the folder owner's entry behind." \
+      "move to this version in three steps, as root: 1) sirven grant repair (from this package) removes what the old grant added. 2) the old install's own uninstall.sh (sudo bash $STATE_DIR/package/uninstall.sh) removes the account and the rest. 3) run this install again. add --dry-run to the first to see what it would remove."
+  elif [ -f "$copy" ] && ! cmp -s "$shipped" "$copy"; then
     _adopt_conflict "the installed $LEVEL policy $CONFIG_DIR/levels/$LEVEL.json differs from this package's levels/$LEVEL.json: edited by hand, or written by another version. sirven will not overwrite it." \
       "compare the two with diff. to keep yours, leave it and do not reinstall this level. to take this package's copy, move yours aside yourself and run again."
   fi

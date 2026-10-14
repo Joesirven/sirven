@@ -131,36 +131,64 @@ for each granted path, every parent folder gets a pass-through entry so the serv
 reach the path without listing anything on the way. a parent that is itself granted is left
 alone, so a pass-through entry never downgrades a grant.
 
-on linux, for builder on `/home/you/project`:
+on linux, for builder on `/home/you/project`, with a snapshot line before each change (see
+"how a grant changes" below for what the snapshot does). the grant is done by the helper in
+`lib/access_control_snapshot.py`, by file descriptor, never by path and never following a link:
 
 ```
-setfacl -m u:agent:x /home
-setfacl -m u:agent:x /home/you
-setfacl -R -P -m u:agent:rwX /home/you/project
-setfacl -R -P -d -m u:agent:rwX /home/you/project
+access_control_snapshot.sh quiesce agent /var/lib/sirven/agent-quiesce.json
+access_control_snapshot.sh grant-access /home yes|no agent x --snapshot ...        (no: this folder only)
+access_control_snapshot.sh grant-access /home/you no agent x --snapshot ...
+access_control_snapshot.sh grant-access /home/you/project yes agent rwX --snapshot ...
+access_control_snapshot.sh grant-default /home/you/project agent rwX --snapshot ...
+access_control_snapshot.sh release agent /var/lib/sirven/agent-quiesce.json
 ```
 
-`-P` keeps the walk from following symbolic links out of the granted folder. the `-d` line makes
-new files inherit the grant. capital `X` gives execute on folders only, not on every file.
+`grant-access` does what `setfacl -R -P -m u:agent:rwX` does: the agent's entry on every folder, file, pipe
+and socket in the tree, links skipped, the mask recalculated, capital `X` giving execute on folders and on
+files that already have an execute bit only. it opens the start folder one component at a time without
+following links, checks it is the folder the snapshot recorded (same device and inode), and walks down by
+descriptor, so a link the agent swaps in cannot redirect it. an earlier version ran `setfacl` by path.
+`quiesce` ends every process of the agent and locks and expires its account, writing what the account was to
+`agent-quiesce.json`; `release` puts it back as it was (an account that was already locked stays locked). the release step is not done while the marker is there, so a run that stopped before it is finished by the next run. `quiesce` repeats the kill until the agent has no process left (at most 20 tries). they
+wrap the grant steps only when a grant step has work to do, so an install that finds everything in place
+leaves a running agent alone; a rollback always runs them. whether a grant step has work to do is read from the whole tree (`verify-access`, `verify-default`), so a grant that stopped partway is finished by the next run; the mask is not compared, so an owner's chmod is not re-applied. if a step fails in between, the account stays
+locked, which is the safe state, and running the same command again finishes the job.
+
+the `-d` line makes new files inherit the grant, and it is the one that needs care. a default
+list overrides the umask of whoever creates a file, and its group and other entries come from
+the folder's own mode unless they are written out. so the line writes them out as `---`: a new
+file gets nothing for group and other, whatever the creator's umask. the agent gets the grant
+by account number, and so does the folder's owner (both looked up when the step runs, so an
+owner with no account name works; root and the agent are not added as the owner), because a file the agent
+creates would otherwise be unreadable to the owner. the result is never wider than a umask of
+077 would give. it can be narrower: a creator whose umask is 022 gets a private file here, not
+a group-readable one. `ls -l` and `stat` show the mask in the group position, because the
+mask must admit the named entries. that display is not a grant to the group: `getfacl` shows
+`group::---` and `other::---`, and those are what counts.
 
 on macos, for builder on `/Users/you/code/app`:
 
 ```
-/bin/chmod +a 'agent allow search' /Users
-/bin/chmod +a 'agent allow search' /Users/you
-/bin/chmod +a 'agent allow search' /Users/you/code
-/usr/bin/find /Users/you/code/app -type f -exec /bin/chmod +a 'agent allow read,write,append,readattr,writeattr,readextattr,writeextattr,readsecurity' {} +
-/usr/bin/find /Users/you/code/app -type d -exec /bin/chmod +a 'agent allow list,search,add_file,add_subdirectory,delete_child,readattr,writeattr,readextattr,writeextattr,readsecurity,file_inherit,directory_inherit' {} +
+/bin/chmod -h +a 'agent allow search' /Users
+/bin/chmod -h +a 'agent allow search' /Users/you
+/bin/chmod -h +a 'agent allow search' /Users/you/code
+/usr/bin/find -P /Users/you/code/app -type f -exec /bin/chmod -h +a 'agent allow read,write,append,readattr,writeattr,readextattr,writeextattr,readsecurity' {} +
+/usr/bin/find -P /Users/you/code/app -type d -exec /bin/chmod -h +a 'agent allow list,search,add_file,add_subdirectory,delete_child,readattr,writeattr,readextattr,writeextattr,readsecurity,file_inherit,directory_inherit' {} +
 ```
 
 files and folders get separate rights so plain files do not pick up folder rights. `find`
-does not follow symbolic links.
+does not follow symbolic links (`-P`), and every `chmod +a` and `chmod -a` has `-h`, so a file swapped for a link
+between `find` and `chmod` never gets an entry on whatever the link points at. `-h` protects the last path
+component only; a swapped intermediate folder is a remaining risk, not run on a Mac.
 
 `revoke` emits the matching removals, the grant first and the pass-through entries last.
 
-`compile --with-undo` adds three more fields to every line: the title, check, and command of
-the removal that reverses it, the same removal `revoke` prints. `install.sh` compiles this way
-so each entry it really applies can go into the install record with its undo.
+`compile --with-undo` adds three more fields to the snapshot line of each folder, the title, check,
+and command that put its access control lists back. `install.sh` compiles this way, so each
+snapshot it really applies goes into the install record with its undo. every snapshot comes
+before the first change, so a path nested inside another granted path is recorded before the
+outer grant reaches it.
 
 ## grant record
 
@@ -209,15 +237,112 @@ the kill switch reads it to know what to remove.
   recorded: the package did not create them.
 - **inspect.** `bin/sirven grant inspect` reads the grant records, says whether the installed
   policy copy still matches `levels/`, and shows the last grant entry from the audit log.
+- **refusal (linux).** before anything changes, the plan reads the granted folders and the parents the
+  agent passes through (`lib/access_control_snapshot.sh check`). a grant recalculates the mask. that
+  widens another account only where the account has an entry with bits the mask now switches off (a file
+  with `user:bob:rw-` and `mask::r--` lets bob only read; after the grant he could write). so the check
+  refuses exactly that: an entry for another account or a named group with bits outside the current mask.
+  an entry that fits inside the mask is fine, however many there are. it never counts the agent's own and
+  the folder owner's entries (an earlier grant), and it skips every path the agent owns, because the agent
+  can put any entry on its own files itself: so the agent can never block a step down to a lower level or
+  a rollback. the group entry is not refused either: the grant narrows the group entry and the other named
+  entries to the old mask before it raises the mask, so an owner's `chmod 600` is not undone by a re-grant
+  and the group stays shut out. up to ten paths are listed, with `setfacl -x u:NAME PATH` as the way on. the
+  check is read only, and under `--dry-run` as an ordinary user it says it could not read every path instead
+  of refusing. the one case still refused after an owner narrowed a mask: another account's own entry would be
+  switched back on by the re-grant.
+- **snapshot and restore (linux).** before a grant changes a folder, install records it:
+  for a granted folder, every folder in it (path, device, inode), the default list of each, and any
+  entries of the agent or the folder owner from an earlier grant; for a parent the agent only passes
+  through, the folder alone. the record is a root-only file in `/var/lib/<package>/access-lists/`,
+  named after a hash of the path. names are recorded as bytes, so a newline or a backslash in a name
+  is safe.
+
+  **exactly what undo changes**, and nothing else: on every path in the tree, the named entries for the
+  agent (and for the folder owner, where the agent's entry is also there); on folders, the default list
+  when it carries the agent's entry, replaced by the one recorded before the grant (if there was one).
+  when a path had named entries before the grant, its recorded mask comes back (not the wider one the grant raised it to). when no named entry is left on a path, its list collapses to a plain mode: the group bits become the
+  group entry AND the mask, which is what the group could really do. it **never changes an owner or a
+  group, and never touches the owner bits, the other bits or the special bits** (setuid, setgid, sticky).
+  so a `chmod 600` the owner made during the grant, a `chown` or `chmod` by root, a setuid bit, and a
+  `chmod 700` on a pass-through parent all stay. one deliberate exception: while a list has a mask,
+  `chmod` changes the mask, not the group entry, so a chmod that **widens** the group bits during the grant
+  (644 to 664) does not survive undo (the file ends 644, which is what the group could do all along).
+  using the mask as the group bits would have widened access nobody granted.
+  this holds for uninstall, rollback and the kill switch alike.
+
+  **the snapshot is as large as the lists the tree already had, not as large as the tree.** it records only paths
+  that held a list before the grant (a default list, a mask, a named entry: earlier default lists, earlier entries of
+  the agent or the folder owner), written into a sqlite file as the walk goes and looked up by device and inode
+  when undo meets each path, so nothing is loaded whole. an agent that makes 300,000 empty folders adds nothing to
+  it and costs 15 MB to record and 15 MB to restore (it was 239 MB and 335 MB). the cost is that the warning for a
+  folder the agent replaced with a link now names only folders that held a list; a swapped folder with no list
+  of its own is not followed either, but is not named in the audit log. snapshots written by earlier versions of this
+  package (a text format) are not read: undo treats them as missing, removes the grant's entries and warns.
+
+  **a snapshot that cannot be used.** the Linux preflight refuses a python3 without the sqlite3 module before any
+  change (install the python3 standard library package; `python3-minimal` without the recommended packages leaves it
+  out). when a snapshot is checked as it is opened (a quick integrity check of the whole file) and found damaged, in
+  its header or in its middle pages, or goes bad during the walk, undo removes the grant's entries anyway, warns
+  loudly (also as an audit `warning` event), and renames the file aside as `NAME.unusable-TIMESTAMP`, printing the new
+  name; it is never deleted, and it is a sqlite file whose `entries` table holds the lists. what is lost is only the
+  lists the folder had before the grant (an owner's own default list, a mask): they are not put back, and the warning
+  says so. a snapshot that python3 cannot read for lack of the module is left where it is, and the same command works
+  once the module is installed. a snapshot locked by another process is not unusable: undo waits
+  (`SIRVEN_SNAPSHOT_WAIT` seconds, default 30), then fails with the file untouched and says to end that process and
+  run the same command again; nothing is removed, the account stays locked until it does.
+
+  **memory.** the walk keeps no path per open folder and no listing for a folder it let go of: a folder is a
+  few small values and its own name, the path is built only when something is printed, and a let-go folder is
+  listed again (sorted, resuming after the last name read) when it is reopened. problems are counted and only
+  the first ten are kept. so 3,000 levels of 255-character names, or 240,000 long-named files, stay under about
+  25 MB in the install-time check and in uninstall, and a tree of 301,001 entries takes about 10.5 s to
+  install and 4.0 s to uninstall, each with about 15 MB in the helper. a folder lost from under the walk (moved, replaced or removed after it
+  was let go) is an error with a recovery hint, never a silent skip.
+
+  **depth and descriptors.** the walk is iterative and keeps the deepest 48 folders open, whatever the depth,
+  so a chain of 12,000 folders made by the agent undoes under an open-file limit of 1,024. a folder let
+  go is opened again through `..` and checked against the device and inode recorded when it was first
+  opened (a slow reopen by name if the tree was moved). a path deeper than 30,000 levels is reported by
+  name and skipped, with a hint to remove it (`rm -r`) and run again. no exception leaves as a traceback; a
+  failure prints `error:` lines and a `recovery:` line, and the account stays locked and expired until a run
+  finishes, which the install, rollback and uninstall messages say, with how to give it back now
+  (`access_control_snapshot.sh release AGENT MARKER`).
+
+  **links.** undo never follows a link. it opens the granted folder one component at a time without
+  following links and checks it is still the folder that was recorded (same device and inode),
+  then walks down by file descriptor and reads and writes the list on the open descriptor, so there is
+  no path to swap under it. a folder the agent replaced with a link is skipped, and a warning
+  event goes to the audit log. before the first list is put back, undo expires the agent's account and
+  ends its processes, so nothing the agent runs can change the folders meanwhile (a rollback ends the agent first too, at the start of its removal, and gives the account back at the end,
+  also when it goes back to no grant).
+
+  **a missing or unusable snapshot.** undo does not treat that as done. the step's check is the state
+  of the folder (an entry of the agent left, or the snapshot still there), not whether the snapshot
+  file exists. with no snapshot it still removes everything the grant added, prints `warning: could
+  not restore the earlier access control lists ...`, and writes a `warning` event to the audit log. it
+  exits 0, because a non-zero exit would stop uninstall before the account is removed. what it cannot
+  put back is a default list the folder had before the grant. look with `getfacl -R -p FOLDER`.
+  a pipe, socket or device in the tree is reached through an `O_PATH` descriptor, never opened.
+
+  **installs made before this change.** the install record stores the undo command text, so an install
+  made by an earlier version keeps its old undo (`setfacl -R -P -x u:agent` and `-d -x`, or the
+  first version of the snapshot helper), which leaves the default list, the mask and the folder
+  owner's entry behind. the alpha cut applies only inside throwaway containers, so none exist outside
+  them. to repair one, from a checkout of this package, as root:
+  `bash lib/access_control_snapshot.sh repair FOLDER yes AGENT` for each granted folder, and
+  `... repair PARENT no AGENT` for each pass-through parent, before running uninstall. repair is
+  the no-snapshot removal above and changes no mode.
 - **rollback.** `bin/sirven grant rollback` takes the newest `grant` entry, refuses if the grant
   record no longer matches it, removes every current entry, and grants the earlier level and
   paths again. it writes its own `grant` entry with the reason `rollback`, so a second rollback
-  undoes the first. what it grants goes into the install record too.
-- **kill switch.** `install.sh revoke --all` removes the entries and renames the grant record to
-  `<user>.json.revoked`. plan output in the alpha cut.
-- **uninstall.** `uninstall.sh` reverses the install record in reverse order: entries first,
-  then the service user, then files and folders, which are removed only when empty. the audit
-  log stays unless `--remove-audit-log` is given.
+  undoes the first. the removal undoes the grant the same way uninstall does (see exactly what undo changes), so an
+  owner's chmod made since the install survives it, and the earlier grant takes a new snapshot. what it grants goes into the install record too.
+- **kill switch.** `install.sh revoke --all` runs the same undo for each folder, with or without a snapshot, and renames the grant record to `<user>.json.revoked`. plan output
+  in the alpha cut.
+- **uninstall.** `uninstall.sh` reverses the install record in reverse order: the snapshots restore
+  each folder first, then the service user, then files and folders, which are removed only when
+  empty. the audit log stays unless `--remove-audit-log` is given.
 
 no step in any of these widens a grant beyond what a level file allows: rollback and uninstall
 only ever apply grants the compiler produced from a level, or remove entries.
@@ -240,7 +365,33 @@ revoke <invite>
 ## known limits in the alpha cut
 
 - macos entries are plan output only. they need a run in a macos virtual machine before apply
-  is turned on.
+  is turned on. the macos entries name the agent only, so no group or other entry is copied and
+  the linux default-list problem has no macos form, as far as the entries show. macos undo is
+  unchanged in kind: it removes the entries it added by their exact text, now with `-h`. not run on a Mac.
+  the manual check, on a test Mac: (1) `ls -lde` the granted folder, a file in it, and every parent up to
+  `/Users/you` (the parents show the pass-through entry), before apply. (2) apply, then `ls -le` the
+  same paths and confirm the agent's entries are the only new ones. (3) `umask 077`, create a file in the
+  folder, `ls -le` it, and confirm the agent's inherited entry is the only one for it. (4) as the owner,
+  `chmod 600` a pre-existing file in the folder, then revoke or uninstall, and confirm that file is
+  still 600 and `ls -le` of every path matches the listing from step 1. (5) make a link inside the
+  granted folder that points at a folder outside it (`ln -s ~/.ssh /granted/link`) before apply, and
+  confirm `ls -le ~/.ssh` is the same after apply and after revoke.
+- the grant, the check and the undo are all descriptor based, so no path is followed after the start
+  folder is opened. who could race a first install: no agent process exists yet, and the folder owner or a
+  collaborator who can write in the tree could plant a link, but the grant does not follow it, so they gain
+  nothing from root's grant. what is still by path is read only: the plan's `getfacl` and `stat` probes (which
+  decide a step is already done), and the first `realpath` of the granted folder, which is checked against the
+  snapshot's device and inode before anything is changed.
+- a grant over a tree that already has named entries for other accounts, or a mask, is refused, not
+  merged. nested grants by two different folder owners are refused for the same reason (the second
+  owner's entries look like foreign lists).
+- files and folders the owner creates during a grant stay private after undo: a new file gets nothing
+  for group and other, and undo leaves the mode as it is. with umask 022, folders end as 755 with files
+  inside at 600, and copies are 660 during the grant. a web server or teammate who read by group or
+  other cannot read files made during the grant, and a shared setgid folder loses group sharing for new
+  files while the grant is in force. this is the safe direction.
+- the default list makes group and other bits show the mask. no grant with a named entry can show
+  `600` for a new file; the effective access is what to check.
 - on macos, `file_inherit` copies the folder entry onto new files, and folder `list` and
   `search` are the same bits as file `read` and `execute`. new files in an observer grant can
   therefore pick up execute for the agent. it cannot write them.

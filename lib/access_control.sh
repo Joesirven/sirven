@@ -3,6 +3,9 @@
 #
 # the commands come from lib/grant_compiler.py, which reads the level file and refuses paths
 # the level's policy never grants. this module only turns its plan fragment into steps.
+# on linux, each folder the grant changes gets a snapshot step first. lib/access_control_snapshot.sh
+# records the folder's access control lists, and that step's undo puts them back exactly. uninstall,
+# rollback and the kill switch all restore from the same snapshot.
 # reads: ROOT_DIR, PREFIX, PACKAGE, OPERATING_SYSTEM, SERVICE_USER, LEVEL, LEVEL_FILE, LEVEL_SUMMARY,
 #        CONFIG_DIR, STAGE_DIR, GRANT_PATHS
 
@@ -93,6 +96,11 @@ plan_access_control() {
     plan_note "macos keeps Desktop, Documents, and Downloads behind privacy prompts a service user cannot answer, so those are refused."
   fi
 
+  access_control_refuse_existing_lists
+  if [ "$OPERATING_SYSTEM" = linux ]; then
+    plan_note "undo removes only what this grant adds: the entries for $SERVICE_USER and the folder owner, and the default list on folders. it never changes an owner or a group, never touches the owner and other bits or special bits, and never follows a link, so a chown, a chmod 600 or a setuid made while the grant is in force stays. the group bits end as what the group could really do, so a chmod that widens the group bits during the grant does not outlast it."
+  fi
+
   grant_record="$STAGE_DIR/grant-record.json"
   _access_control_run_compiler "$grant_record" record --level "$LEVEL_FILE"
   layout_write_file "record the grant for $SERVICE_USER" "$(access_control_record_file)" 0644 "$grant_record" \
@@ -102,6 +110,74 @@ plan_access_control() {
   fragment="$STAGE_DIR/grant-fragment.txt"
   _access_control_run_compiler "$fragment" compile --level "$LEVEL_FILE" --prefix "$PREFIX" --with-undo
   _access_control_add_fragment "$fragment" "$(_access_control_kind)" "$ACCESS_CONTROL_MACOS_REASON"
+}
+
+# access_control_refuse_existing_lists: before any change, read the granted folders and the parents the
+# agent passes through. the grant recalculates the mask, which would widen what another account can do
+# where a named entry for that account or a mask already exists, so such a tree is refused. the agent's
+# own entries and the folder owner's own entries (an earlier grant) do not count. read only, linux only,
+# and only on the real root: a fake root has no real folders to read.
+access_control_refuse_existing_lists() {
+  local fragment="$STAGE_DIR/grant-folders.txt" tab kind path status=0 output
+  local arguments=() count=0 index=0
+  [ "$OPERATING_SYSTEM" = linux ] && [ -z "$PREFIX" ] || return 0
+  _access_control_run_compiler "$fragment" folders --level "$LEVEL_FILE"
+  tab="$(printf '\t')"
+  while IFS="$tab" read -r kind path; do
+    arguments[count]="--$kind=$path"
+    count=$((count + 1))
+  done < "$fragment"
+  set -- check "$SERVICE_USER"
+  while [ "$index" -lt "$count" ]; do
+    set -- "$@" "${arguments[index]}"
+    index=$((index + 1))
+  done
+  output="$(python3 -I "$ROOT_DIR/lib/access_control_snapshot.py" "$@" 2>&1)" || status=$?
+  case "$status" in
+    0) return 0 ;;
+    3)
+      DIE_STATUS=2 die "refusing this grant: these paths have an access list entry for another account with permissions the mask now switches off.
+granting would recalculate the mask and switch those permissions on.
+$output
+to go on, remove each named entry listed (for example: setfacl -x u:NAME PATH, or setfacl -x g:NAME PATH), or narrow it to fit inside the mask, or grant another folder. look at a path with: getfacl PATH.
+nothing was changed."
+      ;;
+    *)
+      if [ "$DRY_RUN" = yes ] && [ "$(id -u)" != 0 ]; then
+        plan_note "the access lists on the granted folders could not all be read as $(id -un), so the check that refuses lists a grant would widen was not complete. a real run, as root, checks every path."
+        return 0
+      fi
+      DIE_STATUS=2 die "the access lists on the granted folders could not be checked, so the grant is refused.
+$output
+nothing was changed."
+      ;;
+  esac
+}
+
+# access_control_report_locked_account: after a failed install or rollback, say plainly if the agent's account
+# was left locked and expired by the step that ends its processes, and how to get out of that state.
+access_control_report_locked_account() {
+  local marker
+  marker="${PREFIX}${STATE_DIR}/agent-quiesce.json"
+  [ -e "$marker" ] || return 0
+  printf 'the account %s is locked and expired until a run finishes: this run stopped after ending its processes, so no login works.\n' "$SERVICE_USER" >&2
+  printf 'fix the cause printed above and run the same command again; it finishes the grant and gives the account back as it was.\n' >&2
+  printf 'to give the account back now without finishing: bash %s/package/lib/access_control_snapshot.sh release %s %s\n' \
+    "${PREFIX}${STATE_DIR}" "$SERVICE_USER" "$marker" >&2
+}
+
+# plan_access_control_quiesce / plan_access_control_release: end the agent's processes and lock and expire its
+# account, then give it back, around a removal that runs while the agent may be alive (a rollback). linux only.
+plan_access_control_quiesce() {
+  [ "$OPERATING_SYSTEM" = linux ] || return 0
+  plan_step system "end every process of $SERVICE_USER and lock its account while the access is removed" "false" \
+    "bash $(rooted "$STATE_DIR/package/lib/access_control_snapshot.sh") quiesce $SERVICE_USER $(rooted "$STATE_DIR/agent-quiesce.json")"
+}
+
+plan_access_control_release() {
+  [ "$OPERATING_SYSTEM" = linux ] || return 0
+  plan_step system "give $SERVICE_USER its account back" "false" \
+    "bash $(rooted "$STATE_DIR/package/lib/access_control_snapshot.sh") release $SERVICE_USER $(rooted "$STATE_DIR/agent-quiesce.json")"
 }
 
 # removal steps for the kill switch. uses --path when given, otherwise the grant record.

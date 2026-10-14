@@ -6,20 +6,20 @@ sirven uninstall plan
   mode: dry run: nothing will be changed
 
 undo: access to paths, level builder
-    1. stop new files in /srv/app inheriting agent (to do, recorded not run under --prefix)
-       $ setfacl -R -P -d -x u:agent <prefix>/srv/app
-    2. remove agent from /srv/app and everything inside (to do, recorded not run under --prefix)
-       $ setfacl -R -P -x u:agent <prefix>/srv/app
-    3. stop new files in /home/example/project inheriting agent (to do, recorded not run under --prefix)
-       $ setfacl -R -P -d -x u:agent <prefix>/home/example/project
-    4. remove agent from /home/example/project and everything inside (to do, recorded not run under --prefix)
-       $ setfacl -R -P -x u:agent <prefix>/home/example/project
-    5. stop agent passing through /srv (to do, recorded not run under --prefix)
-       $ setfacl -x u:agent <prefix>/srv
-    6. stop agent passing through /home/example (to do, recorded not run under --prefix)
-       $ setfacl -x u:agent <prefix>/home/example
-    7. stop agent passing through /home (to do, recorded not run under --prefix)
-       $ setfacl -x u:agent <prefix>/home
+    1. end every process of agent and expire its account, so nothing changes the granted folders while the lists are put back (to do, recorded not run under --prefix)
+       $ { usermod --expiredate 1 --lock agent || true; } && { pkill -KILL -u agent || true; }
+    2. end every process of agent and expire its account, so nothing changes the granted folders while the lists are put back (to do, recorded not run under --prefix)
+       $ { usermod --expiredate 1 --lock agent || true; } && { pkill -KILL -u agent || true; }
+    3. put back the access control lists of /srv/app as they were before the grant, removing only what the grant added (to do, recorded not run under --prefix)
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh restore <prefix>/var/lib/sirven/access-lists/dae668e4084f07b6.txt <prefix>/srv/app yes agent --audit <prefix>/var/log/sirven/audit.jsonl
+    4. put back the access control lists of /home/example/project as they were before the grant, removing only what the grant added (to do, recorded not run under --prefix)
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh restore <prefix>/var/lib/sirven/access-lists/867467bcb77869b9.txt <prefix>/home/example/project yes agent --audit <prefix>/var/log/sirven/audit.jsonl
+    5. put back the access control lists of /srv as they were before the grant, removing only what the grant added (to do, recorded not run under --prefix)
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh restore <prefix>/var/lib/sirven/access-lists/a3d9ac4fdee9c242.txt <prefix>/srv no agent --audit <prefix>/var/log/sirven/audit.jsonl
+    6. put back the access control lists of /home/example as they were before the grant, removing only what the grant added (to do, recorded not run under --prefix)
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh restore <prefix>/var/lib/sirven/access-lists/67a166d2c72af6bb.txt <prefix>/home/example no agent --audit <prefix>/var/log/sirven/audit.jsonl
+    7. put back the access control lists of /home as they were before the grant, removing only what the grant added (to do, recorded not run under --prefix)
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh restore <prefix>/var/lib/sirven/access-lists/2cc974af6afc822c.txt <prefix>/home no agent --audit <prefix>/var/log/sirven/audit.jsonl
     8. remove /etc/sirven/grants/agent.json (to do)
        $ rm -f <prefix>/etc/sirven/grants/agent.json
     9. remove the builder policy copy (to do)

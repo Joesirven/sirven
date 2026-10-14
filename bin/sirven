@@ -59,6 +59,7 @@ usage() {
 usage:
   sirven grant inspect [options]     show the level in force and the active grants
   sirven grant rollback [options]    reverse the most recent grant change
+  sirven grant repair [options]      remove what a grant made by an older version left behind
   sirven runtime serve|status|fetch|classify|decisions|exec
                                      the Solo egress runtime: sirven runtime --help
   sirven awake [command]             keep the Mac awake while your agent works; sirven awake --help
@@ -70,7 +71,8 @@ usage:
 options:
   --prefix PATH    read a fake root that install.sh was applied to with --prefix
   --user NAME      the service user (default: agent). inspect shows every user without it
-  --dry-run        rollback only: print the plan and change nothing
+  --dry-run        rollback or repair: print the plan or the list and change nothing
+  --path PATH      repair only: a granted folder, when the grant record is gone (after an older uninstall)
   --help           show this help
 
 rollback reverses the newest grant entry in the audit log, and refuses when the grant record
@@ -94,6 +96,7 @@ parse_arguments() {
   PREFIX=""
   SERVICE_USER=agent
   USER_GIVEN=no
+  REPAIR_PATHS_TEXT=""
   OWNER="${SUDO_USER:-$(id -un)}"
   case "${1:-}" in
     -h | --help | help) usage; exit 0 ;;
@@ -102,9 +105,9 @@ parse_arguments() {
     *) usage_error "unknown command '$1'" ;;
   esac
   case "${1:-}" in
-    inspect | rollback) ACTION="$1"; shift ;;
+    inspect | rollback | repair) ACTION="$1"; shift ;;
     -h | --help) usage; exit 0 ;;
-    '') usage_error "grant needs inspect or rollback" ;;
+    '') usage_error "grant needs inspect, rollback or repair" ;;
     *) usage_error "unknown grant command '$1'; revoking one grant is designed, not built" ;;
   esac
   while [ "$#" -gt 0 ]; do
@@ -123,6 +126,14 @@ parse_arguments() {
         shift
         ;;
       --user=*) SERVICE_USER="${1#*=}"; USER_GIVEN=yes ;;
+      --path)
+        [ "$#" -ge 2 ] || usage_error "--path needs a value"
+        REPAIR_PATHS_TEXT="${REPAIR_PATHS_TEXT}$2
+"
+        shift
+        ;;
+      --path=*) REPAIR_PATHS_TEXT="${REPAIR_PATHS_TEXT}${1#*=}
+" ;;
       -h | --help) usage; exit 0 ;;
       *) usage_error "unknown option '$1'" ;;
     esac
@@ -138,8 +149,11 @@ parse_arguments() {
     esac
     PREFIX="${PREFIX%/}"
   fi
+  if [ -n "$REPAIR_PATHS_TEXT" ] && [ "$ACTION" != repair ]; then
+    usage_error "--path goes with repair only"
+  fi
   if [ "$ACTION" = inspect ] && [ "$DRY_RUN" = yes ]; then
-    usage_error "--dry-run goes with rollback; inspect never changes anything"
+    usage_error "--dry-run goes with rollback or repair; inspect never changes anything"
   fi
   if [ -n "${SIRVEN_OS_OVERRIDE:-}" ] && [ "$ACTION" = rollback ] && [ "$DRY_RUN" != yes ] && [ -z "$PREFIX" ]; then
     usage_error "SIRVEN_OS_OVERRIDE only works with --dry-run or --prefix"
@@ -311,6 +325,48 @@ inspect() {
   say "after alpha: live sessions and the commands the agent runs come from the forced-command wrapper, which is not built yet. this view reads files only."
 }
 
+# repair_grant: for an install made by an older version, whose own undo leaves the default list, the mask and
+# the folder owner's entry behind. removes what the grant in the grant record added, from the granted folders
+# and the pass-through parents, with this package's helper. run it, then the old install's uninstall.sh, then
+# install.sh of this version. with the account already gone it removes what an old undo left instead.
+repair_grant() {
+  local record folders kind path helper status=0 failed=0 flags="" scratch
+  [ "$OPERATING_SYSTEM" = linux ] || die "repair is for linux access control lists; this machine is $OPERATING_SYSTEM"
+  need_python
+  record="${PREFIX}$(access_control_record_file)"
+  if [ -n "$REPAIR_PATHS_TEXT" ]; then
+    GRANT_LEVEL=observer
+    GRANT_PATHS_TEXT="$REPAIR_PATHS_TEXT"
+  else
+    [ -f "$record" ] || die "no grant record at $record, so there is nothing to repair. after an older uninstall removed the record, name the folders: sirven grant repair --path FOLDER [--path FOLDER]"
+    read_grant "$record" || DIE_STATUS=2 die "the grant record $record cannot be read; nothing was changed"
+    [ "$GRANT_LEVEL" != none ] || die "the grant record $record holds no grant; nothing to repair"
+  fi
+  set_grant_paths "$GRANT_PATHS_TEXT"
+  scratch="$STAGE_DIR/repair-folders.txt"
+  set -- folders --level "$ROOT_DIR/levels/$GRANT_LEVEL.json" --os linux --user "$SERVICE_USER" --package "$PACKAGE"
+  local index=0
+  while [ "$index" -lt "${#GRANT_PATHS[@]}" ]; do
+    set -- "$@" --path "${GRANT_PATHS[index]}"
+    index=$((index + 1))
+  done
+  grant_compiler "$@" > "$scratch" || DIE_STATUS=2 die "the grant compiler refused the paths in $record; nothing was changed"
+  helper="$ROOT_DIR/lib/access_control_snapshot.sh"
+  [ "$DRY_RUN" = yes ] && flags="--dry-run"
+  say "$PACKAGE grant repair for $SERVICE_USER: removes what an older grant added (this version's helper)."
+  while IFS="$(printf '\t')" read -r kind path; do
+    case "$kind" in
+      tree) bash "$helper" repair "${PREFIX}$path" yes "$SERVICE_USER" $flags || failed=1 ;;
+      alone) bash "$helper" repair "${PREFIX}$path" no "$SERVICE_USER" $flags || failed=1 ;;
+    esac
+  done < "$scratch"
+  [ "$failed" -eq 0 ] || status=1
+  if [ "$DRY_RUN" != yes ] && [ "$status" -eq 0 ]; then
+    say "done. next, for an install made by an older version: run its uninstall.sh (the pinned copy in $STATE_DIR/package), then install.sh of this version."
+  fi
+  return "$status"
+}
+
 rollback_header() {
   local mode="apply: the plan below is printed, then applied"
   [ "$DRY_RUN" = yes ] && mode="dry run: nothing will be changed"
@@ -336,6 +392,7 @@ build_rollback_plan() {
   load_level
   set_grant_paths "$GRANT_PATHS_TEXT"
   plan_section "remove the access in force now"
+  plan_access_control_quiesce
   plan_access_control_remove_paths
   plan_assume_undone
   if [ "$LAST_PREVIOUS_LEVEL" = none ]; then
@@ -348,6 +405,7 @@ build_rollback_plan() {
     set_grant_paths "$LAST_PREVIOUS_PATHS_TEXT"
     plan_access_control
   fi
+  plan_access_control_release
   plan_section "after alpha"
   plan_note "$AFTER_ALPHA_SESSIONS"
 }
@@ -362,6 +420,7 @@ rollback_apply() {
   before="$STAGE_DIR/grant-before.json"
   if [ -f "$record" ]; then cp "$record" "$before"; fi
   plan_apply || status=$?
+  if [ "$status" -eq 4 ]; then access_control_report_locked_account; fi
   if [ "$status" -ne 3 ]; then
     audit_grant_change "$before" "$record" rollback
   fi
@@ -477,6 +536,7 @@ main() {
   case "$ACTION" in
     inspect) inspect ;;
     rollback) rollback ;;
+    repair) repair_grant ;;
   esac
 }
 

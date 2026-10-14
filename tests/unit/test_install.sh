@@ -40,13 +40,13 @@ test_dry_run_changes_nothing() {
   assert_status 0 install_sh --dry-run --prefix "$TEST_TMP/root" --level builder --path /home/example/project
   assert_no_file "$TEST_TMP/root"
   assert_contains "$CAPTURED_STDOUT" "dry run: nothing was changed."
-  assert_contains "$CAPTURED_STDOUT" "setfacl -R -P -m u:agent:rwX $TEST_TMP/root/home/example/project"
+  assert_contains "$CAPTURED_STDOUT" "grant-access $TEST_TMP/root/home/example/project yes agent rwX"
 }
 
 test_default_level_is_observer() {
   assert_status 0 install_sh --dry-run --prefix "$TEST_TMP/root" --path /srv/app --transport none
   assert_contains "$CAPTURED_STDOUT" "level: observer (write allowed: false)"
-  assert_contains "$CAPTURED_STDOUT" "u:agent:rX"
+  assert_contains "$CAPTURED_STDOUT" "yes agent rX"
   assert_not_contains "$CAPTURED_STDOUT" "rwX"
 }
 
@@ -67,7 +67,7 @@ test_apply_on_fake_root_then_rerun_is_idempotent() {
   assert_file_exists "$root/etc/sirven/audit-format.json"
   assert_file_exists "$root/var/log/sirven/audit.jsonl"
   assert_contains "$(cat "$root/var/lib/sirven/simulated-system-commands.log")" "useradd --create-home --home-dir $root/home/agent"
-  assert_contains "$(cat "$root/var/lib/sirven/simulated-system-commands.log")" "setfacl -R -P -m u:agent:rwX $root/home/example/project"
+  assert_contains "$(cat "$root/var/lib/sirven/simulated-system-commands.log")" "grant-access $root/home/example/project yes agent rwX"
   assert_contains "$(cat "$root/etc/sirven/grants/agent.json")" '"can_grant": false'
   # ls shows modes the same way on linux and macos, unlike stat
   # shellcheck disable=SC2012
@@ -108,7 +108,7 @@ test_macos_plan_is_plan_only() {
   assert_status 0 install_sh --dry-run --prefix "$TEST_TMP/root" --level builder --path /Users/example/code/app --transport none
   assert_contains "$CAPTURED_STDOUT" "operating system: macos"
   assert_contains "$CAPTURED_STDOUT" "dscl . -create /Users/agent"
-  assert_contains "$CAPTURED_STDOUT" "/bin/chmod +a"
+  assert_contains "$CAPTURED_STDOUT" "/bin/chmod -h +a"
   assert_not_contains "$CAPTURED_STDOUT" "setfacl"
   assert_status 3 install_sh --prefix "$TEST_TMP/root" --level builder --path /Users/example/code/app --transport none
   assert_contains "$CAPTURED_STDERR" "macos virtual machine"
@@ -148,7 +148,8 @@ test_revoke_reads_the_grant_record() {
   local root="$TEST_TMP/root"
   assert_status 0 install_sh --prefix "$root" --level builder --path /home/example/project --transport none
   assert_status 0 install_sh revoke --all --dry-run --prefix "$root"
-  assert_contains "$CAPTURED_STDOUT" "setfacl -R -P -x u:agent $root/home/example/project"
+  assert_contains "$CAPTURED_STDOUT" "access_control_snapshot.sh restore"
+  assert_contains "$CAPTURED_STDOUT" "$root/home/example/project yes agent"
   assert_contains "$CAPTURED_STDOUT" "usermod --lock --expiredate 1"
   assert_contains "$CAPTURED_STDOUT" "pkill -KILL -u agent"
   assert_contains "$CAPTURED_STDOUT" "revoke_started"

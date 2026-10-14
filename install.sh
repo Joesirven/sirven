@@ -239,6 +239,7 @@ apply_for_real() {
   before="$STAGE_DIR/grant-before.json"
   if [ -f "$record" ]; then cp "$record" "$before"; fi
   plan_apply || status=$?
+  if [ "$status" -eq 4 ]; then access_control_report_locked_account; fi
   if [ "$status" -ne 3 ]; then
     if [ "$COMMAND" = install ]; then
       adopt_audit_entries

@@ -23,19 +23,19 @@ kill switch: revoke --all
 
 kill switch: access control lists
     5. remove agent file rights in /Users/example/code/app (plan only)
-       $ /usr/bin/find <prefix>/Users/example/code/app -type f -exec /bin/chmod -a 'agent allow read,readattr,readextattr,readsecurity' {} +
+       $ /usr/bin/find -P <prefix>/Users/example/code/app -type f -exec /bin/chmod -h -a 'agent allow read,readattr,readextattr,readsecurity' {} +
        not yet: the kill switch is plan output in the alpha cut; apply comes in alpha + 1
     6. remove agent folder rights on /Users/example/code/app (plan only)
-       $ /usr/bin/find <prefix>/Users/example/code/app -type d -exec /bin/chmod -a 'agent allow list,search,readattr,readextattr,readsecurity,file_inherit,directory_inherit' {} +
+       $ /usr/bin/find -P <prefix>/Users/example/code/app -type d -exec /bin/chmod -h -a 'agent allow list,search,readattr,readextattr,readsecurity,file_inherit,directory_inherit' {} +
        not yet: the kill switch is plan output in the alpha cut; apply comes in alpha + 1
     7. stop agent passing through /Users (plan only)
-       $ /bin/chmod -a 'agent allow search' <prefix>/Users
+       $ /bin/chmod -h -a 'agent allow search' <prefix>/Users
        not yet: the kill switch is plan output in the alpha cut; apply comes in alpha + 1
     8. stop agent passing through /Users/example (plan only)
-       $ /bin/chmod -a 'agent allow search' <prefix>/Users/example
+       $ /bin/chmod -h -a 'agent allow search' <prefix>/Users/example
        not yet: the kill switch is plan output in the alpha cut; apply comes in alpha + 1
     9. stop agent passing through /Users/example/code (plan only)
-       $ /bin/chmod -a 'agent allow search' <prefix>/Users/example/code
+       $ /bin/chmod -h -a 'agent allow search' <prefix>/Users/example/code
        not yet: the kill switch is plan output in the alpha cut; apply comes in alpha + 1
    10. mark the grant record revoked (plan only)
        $ mv <prefix>/etc/sirven/grants/agent.json <prefix>/etc/sirven/grants/agent.json.revoked

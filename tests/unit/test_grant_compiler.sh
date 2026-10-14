@@ -28,18 +28,18 @@ END
 test_traverse_never_downgrades_a_granted_parent() {
   capture compiler compile --level "$LEVEL_BUILDER" --os linux --path /srv/app --path /srv/app/sub
   assert_not_contains "$CAPTURED_STDOUT" "u:agent:x /srv/app"
-  assert_contains "$CAPTURED_STDOUT" "setfacl -m u:agent:x /srv"
+  assert_contains "$CAPTURED_STDOUT" "grant-access /srv no agent x"
 }
 
 test_paths_with_spaces_are_quoted() {
   capture compiler compile --level "$LEVEL_BUILDER" --os linux --path "/srv/my app"
-  assert_contains "$CAPTURED_STDOUT" "setfacl -R -P -m u:agent:rwX '/srv/my app'"
+  assert_contains "$CAPTURED_STDOUT" "grant-access '/srv/my app' yes agent rwX"
 }
 
 test_prefix_goes_in_commands_not_in_titles() {
   capture compiler compile --level "$LEVEL_BUILDER" --os linux --prefix /tmp/fake --path /srv/app
   assert_contains "$CAPTURED_STDOUT" "grant agent rwX on /srv/app and everything inside"
-  assert_contains "$CAPTURED_STDOUT" "setfacl -R -P -m u:agent:rwX /tmp/fake/srv/app"
+  assert_contains "$CAPTURED_STDOUT" "grant-access /tmp/fake/srv/app yes agent rwX"
 }
 
 test_compile_needs_a_path() {
@@ -76,7 +76,7 @@ test_revoke_from_record_matches_revoke_from_paths() {
 
 test_with_undo_pairs_every_grant_with_its_removal() {
   local os with_undo undo_commands revoke_commands
-  for os in linux macos; do
+  for os in macos; do
     with_undo="$(compiler compile --level "$LEVEL_BUILDER" --os "$os" --with-undo --path /srv/b --path /opt/site/app)"
     assert_eq "" "$(printf '%s\n' "$with_undo" | grep -v '^#' | awk -F '\t' 'NF != 6')" "six fields on $os"
     assert_eq "$(compiler compile --level "$LEVEL_BUILDER" --os "$os" --path /srv/b --path /opt/site/app)" \
@@ -85,6 +85,20 @@ test_with_undo_pairs_every_grant_with_its_removal() {
     revoke_commands="$(compiler revoke --level "$LEVEL_BUILDER" --os "$os" --path /srv/b --path /opt/site/app | grep -v '^#' | cut -f3 | sort)"
     assert_eq "$revoke_commands" "$undo_commands" "undo and revoke agree on $os"
   done
+}
+
+test_linux_with_undo_records_a_snapshot_before_any_change() {
+  local with_undo first_change last_snapshot
+  with_undo="$(compiler compile --level "$LEVEL_BUILDER" --os linux --with-undo --prefix /tmp/fake --path /srv/b --path /srv/b/sub)"
+  # one snapshot per folder (the parent /srv and the two granted folders), each with its restore as undo
+  assert_eq 3 "$(printf '%s\n' "$with_undo" | grep -c '^record the access control lists of ')" "snapshot lines on linux"
+  assert_eq 3 "$(printf '%s\n' "$with_undo" | awk -F '\t' 'NF == 6' | grep -c '^record the access control lists of ')" "snapshot lines carry an undo"
+  assert_contains "$(printf '%s\n' "$with_undo" | awk -F '\t' 'NF == 6 {print $6}')" \
+    "access_control_snapshot.sh restore /tmp/fake/var/lib/sirven/access-lists/"
+  # every snapshot line comes before the first line that changes an access control list
+  last_snapshot="$(printf '%s\n' "$with_undo" | grep -n '^record the access control lists of ' | tail -n 1 | cut -d: -f1)"
+  first_change="$(printf '%s\n' "$with_undo" | grep -n '^let agent pass through\|^grant agent' | head -n 1 | cut -d: -f1)"
+  assert_eq 1 "$((last_snapshot < first_change))" "snapshots come before the first change"
 }
 
 test_show_reads_a_grant_record() {

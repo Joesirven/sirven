@@ -67,19 +67,19 @@ access to paths, level builder
    16. record the grant for agent (to do)
        # write <prefix>/etc/sirven/grants/agent.json (mode 0644): level builder on the paths below, no expiry, cannot grant further
    17. let agent pass through /Users (plan only)
-       $ /bin/chmod +a 'agent allow search' <prefix>/Users
+       $ /bin/chmod -h +a 'agent allow search' <prefix>/Users
        not yet: macos access control lists are plan output in the alpha cut; apply needs a run in a macos virtual machine
    18. let agent pass through /Users/example (plan only)
-       $ /bin/chmod +a 'agent allow search' <prefix>/Users/example
+       $ /bin/chmod -h +a 'agent allow search' <prefix>/Users/example
        not yet: macos access control lists are plan output in the alpha cut; apply needs a run in a macos virtual machine
    19. let agent pass through /Users/example/code (plan only)
-       $ /bin/chmod +a 'agent allow search' <prefix>/Users/example/code
+       $ /bin/chmod -h +a 'agent allow search' <prefix>/Users/example/code
        not yet: macos access control lists are plan output in the alpha cut; apply needs a run in a macos virtual machine
    20. grant agent file rights on files in /Users/example/code/app (plan only)
-       $ /usr/bin/find <prefix>/Users/example/code/app -type f -exec /bin/chmod +a 'agent allow read,write,append,readattr,writeattr,readextattr,writeextattr,readsecurity' {} +
+       $ /usr/bin/find -P <prefix>/Users/example/code/app -type f -exec /bin/chmod -h +a 'agent allow read,write,append,readattr,writeattr,readextattr,writeextattr,readsecurity' {} +
        not yet: macos access control lists are plan output in the alpha cut; apply needs a run in a macos virtual machine
    21. grant agent folder rights on /Users/example/code/app and folders inside, inherited by new files (plan only)
-       $ /usr/bin/find <prefix>/Users/example/code/app -type d -exec /bin/chmod +a 'agent allow list,search,add_file,add_subdirectory,delete_child,readattr,writeattr,readextattr,writeextattr,readsecurity,file_inherit,directory_inherit' {} +
+       $ /usr/bin/find -P <prefix>/Users/example/code/app -type d -exec /bin/chmod -h +a 'agent allow list,search,add_file,add_subdirectory,delete_child,readattr,writeattr,readextattr,writeextattr,readsecurity,file_inherit,directory_inherit' {} +
        not yet: macos access control lists are plan output in the alpha cut; apply needs a run in a macos virtual machine
 
 transport: tailscale

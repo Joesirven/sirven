@@ -52,27 +52,42 @@ access to paths, level observer
      note: observer: read only inside granted paths. sees files, changes nothing.
    16. install the observer level as policy (to do)
        $ cp levels/observer.json <prefix>/etc/sirven/levels/observer.json && chmod 0644 <prefix>/etc/sirven/levels/observer.json
+     note: undo removes only what this grant adds: the entries for agent and the folder owner, and the default list on folders. it never changes an owner or a group, never touches the owner and other bits or special bits, and never follows a link, so a chown, a chmod 600 or a setuid made while the grant is in force stays. the group bits end as what the group could really do, so a chmod that widens the group bits during the grant does not outlast it.
    17. record the grant for agent (to do)
        # write <prefix>/etc/sirven/grants/agent.json (mode 0644): level observer on the paths below, no expiry, cannot grant further
-   18. let agent pass through /home (to do, recorded not run under --prefix)
-       $ setfacl -m u:agent:x <prefix>/home
-   19. let agent pass through /home/example (to do, recorded not run under --prefix)
-       $ setfacl -m u:agent:x <prefix>/home/example
-   20. let agent pass through /srv (to do, recorded not run under --prefix)
-       $ setfacl -m u:agent:x <prefix>/srv
-   21. grant agent rX on /home/example/notes and everything inside (to do, recorded not run under --prefix)
-       $ setfacl -R -P -m u:agent:rX <prefix>/home/example/notes
-   22. make new files in /home/example/notes inherit the grant (to do, recorded not run under --prefix)
-       $ setfacl -R -P -d -m u:agent:rX <prefix>/home/example/notes
-   23. grant agent rX on /srv/app and everything inside (to do, recorded not run under --prefix)
-       $ setfacl -R -P -m u:agent:rX <prefix>/srv/app
-   24. make new files in /srv/app inherit the grant (to do, recorded not run under --prefix)
-       $ setfacl -R -P -d -m u:agent:rX <prefix>/srv/app
+   18. end every process of agent and lock its account while the access changes (to do, recorded not run under --prefix)
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh quiesce agent <prefix>/var/lib/sirven/agent-quiesce.json
+   19. record the access control lists of /home before the grant (to do, recorded not run under --prefix)
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh record <prefix>/var/lib/sirven/access-lists/2cc974af6afc822c.txt <prefix>/home no agent
+   20. record the access control lists of /home/example before the grant (to do, recorded not run under --prefix)
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh record <prefix>/var/lib/sirven/access-lists/67a166d2c72af6bb.txt <prefix>/home/example no agent
+   21. record the access control lists of /srv before the grant (to do, recorded not run under --prefix)
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh record <prefix>/var/lib/sirven/access-lists/a3d9ac4fdee9c242.txt <prefix>/srv no agent
+   22. record the access control lists of /home/example/notes before the grant (to do, recorded not run under --prefix)
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh record <prefix>/var/lib/sirven/access-lists/e5e8e5d743b78051.txt <prefix>/home/example/notes yes agent
+   23. record the access control lists of /srv/app before the grant (to do, recorded not run under --prefix)
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh record <prefix>/var/lib/sirven/access-lists/dae668e4084f07b6.txt <prefix>/srv/app yes agent
+   24. let agent pass through /home (to do, recorded not run under --prefix)
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh grant-access <prefix>/home no agent x --snapshot <prefix>/var/lib/sirven/access-lists/2cc974af6afc822c.txt
+   25. let agent pass through /home/example (to do, recorded not run under --prefix)
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh grant-access <prefix>/home/example no agent x --snapshot <prefix>/var/lib/sirven/access-lists/67a166d2c72af6bb.txt
+   26. let agent pass through /srv (to do, recorded not run under --prefix)
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh grant-access <prefix>/srv no agent x --snapshot <prefix>/var/lib/sirven/access-lists/a3d9ac4fdee9c242.txt
+   27. grant agent rX on /home/example/notes and everything inside (to do, recorded not run under --prefix)
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh grant-access <prefix>/home/example/notes yes agent rX --snapshot <prefix>/var/lib/sirven/access-lists/e5e8e5d743b78051.txt
+   28. make new files in /home/example/notes inherit the grant, with group and other kept out (to do, recorded not run under --prefix)
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh grant-default <prefix>/home/example/notes agent rX --snapshot <prefix>/var/lib/sirven/access-lists/e5e8e5d743b78051.txt
+   29. grant agent rX on /srv/app and everything inside (to do, recorded not run under --prefix)
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh grant-access <prefix>/srv/app yes agent rX --snapshot <prefix>/var/lib/sirven/access-lists/dae668e4084f07b6.txt
+   30. make new files in /srv/app inherit the grant, with group and other kept out (to do, recorded not run under --prefix)
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh grant-default <prefix>/srv/app agent rX --snapshot <prefix>/var/lib/sirven/access-lists/dae668e4084f07b6.txt
+   31. give agent its account back (to do, recorded not run under --prefix)
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh release agent <prefix>/var/lib/sirven/agent-quiesce.json
 
 transport: none
      note: no transport. the agent is reachable only from this machine or your own network.
 
-summary: 24 steps. 23 to do, 0 already done, 1 by the owner, 0 plan only.
+summary: 31 steps. 30 to do, 0 already done, 1 by the owner, 0 plan only.
 dry run: nothing was changed. run the same command without --dry-run to apply this plan.
 to undo later: ./install.sh revoke --all --dry-run, or ./uninstall.sh --dry-run
 exit status: 0

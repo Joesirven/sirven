@@ -13,7 +13,7 @@ already on this machine, adopted as it is
      adopted: bb 0.42.1, installed for the account running this. kept as it is: never reinstalled or updated.
      adopted: the grant for agent from an earlier run: level builder on /home/example/project. kept as it is; its steps below show as already done.
      adopted: the builder policy /etc/sirven/levels/builder.json, the same as levels/builder.json. kept as it is.
-     adopted: the audit log /var/log/sirven/audit.jsonl, 27 entries. kept: new entries are appended, and nothing in it is rewritten.
+     adopted: the audit log /var/log/sirven/audit.jsonl, 32 entries. kept: new entries are appended, and nothing in it is rewritten.
      adopted: the install record /var/lib/sirven/install-record.tsv. kept: steps applied now are added after what it lists, so uninstall still reverses only what this package created.
 
 package directories
@@ -60,21 +60,32 @@ access to paths, level builder
      note: builder: reads and writes inside granted paths. builds and tests there, nothing else.
    16. install the builder level as policy (already done)
        $ cp levels/builder.json <prefix>/etc/sirven/levels/builder.json && chmod 0644 <prefix>/etc/sirven/levels/builder.json
+     note: undo removes only what this grant adds: the entries for agent and the folder owner, and the default list on folders. it never changes an owner or a group, never touches the owner and other bits or special bits, and never follows a link, so a chown, a chmod 600 or a setuid made while the grant is in force stays. the group bits end as what the group could really do, so a chmod that widens the group bits during the grant does not outlast it.
    17. record the grant for agent (already done)
        # write <prefix>/etc/sirven/grants/agent.json (mode 0644): level builder on the paths below, no expiry, cannot grant further
-   18. let agent pass through /home (already done)
-       $ setfacl -m u:agent:x <prefix>/home
-   19. let agent pass through /home/example (already done)
-       $ setfacl -m u:agent:x <prefix>/home/example
-   20. grant agent rwX on /home/example/project and everything inside (already done)
-       $ setfacl -R -P -m u:agent:rwX <prefix>/home/example/project
-   21. make new files in /home/example/project inherit the grant (already done)
-       $ setfacl -R -P -d -m u:agent:rwX <prefix>/home/example/project
+   18. end every process of agent and lock its account while the access changes (already done)
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh quiesce agent <prefix>/var/lib/sirven/agent-quiesce.json
+   19. record the access control lists of /home before the grant (already done)
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh record <prefix>/var/lib/sirven/access-lists/2cc974af6afc822c.txt <prefix>/home no agent
+   20. record the access control lists of /home/example before the grant (already done)
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh record <prefix>/var/lib/sirven/access-lists/67a166d2c72af6bb.txt <prefix>/home/example no agent
+   21. record the access control lists of /home/example/project before the grant (already done)
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh record <prefix>/var/lib/sirven/access-lists/867467bcb77869b9.txt <prefix>/home/example/project yes agent
+   22. let agent pass through /home (already done)
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh grant-access <prefix>/home no agent x --snapshot <prefix>/var/lib/sirven/access-lists/2cc974af6afc822c.txt
+   23. let agent pass through /home/example (already done)
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh grant-access <prefix>/home/example no agent x --snapshot <prefix>/var/lib/sirven/access-lists/67a166d2c72af6bb.txt
+   24. grant agent rwX on /home/example/project and everything inside (already done)
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh grant-access <prefix>/home/example/project yes agent rwX --snapshot <prefix>/var/lib/sirven/access-lists/867467bcb77869b9.txt
+   25. make new files in /home/example/project inherit the grant, with group and other kept out (already done)
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh grant-default <prefix>/home/example/project agent rwX --snapshot <prefix>/var/lib/sirven/access-lists/867467bcb77869b9.txt
+   26. give agent its account back (already done)
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh release agent <prefix>/var/lib/sirven/agent-quiesce.json
 
 transport: tailscale
-   22. write the tailnet policy snippet (already done)
+   27. write the tailnet policy snippet (already done)
        # write <prefix>/etc/sirven/tailscale-policy-snippet.hujson (mode 0644): tag:agent, reachable only from your login, only on port 22
-   23. paste the policy snippet into your tailnet policy (owner, by hand)
+   28. paste the policy snippet into your tailnet policy (owner, by hand)
        tailscale admin console, access controls: merge /etc/sirven/tailscale-policy-snippet.hujson and put your login in place of you@example.com.
      note: this machine is already the agent node, adopted above: no auth key and no join. sirven never runs tailscale up on it.
      note: the agent client connects with: ssh agent@<this machine's tailnet name>. tailscale ssh stays off; the machine's own SSH server and keys are used.
@@ -82,7 +93,7 @@ transport: tailscale
 phone to agent channel
      note: bb is already installed, adopted above: nothing to install.
 
-summary: 23 steps. 0 to do, 21 already done, 2 by the owner, 0 plan only.
+summary: 28 steps. 0 to do, 26 already done, 2 by the owner, 0 plan only.
 dry run: nothing was changed. run the same command without --dry-run to apply this plan.
 to undo later: ./install.sh revoke --all --dry-run, or ./uninstall.sh --dry-run
 exit status: 0

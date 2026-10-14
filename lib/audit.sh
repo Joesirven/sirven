@@ -26,7 +26,7 @@ audit_format_json() {
   "encoding": "JSON lines: one JSON object per line, appended, never rewritten",
   "fields": {
     "time": "universal time with seconds, like 2026-10-10T12:00:00Z",
-    "event": "install, step, grant, adopt, uninstall, component, session_start, command, session_end, revoke_started, revoke_finished",
+    "event": "install, step, grant, adopt, uninstall, component, warning, session_start, command, session_end, revoke_started, revoke_finished",
     "user": "the service user, $SERVICE_USER by default",
     "principal": "who acted: owner for the package's own commands, owner-agent, or invite:<name> for a friend's agent",
     "level": "observer, builder, or operator; null when a grant change leaves no grant",
@@ -45,7 +45,8 @@ audit_format_json() {
     "paths": "for grant events: the granted paths after the change",
     "previous_level": "for grant events: the level before the change, or null",
     "previous_paths": "for grant events: the paths before the change",
-    "reason": "for grant events: install or rollback"
+    "reason": "for grant events: install or rollback",
+    "message": "for warning events: what the undo of a grant could not do, such as a folder replaced by a link (not followed) or a missing snapshot (earlier lists not restored)"
   },
   "rules": [
     "the directory belongs to the owner, mode 0750; the agent cannot read, edit, or remove entries",
