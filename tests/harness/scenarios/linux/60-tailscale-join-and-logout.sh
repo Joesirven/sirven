@@ -47,12 +47,12 @@ check "the node is logged out and the record is gone" bash -c '[ "$(cat /tmp/fak
 check "the revoke plan showed the logout and the audit log recorded the step" bash -c 'grep -q "log this machine out of the tailnet" <<< "$0" && grep -q "log this machine out of the tailnet" /var/log/sirven/audit.jsonl' "$LAST_OUTPUT"
 check_exit "a second revoke exits 0" 0 bash install.sh revoke --all --yes --transport tailscale
 check "and logged out nothing more" bash -c '[ "$(grep -c "^tailscale logout" /tmp/fake-ts/calls.log)" = 1 ]'
-check_exit "uninstall after revoke exits 0" 0 bash uninstall.sh
+check_exit "uninstall after revoke exits 0" 0 bash uninstall.sh --yes
 check "uninstall had no login left to undo, and the key is still nowhere" no_key_on_disk
 
 # 5. a login that is not ours is never logged out: apply, then somebody else logs this machine in
 rm -rf /tmp/fake-ts /var/lib/sirven/package
-bash uninstall.sh >/dev/null 2>&1
+bash uninstall.sh --yes >/dev/null 2>&1
 SIRVEN_TAILSCALE_AUTHKEY="$KEY" check_exit "apply again on a clean machine joins" 0 install_ts
 printf 'Running\n' > /tmp/fake-ts/state; printf 'node-owner\n' > /tmp/fake-ts/id; printf '\n' > /tmp/fake-ts/tags
 check_exit "revoke with another login present exits 0" 0 bash install.sh revoke --all --yes --transport tailscale
@@ -60,10 +60,10 @@ check "it left the other login alone and dropped its stale record" bash -c '[ "$
 
 # 6. uninstall alone logs out what install joined
 printf 'NeedsLogin\n' > /tmp/fake-ts/state
-bash uninstall.sh >/dev/null 2>&1
+bash uninstall.sh --yes >/dev/null 2>&1
 rm -f /var/lib/sirven/revoked* /etc/sirven/grants/*.revoked 2>/dev/null
 SIRVEN_TAILSCALE_AUTHKEY="$KEY" check_exit "install --reinstate after a revoke joins again" 0 install_ts --reinstate
-check_exit "uninstall logs the node out" 0 bash uninstall.sh
+check_exit "uninstall logs the node out" 0 bash uninstall.sh --yes
 check "the node is logged out" bash -c '[ "$(cat /tmp/fake-ts/state)" = NeedsLogin ]'
 
 finish
