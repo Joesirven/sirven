@@ -73,6 +73,12 @@ world_acls() {
   for path in "$@"; do getfacl -R -p "$path" 2>/dev/null; done | sort
 }
 
+# the raw permission-list attributes of the folders given, with names kept lossless (see aclraw.py), so a
+# newline or a backslash in a file name cannot hide a difference. world_aclraw_attributes adds owner, group,
+# and the full mode, special bits included.
+world_aclraw() { python3 -I "$SRC/tests/harness/lib/aclraw.py" "$@"; }
+world_aclraw_attributes() { python3 -I "$SRC/tests/harness/lib/aclraw.py" --attributes "$@"; }
+
 # world_unchanged NAME KIND BEFOREFILE: compare now against a saved snapshot.
 world_unchanged() {
   local name="$1" kind="$2" before="$3" shift_out

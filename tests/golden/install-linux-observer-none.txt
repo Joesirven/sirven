@@ -73,11 +73,11 @@ access to paths, level observer
    26. grant agent rX on /home/example/notes and everything inside (to do, recorded not run under --prefix)
        $ setfacl -R -P -m u:agent:rX <prefix>/home/example/notes
    27. make new files in /home/example/notes inherit the grant, with group and other kept out (to do, recorded not run under --prefix)
-       $ setfacl -R -P -d -m g::---,o::---,u:agent:rX,u:$(stat -c %U <prefix>/home/example/notes):rX <prefix>/home/example/notes
+       $ a=$(id -u agent) && o=$(stat -c %u <prefix>/home/example/notes) && e="u:$a:rX" && { [ "$o" = 0 ] || [ "$o" = "$a" ] || e="$e,u:$o:rX"; } && setfacl -R -P -d -m "g::---,o::---,$e" <prefix>/home/example/notes
    28. grant agent rX on /srv/app and everything inside (to do, recorded not run under --prefix)
        $ setfacl -R -P -m u:agent:rX <prefix>/srv/app
    29. make new files in /srv/app inherit the grant, with group and other kept out (to do, recorded not run under --prefix)
-       $ setfacl -R -P -d -m g::---,o::---,u:agent:rX,u:$(stat -c %U <prefix>/srv/app):rX <prefix>/srv/app
+       $ a=$(id -u agent) && o=$(stat -c %u <prefix>/srv/app) && e="u:$a:rX" && { [ "$o" = 0 ] || [ "$o" = "$a" ] || e="$e,u:$o:rX"; } && setfacl -R -P -d -m "g::---,o::---,$e" <prefix>/srv/app
 
 transport: none
      note: no transport. the agent is reachable only from this machine or your own network.

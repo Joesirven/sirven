@@ -299,6 +299,26 @@ def macos_folders_removal(rights, user, target, path):
             % (target, shlex.quote("%s allow %s" % (user, rights["directories"]))))
 
 
+def linux_default_check(user, target, entry):
+    """read only: the default list on target has the agent's entry (by number), the folder owner's when
+    one is wanted, and nothing for group and other."""
+    listing = "getfacl -n --absolute-names --omit-header %s 2>/dev/null" % target
+    return (
+        "a=$(id -u %s 2>/dev/null) && [ -n \"$a\" ] && o=$(stat -c %%u %s) && l=$(%s) && "
+        "printf '%%s\\n' \"$l\" | grep -qx \"default:user:$a:%s\" && "
+        "{ [ \"$o\" = 0 ] || [ \"$o\" = \"$a\" ] || printf '%%s\\n' \"$l\" | grep -qx \"default:user:$o:%s\"; } && "
+        "printf '%%s\\n' \"$l\" | grep -qx 'default:other::---' && "
+        "printf '%%s\\n' \"$l\" | grep -qx 'default:group::---'"
+        % (user, target, listing, entry, entry))
+
+
+def linux_default_command(user, target, grant):
+    return (
+        "a=$(id -u %s) && o=$(stat -c %%u %s) && e=\"u:$a:%s\" && "
+        "{ [ \"$o\" = 0 ] || [ \"$o\" = \"$a\" ] || e=\"$e,u:$o:%s\"; } && "
+        "setfacl -R -P -d -m \"g::---,o::---,$e\" %s" % (user, target, grant, grant, target))
+
+
 def compile_linux(level, user, prefix, paths, with_undo=False, package="sirven"):
     grant = level["access_control"]["linux"]["grant"]
     traverse = level["access_control"]["linux"]["traverse"]
@@ -335,16 +355,13 @@ def compile_linux(level, user, prefix, paths, with_undo=False, package="sirven")
             "getfacl --absolute-names --omit-header %s 2>/dev/null | grep -qx 'user:%s:%s'" % (target, user, entry),
             "setfacl -R -P -m u:%s:%s %s" % (user, grant, target)))
         # the default list gives group and other nothing, whatever the owner's umask. the agent and
-        # the folder owner get the grant on new files; the owner's name is looked up when the step runs.
-        owner_name = "$(stat -c %%U %s)" % target
+        # the folder owner get the grant on new files. both are written by account number, looked up
+        # when the step runs, so an owner with no account name (a deleted account, a mounted volume)
+        # works, and root and the agent are not added as the owner.
         lines.append(fragment_line(
             "make new files in %s inherit the grant, with group and other kept out" % path,
-            "getfacl --absolute-names --omit-header %s 2>/dev/null | grep -qx 'default:user:%s:%s' && "
-            "getfacl --absolute-names --omit-header %s 2>/dev/null | grep -qx \"default:user:%s:%s\" && "
-            "getfacl --absolute-names --omit-header %s 2>/dev/null | grep -qx 'default:other::---' && "
-            "getfacl --absolute-names --omit-header %s 2>/dev/null | grep -qx 'default:group::---'"
-            % (target, user, entry, target, owner_name, entry, target, target),
-            "setfacl -R -P -d -m g::---,o::---,u:%s:%s,u:%s:%s %s" % (user, grant, owner_name, grant, target)))
+            linux_default_check(user, target, entry),
+            linux_default_command(user, target, grant)))
     return lines
 
 

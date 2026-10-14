@@ -67,7 +67,7 @@ access to paths, level builder
    23. grant agent rwX on /home/example/project and everything inside (to do, recorded not run under --prefix)
        $ setfacl -R -P -m u:agent:rwX <prefix>/home/example/project
    24. make new files in /home/example/project inherit the grant, with group and other kept out (to do, recorded not run under --prefix)
-       $ setfacl -R -P -d -m g::---,o::---,u:agent:rwX,u:$(stat -c %U <prefix>/home/example/project):rwX <prefix>/home/example/project
+       $ a=$(id -u agent) && o=$(stat -c %u <prefix>/home/example/project) && e="u:$a:rwX" && { [ "$o" = 0 ] || [ "$o" = "$a" ] || e="$e,u:$o:rwX"; } && setfacl -R -P -d -m "g::---,o::---,$e" <prefix>/home/example/project
 
 transport: tailscale
    25. write the tailnet policy snippet (to do)
