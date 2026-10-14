@@ -44,7 +44,7 @@ Base code (`0ffd59f`, before any change):
 |---|---|---|
 | Full peer routing suite, idle machine | 40 | 0 |
 | Full peer routing suite, three concurrent loops | 45 | 0 |
-| Replay tests only, cwd `/tmp` and the worktree, TZ UTC, Pacific/Kiritimati, America/Los_Angeles | 120 | 0 |
+| Replay tests only, working directory `/tmp` and the worktree, with the time zone set to coordinated universal time, Pacific/Kiritimati, and America/Los_Angeles | 120 | 0 |
 | Full suite from a copy of the keep-awake worktree (`thr_2huemangmh-1`) | 30 | 0 |
 | `make test` | 1 | 0 peer failures (412 passed, 3 known installer failures) |
 
@@ -64,10 +64,11 @@ Lock fix and dash fix (`72645c7`):
 | `make test` | 1 | 0 peer failures (413 passed, 3 known installer failures, exit status 2) |
 | `make lint` | 1 | exit status 0 (shellcheck not installed here, so its step was skipped) |
 
-The base-code runs did not reproduce the flake. The 3 failures in 200 came from the lock-fix
-build, and their cause is the dash-leading key identifier, which was present in the base code
-too. The base code's 0 in 120 or 40 runs is consistent with about 1 in 64 per run only at a low
-sample size, so it does not show the flake was absent.
+The base-code runs recorded no failures in 235 runs. At the per-run rate implied by the
+dash-leading key probability (1 in 64), the chance of zero failures in 235 runs is about 2.5
+percent. The base-code zeros therefore do not confirm that the flake was absent, and they are
+unexplained by the dash cause alone. The lock-fix build recorded 3 failures in 200 runs, all
+with the dash cause. This discrepancy is not resolved.
 
 ## Reproducing
 
