@@ -34,20 +34,38 @@ except h.Failure as error:
     print("refused:", error)')" "refused:"
 }
 
-test_lists_for_other_accounts_or_a_mask_alone_are_refused() {
+test_only_an_entry_the_mask_switches_off_is_refused() {
   assert_eq "ok" "$(snapshot_python '
 ours = {1002, 1001}
 base = [(h.USER_OBJ, 6, h.NO_ID), (h.GROUP_OBJ, 4, h.NO_ID), (h.OTHER, 4, h.NO_ID)]
 assert h.problems_in(base, ours, "access") == []
 assert h.problems_in(None, ours, "access") == []
-bob = base + [(h.USER, 6, 1500), (h.MASK, 4, h.NO_ID)]
-assert len(h.problems_in(bob, ours, "access")) == 1
-group = base + [(h.GROUP, 4, 200), (h.MASK, 4, h.NO_ID)]
-assert "group" in h.problems_in(group, ours, "access")[0]
-mask_only = base + [(h.MASK, 4, h.NO_ID)]
-assert "mask" in h.problems_in(mask_only, ours, "access")[0]
-earlier_grant = base + [(h.USER, 6, 1002), (h.USER, 6, 1001), (h.MASK, 6, h.NO_ID)]
+# bob rw- with mask r--: the write is switched off, and a grant would switch it on
+wide = base + [(h.USER, 6, 1500), (h.MASK, 4, h.NO_ID)]
+assert len(h.problems_in(wide, ours, "access")) == 1
+# bob r-- with mask r--, or any number of entries inside the mask, is not widened
+inside = base + [(h.USER, 4, 1500), (h.USER, 4, 1501), (h.GROUP, 4, 200), (h.MASK, 4, h.NO_ID)]
+assert h.problems_in(inside, ours, "access") == []
+group = base + [(h.GROUP, 6, 200), (h.MASK, 4, h.NO_ID)]
+assert "group 200" in h.problems_in(group, ours, "access")[0]
+# a mask narrower than the group entry is not refused here: the grant narrows the group entry first
+mask_only = base + [(h.MASK, 0, h.NO_ID)]
+assert h.problems_in(mask_only, ours, "access") == []
+# the agent and the folder owner are never counted
+earlier_grant = base + [(h.USER, 6, 1002), (h.USER, 6, 1001), (h.MASK, 0, h.NO_ID)]
 assert h.problems_in(earlier_grant, ours, "access") == []
+print("ok")')"
+}
+
+test_a_grant_does_not_switch_on_what_a_narrow_mask_switched_off() {
+  # a 644 file the owner then chmod 600: group entry r--, mask nothing, agent rw-. granting again must leave the
+  # group with nothing, not give it the read back by raising the mask.
+  assert_eq "ok" "$(snapshot_python '
+agent, owner = 1002, 1001
+after_chmod = [(h.USER_OBJ, 6, h.NO_ID), (h.USER, 6, agent), (h.GROUP_OBJ, 4, h.NO_ID), (h.MASK, 0, h.NO_ID), (h.OTHER, 0, h.NO_ID)]
+again = h.access_with_grant(after_chmod, 0o600, False, agent, "rwX")
+assert (h.GROUP_OBJ, 0, h.NO_ID) in again, again
+assert (h.USER, 6, agent) in again and (h.MASK, 6, h.NO_ID) in again, again
 print("ok")')"
 }
 

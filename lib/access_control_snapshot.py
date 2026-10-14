@@ -231,20 +231,30 @@ class Warnings:
 
 # ---- what a grant may and may not meet ----
 
+def letters(bits):
+    return "".join(letter if bits & bit else "-" for letter, bit in (("r", 4), ("w", 2), ("x", 1)))
+
+
 def problems_in(entries, ours, where):
-    """why a list the grant would recalculate is not safe to grant over. empty means it is fine."""
+    """why granting over a list would widen another account. empty means it is fine.
+
+    a grant recalculates the mask. that widens a named entry for another account only when the entry has
+    permission bits outside the mask it has now: they were switched off by the mask and would switch on.
+    an entry inside the mask, however many, is not widened. the agent's and the folder owner's entries are
+    not counted, and the group entry is not either: the grant narrows it to the old mask before it
+    raises the mask (see access_with_grant), so it stays as closed as it was.
+    """
     if not entries:
         return []
+    mask = next((perm for tag, perm, _ in entries if tag == MASK), None)
+    if mask is None:
+        return []
     found = []
-    others = sorted({number for tag, _, number in entries if tag == USER and number not in ours})
-    groups = sorted({number for tag, _, number in entries if tag == GROUP})
-    if others:
-        found.append("%s list has an entry for %s" % (where, ", ".join(describe_user(n) for n in others)))
-    if groups:
-        found.append("%s list has an entry for group %s" % (where, ", ".join(str(n) for n in groups)))
-    own = [1 for tag, _, number in entries if tag == USER and number in ours]
-    if any(tag == MASK for tag, _, _ in entries) and not own and not others and not groups:
-        found.append("%s list has a mask" % where)
+    for tag, perm, number in entries:
+        outside = perm & ~mask & 7
+        if outside and ((tag == USER and number not in ours) or tag == GROUP):
+            who = describe_user(number) if tag == USER else "group %d" % number
+            found.append("%s list: %s has %s but the mask is %s" % (where, who, letters(perm), letters(mask)))
     return found
 
 
@@ -264,8 +274,11 @@ def scan(folder, recursive, user):
     def visit(fd, item, path, is_folder):
         access = read_list(fd, ACCESS)
         default = read_list(fd, DEFAULT) if is_folder and recursive else None
-        for reason in problems_in(access, ours, "access") + problems_in(default, ours, "default"):
-            refusals.append((path, reason))
+        # the agent owns what it made and can put any entry on it itself, so those paths never block a
+        # change of level or a rollback.
+        if item.st_uid != agent:
+            for reason in problems_in(access, ours, "access") + problems_in(default, ours, "default"):
+                refusals.append((path, reason))
         record = {}
         if access is not None and (has_named(access) or any(tag == MASK for tag, _, _ in access)):
             record["access"] = base64.b64encode(build(access)).decode()
@@ -311,12 +324,24 @@ def with_entry(entries, tag, number, perm):
     return [entry for entry in entries if not (entry[0] == tag and entry[2] == number)] + [(tag, perm, number)]
 
 
+def narrowed_to_mask(entries, agent):
+    """keep every entry of the group class (group, other accounts) as closed as the mask makes it today.
+    recalculating the mask would switch on bits that an old chmod or a narrow mask had switched off, so they
+    are cleared first; what each account can really do does not change."""
+    mask = next((perm for tag, perm, _ in entries if tag == MASK), None)
+    if mask is None:
+        return list(entries)
+    return [(tag, perm & mask, number) if tag in (GROUP_OBJ, GROUP) or (tag == USER and number != agent) else (tag, perm, number)
+            for tag, perm, number in entries]
+
+
 def access_with_grant(current, mode, is_folder, agent, spec):
     """the access list after the agent gets the permissions. pure."""
     bits, conditional = parse_permissions(spec)
     entries = list(current) if current else mode_entries(mode)
     if conditional and (is_folder or any(perm & 1 for _, perm, _ in entries)):
         bits |= 1
+    entries = narrowed_to_mask(entries, agent)
     entries = with_entry(entries, USER, agent, bits)
     entries = [entry for entry in entries if entry[0] != MASK]
     entries.append((MASK, mask_of(entries), NO_ID))
@@ -329,7 +354,7 @@ def default_with_grant(default, access, mode, agent, owner, spec):
     bits, conditional = parse_permissions(spec)
     if conditional:
         bits |= 1  # a default list is on a folder, and X gives a folder execute
-    source = default if default else [entry for entry in (access or mode_entries(mode)) if entry[0] in (USER_OBJ, GROUP_OBJ, OTHER)]
+    source = narrowed_to_mask(default, agent) if default else [entry for entry in (access or mode_entries(mode)) if entry[0] in (USER_OBJ, GROUP_OBJ, OTHER)]
     entries = [entry for entry in source if entry[0] != MASK]
     entries = [(tag, 0, number) if tag in (GROUP_OBJ, OTHER) else (tag, perm, number) for tag, perm, number in entries]
     entries = with_entry(entries, USER, agent, bits)

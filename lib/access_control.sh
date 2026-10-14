@@ -136,10 +136,10 @@ access_control_refuse_existing_lists() {
   case "$status" in
     0) return 0 ;;
     3)
-      DIE_STATUS=2 die "refusing this grant: these paths already have access lists for other accounts, or a mask.
-granting would recalculate the mask and widen what those accounts can do.
+      DIE_STATUS=2 die "refusing this grant: these paths have an access list entry for another account with permissions the mask now switches off.
+granting would recalculate the mask and switch those permissions on.
 $output
-to go on, remove those lists first (look with: getfacl -R -p FOLDER; remove with: setfacl -R -b FOLDER, only when nobody relies on them), or grant another folder.
+to go on, remove each named entry listed (for example: setfacl -x u:NAME PATH, or setfacl -x g:NAME PATH), or narrow it to fit inside the mask, or grant another folder. look at a path with: getfacl PATH.
 nothing was changed."
       ;;
     *)
