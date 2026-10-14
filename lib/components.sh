@@ -133,7 +133,8 @@ components_parse() {
       /*) ;;
       *) components_usage_error "--prefix must be an absolute path" ;;
     esac
-    PREFIX="$(prefix_normalize "$PREFIX")" || components_usage_error "--prefix names a fake root; / is the real machine. leave --prefix out to work on it"
+    if ! checked_prefix="$(prefix_normalize "$PREFIX")"; then components_usage_error "$checked_prefix"; fi
+    PREFIX="$checked_prefix"
   fi
   if [ -n "${SIRVEN_OS_OVERRIDE:-}" ] && [ "$DRY_RUN" != yes ] && [ -z "$PREFIX" ]; then
     components_usage_error "SIRVEN_OS_OVERRIDE only works with --dry-run or --prefix"

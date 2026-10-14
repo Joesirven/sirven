@@ -44,17 +44,27 @@ package_name() {
   printf '%s' "$name"
 }
 
-# prefix_normalize VALUE: the fake root as an absolute path with no trailing slash. a prefix that is the real root, or
-# resolves to it (/, //, /., /..), is refused: --prefix / would otherwise turn into no prefix at all, a real run.
+# prefix_normalize VALUE: the fake root as an absolute path with no trailing slash, printed. when it cannot be used, the reason is
+# printed instead and the status is 1. a prefix that is the real root, or resolves to it (/, //, /., /..), is refused: --prefix /
+# would otherwise turn into no prefix at all, a real run. a prefix with a "." or ".." component is refused whether or not the
+# folders exist: /nonexist/.. names the root without being able to be resolved, and a real run created directories there.
 prefix_normalize() {
   local value="$1" stripped resolved
+  case "/$value/" in
+    */../* | */./*)
+      printf '%s' "--prefix may not contain a . or .. component (got '$value'): name the folder itself, for example /tmp/fake-root"
+      return 1
+      ;;
+  esac
   stripped="$value"
   while [ "${stripped%/}" != "$stripped" ]; do stripped="${stripped%/}"; done
   resolved="$(cd -P "$value" 2>/dev/null && pwd -P || true)"
   # "//" is a spelling of the root too, so slashes are stripped from the resolved path before it is compared
   while [ "${resolved%/}" != "$resolved" ]; do resolved="${resolved%/}"; done
-  if [ -z "$stripped" ]; then return 1; fi
-  if [ -z "$resolved" ] && [ -d "$value" ]; then return 1; fi
+  if [ -z "$stripped" ] || { [ -z "$resolved" ] && [ -d "$value" ]; }; then
+    printf '%s' "--prefix names a fake root; / is the real machine. leave --prefix out to work on it"
+    return 1
+  fi
   printf '%s' "$stripped"
 }
 

@@ -78,6 +78,16 @@ test_a_prefix_that_is_the_real_root_is_refused() {
   assert_status 64 "$REPO_DIR/uninstall.sh" --dry-run --prefix /
 }
 
+test_a_prefix_with_a_dot_component_is_refused_even_when_it_does_not_exist() {
+  assert_status 64 "$REPO_DIR/install.sh" --dry-run --prefix /nonexist/..
+  assert_contains "$CAPTURED_STDERR" "may not contain a . or .. component"
+  assert_status 64 "$REPO_DIR/install.sh" --dry-run --prefix /tmp/nonexist/../..
+  assert_status 64 "$REPO_DIR/install.sh" --dry-run --prefix /tmp/./x
+  assert_status 64 "$REPO_DIR/uninstall.sh" --dry-run --prefix /nonexist/..
+  assert_status 0 "$REPO_DIR/install.sh" --dry-run --prefix "$TEST_TMP/real-root" --transport none --path /srv/app
+  assert_no_file "$TEST_TMP/real-root"
+}
+
 test_a_package_name_with_a_slash_or_dots_is_refused() {
   . "$REPO_DIR/lib/common.sh"
   printf '{\n  "name": "../../tmp/evil"\n}\n' > "$TEST_TMP/project.json"
