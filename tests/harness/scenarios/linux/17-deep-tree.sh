@@ -3,6 +3,10 @@
 # it without recursion and without a descriptor per level, even with an open-file limit of 1,024. at 1ce7450 the
 # walk was recursive: uninstall exited 4 with a RecursionError traceback and left the account locked, and about
 # 1,000 levels were enough under a 1,024 limit.
+# harness-apparmor: unconfined
+# (why: the server ba-sing-se's default AppArmor profile rejects this deliberately deep chain (about 24,000 bytes of path) with
+# ENAMETOOLONG; Omashu has no AppArmor. the depth must not be lowered. no other isolation changes: no host folder, no network,
+# same capabilities and caps)
 set -uo pipefail
 . "$(dirname "$0")/../../lib/world.sh"
 cd "$SRC" || exit 2
