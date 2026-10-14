@@ -47,7 +47,9 @@ kill_switch_revoked_marker() {
 kill_switch_write_marker() {
   local user="$1" marker="$2"
   [ ! -e "$marker" ] || return 0
-  [ -d "$(dirname "$marker")" ] || mkdir -p -m 0700 "$(dirname "$marker")" || return 1
+  if [ ! -d "$(dirname "$marker")" ]; then
+    mkdir -p "$(dirname "$marker")" && chmod 0700 "$(dirname "$marker")" || return 1
+  fi
   ( umask 077 && printf '{"user": "%s", "revoked": "%s"}\n' "$user" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$marker" )
 }
 
