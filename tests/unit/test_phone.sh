@@ -102,7 +102,7 @@ test_the_interface_needs_the_bearer_token_and_listens_on_loopback_only() {
   assert_contains "$BRIDGE" "http://127.0.0.1:"
   TOKEN=wrong ask GET /status
   assert_eq 401 "$HTTP_STATUS"
-  assert_eq 600 "$(stat -f %Lp "$SIRVEN_PHONE_DIR/token" 2>/dev/null || stat -c %a "$SIRVEN_PHONE_DIR/token")"
+  assert_eq 600 "$(stat -c %a "$SIRVEN_PHONE_DIR/token" 2>/dev/null || stat -f %Lp "$SIRVEN_PHONE_DIR/token")"
 }
 
 test_without_a_session_every_action_is_refused_and_nothing_reaches_the_phone() {
