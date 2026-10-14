@@ -252,3 +252,55 @@ test_steps_assumed_undone_always_run() {
   plan_evaluate
   assert_eq "done todo todo" "${PLAN_STATUS[0]} ${PLAN_STATUS[1]} ${PLAN_STATUS[2]}"
 }
+
+test_a_failed_continue_step_does_not_stop_the_steps_after_it() {
+  setup_fake_root
+  mkdir -p "$ROOT"
+  plan_step run "a step that fails" "false" "false"
+  plan_continue
+  add_directory_step /after
+  plan_step run "a second step that fails" "false" "false"
+  plan_continue
+  plan_evaluate
+  assert_status 4 plan_apply
+  assert_contains "$CAPTURED_STDERR" "the other steps still run"
+  assert_contains "$CAPTURED_STDERR" "2 steps failed, each listed here, and the others ran:"
+  assert_contains "$CAPTURED_STDERR" "step 1: a step that fails"
+  assert_contains "$CAPTURED_STDERR" "step 3: a second step that fails"
+  assert_file_exists "$ROOT/after"
+}
+
+test_a_step_that_is_not_continue_still_stops_the_run() {
+  setup_fake_root
+  mkdir -p "$ROOT"
+  plan_step run "a step that fails" "false" "false"
+  add_directory_step /after
+  plan_evaluate
+  assert_status 4 plan_apply
+  assert_no_file "$ROOT/after"
+}
+
+test_recheck_reads_the_check_again_just_before_the_step() {
+  setup_fake_root
+  mkdir -p "$ROOT"
+  # step 2 looks done when the plan is read (nothing is there) and is not done once step 1 has run
+  plan_step run "make a file" "false" "touch $ROOT/made"
+  plan_step run "remove it again" "[ ! -e $ROOT/made ]" "rm -f $ROOT/made && touch $ROOT/removed"
+  plan_evaluate
+  PLAN_RECHECK=yes
+  assert_status 0 plan_apply
+  PLAN_RECHECK=no
+  assert_file_exists "$ROOT/removed"
+  assert_no_file "$ROOT/made"
+}
+
+test_without_recheck_the_first_reading_stands() {
+  setup_fake_root
+  mkdir -p "$ROOT"
+  plan_step run "make a file" "false" "touch $ROOT/made"
+  plan_step run "remove it again" "[ ! -e $ROOT/made ]" "rm -f $ROOT/made && touch $ROOT/removed"
+  plan_evaluate
+  assert_status 0 plan_apply
+  assert_no_file "$ROOT/removed"
+  assert_file_exists "$ROOT/made"
+}

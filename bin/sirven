@@ -37,6 +37,17 @@ while [ -L "$_sirven_self" ]; do
 done
 ROOT_DIR="$(cd "$(dirname "$_sirven_self")/.." && pwd)"
 
+# before any other library: root runs the kept copy, or code only root and the owner can write (lib/trust.sh)
+# the gate itself comes from the root-owned kept copy when there is one, so editing lib/trust.sh in a folder the
+# agent can write gains nothing
+_sirven_trust="$ROOT_DIR/lib/trust.sh"
+[ ! -f /var/lib/sirven/package/lib/trust.sh ] || _sirven_trust=/var/lib/sirven/package/lib/trust.sh
+# shellcheck source=lib/trust.sh
+. "$_sirven_trust"
+if [ "${1:-}" = grant ]; then
+  case "${2:-}" in rollback | repair) trust_gate "$2" bin/sirven "$@" ;; esac
+fi
+
 # shellcheck source=lib/common.sh
 . "$ROOT_DIR/lib/common.sh"
 # shellcheck source=lib/plan.sh
@@ -51,6 +62,8 @@ ROOT_DIR="$(cd "$(dirname "$_sirven_self")/.." && pwd)"
 . "$ROOT_DIR/lib/access_control.sh"
 # shellcheck source=lib/components.sh
 . "$ROOT_DIR/lib/components.sh"
+# shellcheck source=lib/lock.sh
+. "$ROOT_DIR/lib/lock.sh"
 
 AFTER_ALPHA_SESSIONS="sessions already open keep the rights they started with until they end. ending them belongs to the forced-command wrapper, built after alpha. to cut everything now: sudo bash install.sh revoke --all (add --dry-run to read the plan first)"
 
@@ -333,6 +346,7 @@ repair_grant() {
   local record folders kind path helper status=0 failed=0 flags="" scratch
   [ "$OPERATING_SYSTEM" = linux ] || die "repair is for linux access control lists; this machine is $OPERATING_SYSTEM"
   need_python
+  if [ "$DRY_RUN" != yes ]; then lock_take 60 refuse; fi
   record="${PREFIX}$(access_control_record_file)"
   if [ -n "$REPAIR_PATHS_TEXT" ]; then
     GRANT_LEVEL=observer
@@ -483,6 +497,7 @@ rollback() {
     say "dry run: nothing was changed. run the same command without --dry-run to apply this plan."
     return 0
   fi
+  lock_take 60 refuse
   rollback_apply
 }
 

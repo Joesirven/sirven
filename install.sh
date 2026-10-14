@@ -15,6 +15,17 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# before any other library: root runs the kept copy, or code only root and the owner can write (lib/trust.sh)
+# the gate itself comes from the root-owned kept copy when there is one, so editing lib/trust.sh in a folder the
+# agent can write gains nothing
+_sirven_trust="$ROOT_DIR/lib/trust.sh"
+[ ! -f /var/lib/sirven/package/lib/trust.sh ] || _sirven_trust=/var/lib/sirven/package/lib/trust.sh
+# shellcheck source=lib/trust.sh
+. "$_sirven_trust"
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  if [ "${1:-}" = revoke ]; then trust_gate revoke install.sh "$@"; else trust_gate install install.sh "$@"; fi
+fi
+
 # shellcheck source=lib/common.sh
 . "$ROOT_DIR/lib/common.sh"
 # shellcheck source=lib/plan.sh

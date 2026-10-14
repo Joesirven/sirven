@@ -21,6 +21,15 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# before any other library: root runs the kept copy, or code only root and the owner can write (lib/trust.sh)
+# the gate itself comes from the root-owned kept copy when there is one, so editing lib/trust.sh in a folder the
+# agent can write gains nothing
+_sirven_trust="$ROOT_DIR/lib/trust.sh"
+[ ! -f /var/lib/sirven/package/lib/trust.sh ] || _sirven_trust=/var/lib/sirven/package/lib/trust.sh
+# shellcheck source=lib/trust.sh
+. "$_sirven_trust"
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then trust_gate uninstall uninstall.sh "$@"; fi
+
 # shellcheck source=lib/common.sh
 . "$ROOT_DIR/lib/common.sh"
 # shellcheck source=lib/plan.sh
@@ -31,6 +40,8 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$ROOT_DIR/lib/layout.sh"
 # shellcheck source=lib/audit.sh
 . "$ROOT_DIR/lib/audit.sh"
+# shellcheck source=lib/lock.sh
+. "$ROOT_DIR/lib/lock.sh"
 
 usage() {
   cat <<END
@@ -228,6 +239,7 @@ finish() {
     say "dry run: nothing was changed. run the same command without --dry-run to apply this plan."
     return 0
   fi
+  lock_take 60 refuse
   apply_for_real
 }
 
