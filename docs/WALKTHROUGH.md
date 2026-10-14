@@ -70,10 +70,10 @@ sirven grant rollback --dry-run # what reversing the last change would do
 ## take it all back
 
 ```bash
-sudo bash install.sh revoke --all
+sudo bash install.sh revoke --all --dry-run
 ```
 
-The kill switch. Revokes every grant in one shot.
+The kill switch prints its plan: every grant it would remove. Applying it is not built yet, and an applied run is refused with exit status 3 before it changes anything. Neither the kill switch nor uninstall is verified to apply on a regular machine yet. Until one is, check what the agent can reach with `sirven grant inspect`.
 
 ## known limitations, not built yet
 

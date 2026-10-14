@@ -28,9 +28,11 @@ The script is `bootstrap/sirven-bootstrap.sh`. Read it before you run it.
 The release pin is two lines near the top of `bootstrap/sirven-bootstrap.sh`:
 
 ```
-SIRVEN_PINNED_TAG="v0.2.0"
-SIRVEN_PINNED_SHA256="<64 hexadecimal characters>"
+SIRVEN_PINNED_TAG="v0.1.0"
+SIRVEN_PINNED_SHA256="556ce5fb658c6d6f1e0fa74de39c4d6c4508c61f65ac51dd52c3feda914a2718"
 ```
+
+Those are the values for release v0.1.0, as pinned at the time of writing. Read the current pins in the script itself.
 
 The served script carries its own pin, so nothing is fetched from anywhere to find out which
 release to install. Only `bootstrap/release.sh` writes these two lines.
@@ -102,8 +104,8 @@ sudo bash /var/lib/sirven/package/uninstall.sh
 ```
 
 Revoking access from the copy is not available in this alpha. `install.sh revoke --all` prints its
-plan (`--dry-run`) and exits with status 3 when applied. Until the kill switch applies, revoke by
-uninstalling.
+plan (`--dry-run`) and exits with status 3 when applied. Neither revoke nor uninstall is verified to
+apply on a regular machine yet.
 
 A Mac does not yet apply an install in this alpha, so no copy is made on a Mac either. The copy is
 created on Linux, inside the container the installer supports.

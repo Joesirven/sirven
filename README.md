@@ -23,7 +23,7 @@ flowchart LR
 | **Its own account** | The agent works as a dedicated local user. Your personal credentials are never copied across. |
 | **Three access levels** | `observer` reads the folder you grant, `builder` reads and writes it, `operator` is `builder` today, with owner-listed service restarts and log reads designed. None of them ever gets root or `sudo`. |
 | **Nothing granted by default** | A folder is granted only when you name it. System folders, your whole home folder, and credential folders such as `.ssh` are refused. |
-| **A way back** | `sirven grant inspect` shows what is in force. `sirven grant rollback` reverses the last change. `sudo bash install.sh revoke --all` revokes everything. |
+| **A way back** | `sirven grant inspect` shows what is in force. `sirven grant rollback` reverses the last change. `sudo bash install.sh revoke --all` prints its plan; applying it is not built yet. |
 | **Plans before changes** | The installer prints its full plan first, and `--dry-run` changes nothing. |
 | **Works with what you run** | Already have an agent? sirven adopts what it finds (Tailscale, bb, an earlier run) and does not replace it. |
 
@@ -63,7 +63,7 @@ Stated plainly so you can trust the rest. Applying the plan to a regular Linux o
 
 Your personal agent often works while you are away from the keyboard. If the Mac goes to sleep
 halfway through, the work stops. `sirven awake` keeps the Mac awake while your agent has work in
-flight, and only then. Inspired by Sleepless by itskoosh (MIT).
+flight, and only then. Inspired by Sleepless by itskoosh.
 
 What it does, and what it never does:
 
@@ -151,8 +151,8 @@ off by default and only active while there is work to point to.
 
 ### Credit for keep-awake
 
-Inspired by Sleepless by itskoosh (MIT): https://github.com/itskoosh/Sleepless. sirven's
-keep-awake is its own implementation.
+Inspired by Sleepless by itskoosh. sirven's keep-awake is its own implementation. No live
+repository for Sleepless could be confirmed, so none is linked.
 
 ## Credits
 

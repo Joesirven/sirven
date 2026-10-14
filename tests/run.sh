@@ -26,7 +26,9 @@ failed_names=""
 
 run_test() {
   local file="$1" name="$2" log status
-  TEST_TMP="$(mktemp -d "${TMPDIR:-/tmp}/sirven-test.XXXXXX")"
+  # /tmp, not TMPDIR: on macOS TMPDIR sits under /var, which the grant policy refuses as a folder
+  # to grant, so a test that grants its own project folder would get no default path there.
+  TEST_TMP="$(mktemp -d /tmp/sirven-test.XXXXXX)"
   log="$TEST_TMP/.log"
   (
     export TEST_TMP

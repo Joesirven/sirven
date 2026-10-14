@@ -39,7 +39,7 @@ rest ships together.
 
 ## What `tests/peer_routing` proves
 
-Twenty cases, each through the real code: a reviewed site with a valid envelope is carried and
+Twenty-six end-to-end cases (tests/peer_routing/test_end_to_end.py), each through the real code: a reviewed site with a valid envelope is carried and
 its bytes reserved; `www.` matches its registry entry; signed-in traffic is refused while the gate
 is closed, and with the gate open it still needs a site reviewed for signed-in sessions. Refusals,
 one per component: a site never reviewed, Solo, a tampered registry, a registry signed by an
