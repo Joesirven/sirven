@@ -53,6 +53,7 @@ import stat
 import struct
 import subprocess
 import sys
+import time
 
 ACCESS = "system.posix_acl_access"
 DEFAULT = "system.posix_acl_default"
@@ -521,6 +522,60 @@ def command_grant_default(arguments):
     return finish_changes(errors)
 
 
+def agent_bits(entries, agent):
+    return next((perm for tag, perm, number in entries or [] if tag == USER and number == agent), None)
+
+
+def command_verify_access(arguments):
+    """read only: exit 0 when every path in the tree already has the agent's entry as the grant would write it.
+    the mask is not compared: an owner's chmod narrows it on purpose and a re-install must not undo that."""
+    recursive = arguments.recursive == "yes"
+    agent = account_number(arguments.user)
+    if agent is None:
+        return 1
+    missing, errors = [], []
+
+    def visit(handle, item, path, is_folder, parent=None):
+        try:
+            current = read_list(handle, ACCESS)
+            wanted = access_with_grant(current, stat.S_IMODE(item.st_mode), is_folder, agent, arguments.permissions)
+            if agent_bits(current, agent) != agent_bits(wanted, agent):
+                missing.append(path)
+        except OSError as error:
+            errors.append((path, error.strerror))
+
+    start(os.path.realpath(arguments.folder), recursive, visit, errors)
+    return 1 if missing or errors else 0
+
+
+def command_verify_default(arguments):
+    """read only: exit 0 when every folder in the tree has the default list the grant writes."""
+    agent = account_number(arguments.user)
+    if agent is None:
+        return 1
+    bad, errors, owner = [], [], []
+
+    def visit(handle, item, path, is_folder, parent=None):
+        if not is_folder:
+            return
+        try:
+            if not owner:
+                owner.append(item.st_uid)
+            current = read_list(handle, DEFAULT)
+            wanted = default_with_grant(current, read_list(handle, ACCESS), stat.S_IMODE(item.st_mode),
+                                        agent, owner[0], arguments.permissions)
+            same = current is not None and all(
+                (tag, perm) in [(t, p) for t, p, n in current if n == number]
+                for tag, perm, number in wanted if tag in (USER, GROUP_OBJ, OTHER))
+            if not same:
+                bad.append(path)
+        except OSError as error:
+            errors.append((path, error.strerror))
+
+    start(os.path.realpath(arguments.folder), True, visit, errors)
+    return 1 if bad or errors else 0
+
+
 # ---- the agent's account while access changes ----
 
 def shadow_fields(user):
@@ -543,8 +598,20 @@ def command_quiesce(arguments):
     if not fields[1].startswith("!"):
         subprocess.run(["usermod", "--lock", arguments.user], check=True)
     subprocess.run(["usermod", "--expiredate", "1", arguments.user], check=True)
-    subprocess.run(["pkill", "-KILL", "-u", arguments.user])
+    end_processes(arguments.user)
     return 0
+
+
+def end_processes(user):
+    """end every process of the user. one pass is not enough for a process that keeps starting others, so
+    repeat until none is left, at most 20 times."""
+    for _ in range(20):
+        subprocess.run(["pkill", "-KILL", "-u", user])
+        if subprocess.run(["pgrep", "-u", user], capture_output=True).returncode != 0:
+            return
+        time.sleep(0.05)
+    raise Failure("processes of %s keep starting and could not all be ended after 20 tries. its account is locked "
+                  "and expired, so no new login works; end them by hand (pkill -KILL -u %s) and run again" % (user, user))
 
 
 def command_release(arguments):
@@ -656,11 +723,46 @@ def access_without_grant(current, agent, owner, recorded):
         masks = [entry[1] for entry in before if entry[0] == MASK]
         if again and masks:
             kept = [(tag, perm & masks[0], number) if tag == MASK else (tag, perm, number) for tag, perm, number in kept]
-    kept.sort(key=lambda e: (e[0], e[2] if e[0] in (USER, GROUP) else 0))
+    return collapsed(kept)
+
+
+def collapsed(entries):
+    """sorted entries; with no named entry left, a plain mode: the group entry AND the mask, and no mask."""
+    kept = sorted(entries, key=lambda e: (e[0], e[2] if e[0] in (USER, GROUP) else 0))
     if has_named(kept):
         return kept
     mask = next((perm for tag, perm, _ in kept if tag == MASK), 7)
     return [(tag, perm & mask if tag == GROUP_OBJ else perm, number) for tag, perm, number in kept if tag != MASK]
+
+
+def has_account(number):
+    try:
+        pwd.getpwuid(number)
+        return True
+    except KeyError:
+        return False
+
+
+def access_without_leftovers(current, owner):
+    """for a machine where the agent's account is already gone: take off the entries for numbers that no
+    account has, and the folder owner's, and collapse a list that is only a mask. None when nothing to do. pure
+    apart from the account lookup."""
+    kept = [entry for entry in current
+            if not (entry[0] == USER and (entry[2] == owner or not has_account(entry[2])))]
+    only_a_mask = not has_named(current) and any(tag == MASK for tag, _, _ in current)
+    if len(kept) == len(current) and not only_a_mask:
+        return None
+    return collapsed(kept)
+
+
+def default_is_leftover(current, owner):
+    """a default list the grant wrote and an old undo left: group and other get nothing, and the only named
+    entries are for the folder owner or for numbers no account has."""
+    if current is None:
+        return False
+    closed = all(perm == 0 for tag, perm, _ in current if tag in (GROUP_OBJ, OTHER))
+    named_ours = all(number == owner or not has_account(number) for tag, _, number in current if tag == USER)
+    return closed and named_ours and any(tag == MASK for tag, _, _ in current)
 
 
 def undo_access(fd, agent, owner, recorded, changes):
@@ -687,6 +789,23 @@ def undo_default(fd, agent, recorded, changes):
     changes.append(1)
 
 
+def undo_leftovers(fd, owner, with_default, path, changes, dry):
+    """the no-account form of undo for one path. records the path in changes; writes unless dry."""
+    current = read_list(fd, ACCESS)
+    wanted = access_without_leftovers(current, owner) if current else None
+    default = read_list(fd, DEFAULT) if with_default else None
+    drop_default = default_is_leftover(default, owner)
+    if wanted is None and not drop_default:
+        return
+    changes.append(path)
+    if dry:
+        return
+    if wanted is not None:
+        os.setxattr(fd, ACCESS, build(wanted))
+    if drop_default:
+        os.removexattr(fd, DEFAULT)
+
+
 def restore_folder(arguments):
     recursive = arguments.recursive == "yes"
     warnings = Warnings(arguments.audit, arguments.user)
@@ -698,9 +817,15 @@ def restore_folder(arguments):
     agent = account_number(arguments.user)
     if agent is None and snapshot:
         agent = snapshot["context"]["agent"]
-    if agent is None:
-        say("error: the account %s is gone and no snapshot names its number, so its entries cannot be found" % arguments.user)
-        return EXIT_FAILED
+    leftovers = agent is None
+    if getattr(arguments, "dry_run", False) and not leftovers:
+        say("dry run: nothing was changed. repair would remove the entries of %s (and the folder owner's, and the "
+            "default list that carries them) under %s" % (arguments.user, arguments.folder))
+        return 0
+    if leftovers:
+        say("the account %s is gone and no snapshot names its number, so this removes what an old undo left: entries "
+            "for numbers no account has, the folder owner's entry, a mask with no entry, and the default list the "
+            "grant wrote (group and other nothing)" % arguments.user)
     resolved = os.path.realpath(arguments.folder)
     if snapshot:
         if resolved != snapshot["context"]["resolved"]:
@@ -739,6 +864,9 @@ def restore_folder(arguments):
             if place is not None and (place["d"], place["i"]) != (item.st_dev, item.st_ino):
                 warnings.add("%s is not the folder that was recorded (it was replaced during the grant)" % printable(path))
         try:
+            if leftovers:
+                undo_leftovers(fd, owner, is_folder and recursive, path, changes, getattr(arguments, "dry_run", False))
+                return
             undo_access(fd, agent, owner, earlier.get("access"), changes)
             if is_folder and recursive:
                 undo_default(fd, agent, earlier.get("default"), changes)
@@ -747,6 +875,13 @@ def restore_folder(arguments):
 
     start(resolved, recursive, visit, errors,
           lambda parent, name, path: replaced(parent, name, path, "a symbolic link"))
+    if leftovers:
+        for path in changes[:LISTED]:
+            say("%s %s" % ("would change" if getattr(arguments, "dry_run", False) else "changed", printable(path)))
+        if len(changes) > LISTED:
+            say("and %d more" % (len(changes) - LISTED))
+        if not changes:
+            say("nothing left to remove in %s" % arguments.folder)
     for path, reason in errors[:LISTED]:
         say("error: %s: %s" % (printable(path), reason))
     if len(errors) > LISTED:
@@ -817,6 +952,14 @@ def parser():
         command.add_argument("permissions")
         command.add_argument("--snapshot", default="")
 
+    for name in ("verify-access", "verify-default"):
+        command = commands.add_parser(name)
+        command.add_argument("folder")
+        if name == "verify-access":
+            command.add_argument("recursive", choices=("yes", "no"))
+        command.add_argument("user")
+        command.add_argument("permissions")
+
     for name in ("quiesce", "release"):
         command = commands.add_parser(name)
         command.add_argument("user")
@@ -827,6 +970,7 @@ def parser():
     repair.add_argument("recursive", choices=("yes", "no"))
     repair.add_argument("user")
     repair.add_argument("--audit", default="")
+    repair.add_argument("--dry-run", action="store_true", dest="dry_run")
     return top
 
 
@@ -867,7 +1011,8 @@ def main(argv):
         status = {"check": command_check, "record": command_record, "restore": command_restore,
                   "status": command_status, "grant-access": command_grant_access,
                   "grant-default": command_grant_default, "quiesce": command_quiesce,
-                  "release": command_release}[command](arguments)
+                  "release": command_release, "verify-access": command_verify_access,
+                  "verify-default": command_verify_default}[command](arguments)
     except (OSError, Failure, subprocess.CalledProcessError) as error:
         say("error: %s" % error)
         status = EXIT_FAILED

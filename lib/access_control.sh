@@ -154,6 +154,18 @@ nothing was changed."
   esac
 }
 
+# access_control_report_locked_account: after a failed install or rollback, say plainly if the agent's account
+# was left locked and expired by the step that ends its processes, and how to get out of that state.
+access_control_report_locked_account() {
+  local marker
+  marker="${PREFIX}${STATE_DIR}/agent-quiesce.json"
+  [ -e "$marker" ] || return 0
+  printf 'the account %s is locked and expired until a run finishes: this run stopped after ending its processes, so no login works.\n' "$SERVICE_USER" >&2
+  printf 'fix the cause printed above and run the same command again; it finishes the grant and gives the account back as it was.\n' >&2
+  printf 'to give the account back now without finishing: bash %s/package/lib/access_control_snapshot.sh release %s %s\n' \
+    "${PREFIX}${STATE_DIR}" "$SERVICE_USER" "$marker" >&2
+}
+
 # removal steps for the kill switch. uses --path when given, otherwise the grant record.
 plan_access_control_revoke() {
   local record fragment

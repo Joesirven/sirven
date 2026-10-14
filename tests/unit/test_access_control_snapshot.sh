@@ -138,3 +138,45 @@ after = h.default_with_grant(earlier, None, 0o755, agent, owner, "rX")
 assert (h.GROUP_OBJ, 0, h.NO_ID) in after and (h.OTHER, 0, h.NO_ID) in after and (h.USER, 5, agent) in after, after
 print("ok")')"
 }
+
+report_locked_account() {
+  PREFIX="$1" STATE_DIR=/var/lib/sirven SERVICE_USER=agent REPO_DIR="$REPO_DIR" bash -c '
+    . "$REPO_DIR/lib/common.sh"
+    . "$REPO_DIR/lib/access_control.sh"
+    access_control_report_locked_account'
+}
+
+test_a_failed_run_says_the_account_is_locked_and_how_to_get_out() {
+  local root="$TEST_TMP/root"
+  mkdir -p "$root/var/lib/sirven"
+  : > "$root/var/lib/sirven/agent-quiesce.json"
+  assert_status 0 report_locked_account "$root"
+  assert_contains "$CAPTURED_STDERR" "the account agent is locked and expired until a run finishes"
+  assert_contains "$CAPTURED_STDERR" "run the same command again"
+  assert_contains "$CAPTURED_STDERR" "access_control_snapshot.sh release agent"
+}
+
+test_a_run_that_left_no_marker_says_nothing_about_the_account() {
+  local root="$TEST_TMP/root"
+  mkdir -p "$root/var/lib/sirven"
+  assert_status 0 report_locked_account "$root"
+  assert_eq "" "$CAPTURED_STDERR"
+}
+
+test_the_list_collapse_and_the_leftovers_of_an_old_undo() {
+  assert_eq "ok" "$(snapshot_python '
+base = [(h.USER_OBJ, 6, h.NO_ID), (h.GROUP_OBJ, 4, h.NO_ID), (h.OTHER, 4, h.NO_ID)]
+# a list that is only a mask collapses; one with nothing of the grant is left alone
+assert h.access_without_leftovers(base + [(h.MASK, 4, h.NO_ID)], 1001) == base
+assert h.access_without_leftovers(base, 1001) is None
+# the folder owner s entry goes with the mask
+owner = base + [(h.USER, 6, 1001), (h.MASK, 6, h.NO_ID)]
+assert h.access_without_leftovers(owner, 1001) == base
+# a default list the grant wrote (group and other nothing, the owner named, a mask) is a leftover
+grant = [(h.USER_OBJ, 7, h.NO_ID), (h.USER, 7, 1001), (h.GROUP_OBJ, 0, h.NO_ID), (h.MASK, 7, h.NO_ID), (h.OTHER, 0, h.NO_ID)]
+assert h.default_is_leftover(grant, 1001)
+# an ordinary default list is not
+ordinary = [(h.USER_OBJ, 7, h.NO_ID), (h.GROUP_OBJ, 5, h.NO_ID), (h.OTHER, 5, h.NO_ID)]
+assert not h.default_is_leftover(ordinary, 1001)
+print("ok")')"
+}

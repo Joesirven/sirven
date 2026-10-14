@@ -150,9 +150,9 @@ files that already have an execute bit only. it opens the start folder one compo
 following links, checks it is the folder the snapshot recorded (same device and inode), and walks down by
 descriptor, so a link the agent swaps in cannot redirect it. an earlier version ran `setfacl` by path.
 `quiesce` ends every process of the agent and locks and expires its account, writing what the account was to
-`agent-quiesce.json`; `release` puts it back as it was (an account that was already locked stays locked). they
+`agent-quiesce.json`; `release` puts it back as it was (an account that was already locked stays locked). the release step is not done while the marker is there, so a run that stopped before it is finished by the next run. `quiesce` repeats the kill until the agent has no process left (at most 20 tries). they
 wrap the grant steps only when a grant step has work to do, so an install that finds everything in place
-leaves a running agent alone; a rollback always runs them. if a step fails in between, the account stays
+leaves a running agent alone; a rollback always runs them. whether a grant step has work to do is read from the whole tree (`verify-access`, `verify-default`), so a grant that stopped partway is finished by the next run; the mask is not compared, so an owner's chmod is not re-applied. if a step fails in between, the account stays
 locked, which is the safe state, and running the same command again finishes the job.
 
 the `-d` line makes new files inherit the grant, and it is the one that needs care. a default
@@ -238,14 +238,19 @@ the kill switch reads it to know what to remove.
 - **inspect.** `bin/sirven grant inspect` reads the grant records, says whether the installed
   policy copy still matches `levels/`, and shows the last grant entry from the audit log.
 - **refusal (linux).** before anything changes, the plan reads the granted folders and the parents the
-  agent passes through (`lib/access_control_snapshot.sh check`). the grant recalculates the mask, which
-  would widen another account where a named entry for that account, or a mask, already exists (a file
-  with `user:bob:rw-` and `mask::r--` lets bob only read; after the grant he can write). so such a tree
-  is refused, with up to ten paths listed and how to go on: remove those lists, or grant another
-  folder. the agent's own entries and the folder owner's own entries, left by an earlier grant, do
-  not count, so a re-install, a nested second install and a rollback still apply. the check is read
-  only, and under `--dry-run` as an ordinary user it says it could not read every path instead of
-  refusing.
+  agent passes through (`lib/access_control_snapshot.sh check`). a grant recalculates the mask. that
+  widens another account only where the account has an entry with bits the mask now switches off (a file
+  with `user:bob:rw-` and `mask::r--` lets bob only read; after the grant he could write). so the check
+  refuses exactly that: an entry for another account or a named group with bits outside the current mask.
+  an entry that fits inside the mask is fine, however many there are. it never counts the agent's own and
+  the folder owner's entries (an earlier grant), and it skips every path the agent owns, because the agent
+  can put any entry on its own files itself: so the agent can never block a step down to a lower level or
+  a rollback. the group entry is not refused either: the grant narrows the group entry and the other named
+  entries to the old mask before it raises the mask, so an owner's `chmod 600` is not undone by a re-grant
+  and the group stays shut out. up to ten paths are listed, with `setfacl -x u:NAME PATH` as the way on. the
+  check is read only, and under `--dry-run` as an ordinary user it says it could not read every path instead
+  of refusing. the one case still refused after an owner narrowed a mask: another account's own entry would be
+  switched back on by the re-grant.
 - **snapshot and restore (linux).** before a grant changes a folder, install records it:
   for a granted folder, every folder in it (path, device, inode), the default list of each, and any
   entries of the agent or the folder owner from an earlier grant; for a parent the agent only passes
@@ -265,6 +270,15 @@ the kill switch reads it to know what to remove.
   (644 to 664) does not survive undo (the file ends 644, which is what the group could do all along).
   using the mask as the group bits would have widened access nobody granted.
   this holds for uninstall, rollback and the kill switch alike.
+
+  **depth and descriptors.** the walk is iterative and keeps the deepest 48 folders open, whatever the depth,
+  so a chain of 12,000 folders made by the agent undoes under an open-file limit of 1,024. a folder let
+  go is opened again through `..` and checked against the device and inode recorded when it was first
+  opened (a slow reopen by name if the tree was moved). a path deeper than 30,000 levels is reported by
+  name and skipped, with a hint to remove it (`rm -r`) and run again. no exception leaves as a traceback; a
+  failure prints `error:` lines and a `recovery:` line, and the account stays locked and expired until a run
+  finishes, which the install, rollback and uninstall messages say, with how to give it back now
+  (`access_control_snapshot.sh release AGENT MARKER`).
 
   **links.** undo never follows a link. it opens the granted folder one component at a time without
   following links and checks it is still the folder that was recorded (same device and inode),

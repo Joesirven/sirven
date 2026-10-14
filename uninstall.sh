@@ -202,6 +202,10 @@ apply_for_real() {
     AUDIT_PENDING="$STAGE_DIR/audit-pending.jsonl"
   fi
   plan_apply || status=$?
+  if [ "$status" -eq 4 ]; then
+    printf 'if the step that ends the agent processes already ran, the account %s is locked and expired until uninstall finishes.\n' "$SERVICE_USER" >&2
+    printf 'fix the cause printed above and run uninstall.sh again: it continues where it stopped and removes the account at the end.\n' >&2
+  fi
   if [ "$REMOVE_AUDIT_LOG" != yes ] && [ "$status" -ne 3 ]; then
     if [ "$status" -eq 0 ]; then
       audit_write "$(audit_entry uninstall "operation=uninstall" "outcome=finished")"

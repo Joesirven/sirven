@@ -316,19 +316,6 @@ def macos_folders_removal(rights, user, target, path):
             % (target, shlex.quote("%s allow %s" % (user, rights["directories"]))))
 
 
-def linux_default_check(user, target, entry):
-    """read only: the default list on target has the agent's entry (by number), the folder owner's when
-    one is wanted, and nothing for group and other."""
-    listing = "getfacl -n --absolute-names --omit-header %s 2>/dev/null" % target
-    return (
-        "a=$(id -u %s 2>/dev/null) && [ -n \"$a\" ] && o=$(stat -c %%u %s) && l=$(%s) && "
-        "printf '%%s\\n' \"$l\" | grep -qx \"default:user:$a:%s\" && "
-        "{ [ \"$o\" = 0 ] || [ \"$o\" = \"$a\" ] || printf '%%s\\n' \"$l\" | grep -qx \"default:user:$o:%s\"; } && "
-        "printf '%%s\\n' \"$l\" | grep -qx 'default:other::---' && "
-        "printf '%%s\\n' \"$l\" | grep -qx 'default:group::---'"
-        % (user, target, listing, entry, entry))
-
-
 def compile_linux(level, user, prefix, paths, with_undo=False, package="sirven"):
     grant = level["access_control"]["linux"]["grant"]
     traverse = level["access_control"]["linux"]["traverse"]
@@ -371,17 +358,17 @@ def compile_linux(level, user, prefix, paths, with_undo=False, package="sirven")
     for path in paths:
         target = shlex.quote(prefix + path)
         snapshot = " --snapshot " + shlex.quote(prefix + linux_snapshot(state_dir, path)) if with_undo else ""
+        # the checks read the whole tree (a grant that stopped partway is not done), by descriptor like the grant
         grants.append(fragment_line(
             "grant %s %s on %s and everything inside" % (user, grant, path),
-            "getfacl --absolute-names --omit-header %s 2>/dev/null | grep -qx 'user:%s:%s'" % (target, user, entry),
+            "bash %s verify-access %s yes %s %s" % (helper_word, target, user, grant),
             "bash %s grant-access %s yes %s %s%s" % (helper_word, target, user, grant, snapshot)))
         # the default list gives group and other nothing, whatever the owner's umask. the agent and
-        # the folder owner get the grant on new files. both are written by account number, looked up
-        # when the step runs, so an owner with no account name (a deleted account, a mounted volume)
-        # works, and root and the agent are not added as the owner.
+        # the folder owner get the grant on new files, by account number, so an owner with no account
+        # name (a deleted account, a mounted volume) works, and root and the agent are not added as the owner.
         grants.append(fragment_line(
             "make new files in %s inherit the grant, with group and other kept out" % path,
-            linux_default_check(user, target, entry),
+            "bash %s verify-default %s %s %s" % (helper_word, target, user, grant),
             "bash %s grant-default %s %s %s%s" % (helper_word, target, user, grant, snapshot),
             linux_stop_agent_removal(user) if with_undo else None))
     # the account is stopped only when a grant step has work to do: a re-run that finds every grant in
@@ -396,7 +383,8 @@ def compile_linux(level, user, prefix, paths, with_undo=False, package="sirven")
     lines.extend(grants)
     lines.append(fragment_line(
         "give %s its account back" % user,
-        everything_in_place,
+        # also not done while the marker is there: a run that stopped before this step left the account locked
+        "[ ! -e %s ] && %s" % (marker, everything_in_place),
         "bash %s release %s %s" % (helper_word, user, marker)))
     return lines
 
