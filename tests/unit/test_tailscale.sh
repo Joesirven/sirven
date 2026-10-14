@@ -10,7 +10,7 @@ NODE="$REPO_DIR/lib/tailscale_node.sh"
 
 # setup: a state directory for the record, and the fake's own folder.
 # the script ignores the SIRVEN_TAILSCALE seam when it runs as root (root runs only the vetted tailscale), so as root these
-# tests could not use the fake: they end here, and scenario 60 covers the same ground as root, in a container.
+# tests could not use the fake: they end here, and scenario 61 covers the same ground as root, in a container.
 setup_node() {
   if [ "$(id -u)" -eq 0 ]; then
     printf 'skipped: these tests need a normal user, because root ignores the SIRVEN_TAILSCALE seam\n'
@@ -192,7 +192,7 @@ test_a_key_with_odd_characters_is_refused_and_not_run() {
 }
 
 # a key file that is not a plain file owned by the account running this with nothing for anyone else is not used. (owned by
-# root is the rule as root; the tests run as a normal user, so "owned by whoever runs it". scenario 60 and the attack scripts
+# root is the rule as root; the tests run as a normal user, so "owned by whoever runs it". scenario 61 and the attack scripts
 # cover a file owned by another account, which needs root to make.)
 test_a_key_file_others_can_read_or_write_is_refused() {
   setup_node

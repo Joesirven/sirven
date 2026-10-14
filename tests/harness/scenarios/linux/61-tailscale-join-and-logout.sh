@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SIR-1, SIR-33. the Tailscale transport on a real install, with a fake tailscale that keeps a login state (the real
-# one is scenario 61, which needs a test key and a network). apply without a key is refused before the first change;
+# one is scenario 62, which needs a test key and a network). apply without a key is refused before the first change;
 # apply with a key joins as tag:agent and records the node; a second apply does nothing; the key is nowhere on the
 # disk or in any output; revoke and uninstall log out exactly that node and nothing else, and are safe to repeat.
 set -uo pipefail

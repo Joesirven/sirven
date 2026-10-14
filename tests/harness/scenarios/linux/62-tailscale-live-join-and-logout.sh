@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# SIR-1, SIR-33. the Tailscale transport against the REAL tailscale, in a disposable machine. scenario 60 does the same with a
+# SIR-1, SIR-33. the Tailscale transport against the REAL tailscale, in a disposable machine. scenario 61 does the same with a
 # fake. this one needs a network and, for the join itself, a test key: an auth key of a TEST tailnet (never Jose's own), tagged
 # tag:agent, pre-approved, reusable, ephemeral. without the key the steps that join say "skipped: needs a Tailscale test key"
 # and the rest still runs against the real tailscale: apply without a key is refused, and a wrong key fails cleanly with
 # nothing recorded and the key nowhere in the output.
 # to run the joining steps for real, once a test key is in a dotenv file (a line SIRVEN_TAILSCALE_AUTHKEY=...), as one command:
-#   SIRVEN_HARNESS_SECRETS_FILE=/path/to/that.env bash tests/harness/run-linux.sh 61
+#   SIRVEN_HARNESS_SECRETS_FILE=/path/to/that.env bash tests/harness/run-linux.sh 62
 # (or export SIRVEN_TAILSCALE_AUTHKEY in the shell). the key goes into the container by name or by file, never on a command line.
 # harness-tailscale: yes
 # harness-memory: 512m
