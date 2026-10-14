@@ -1,0 +1,24 @@
+flowchart LR
+  %% Access levels, grant audit, and rollback
+  subgraph g_level["level"]
+  observer["levels/observer.json"]
+  builder["levels/builder.json"]
+  operator["levels/operator.json"]
+  end
+  subgraph g_core["core"]
+  compiler["lib/grant_compiler.py"]
+  control["lib/access_control.sh"]
+  audit["lib/audit.sh"]
+  end
+  subgraph g_action["action"]
+  rollback["sirven grant rollback"]
+  kill["lib/kill_switch.sh"]
+  end
+  observer --> compiler
+  builder --> compiler
+  operator --> compiler
+  compiler -->|plan| control
+  control -->|step and grant entries| audit
+  rollback -->|last-grant| audit
+  rollback -->|revoke --record| compiler
+  kill -->|revoke --all| control

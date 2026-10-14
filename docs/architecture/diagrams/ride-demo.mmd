@@ -1,0 +1,21 @@
+flowchart LR
+  %% ride-to-the-barber demo
+  subgraph g_person["person"]
+  owner(("Owner"))
+  agent(("Personal agent"))
+  end
+  subgraph g_core["core"]
+  contract["connectors/ride contract"]
+  policy["lib/policy_engine.py"]
+  end
+  phone["phone path"]
+  subgraph g_data["data"]
+  card[("booking card")]
+  audit[("lib/audit.sh")]
+  end
+  owner -->|take me to the barber| agent
+  agent -->|ride request| contract
+  contract -->|decide| policy
+  policy -->|allowed| phone
+  phone -->|write| card
+  contract -->|log| audit

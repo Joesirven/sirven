@@ -1,0 +1,29 @@
+flowchart LR
+  %% Peer routing: policy, attestation, and carrier transport built, ship gate closed
+  requester(("requesting device"))
+  envelope["signed envelope"]
+  subgraph g_built["built"]
+  attestation["lib/attestation"]
+  review["lib/allowlist_review.py"]
+  registry["signed registry"]
+  peer["lib/peer_routing.py"]
+  policy["lib/policy_engine.py"]
+  reciprocity["lib/reciprocity.py"]
+  transport["lib/peer_transport.py (carrier, loopback)"]
+  end
+  subgraph g_pending["pending"]
+  seam{{"lib/sirven_runtime/seam.py (user wiring open)"}}
+  auth{{"host authentication between machines (open)"}}
+  gate{{"ship gate (closed)"}}
+  end
+  requester -->|sign one request| envelope
+  envelope -->|verify| attestation
+  review -->|publish| registry
+  registry -->|sign version| attestation
+  attestation --> peer
+  peer -->|decision table| policy
+  peer -->|reserve bytes| reciprocity
+  seam -.->|wiring open| peer
+  peer -.->|would carry real traffic| transport
+  auth -.->|open| transport
+  transport -.-> gate

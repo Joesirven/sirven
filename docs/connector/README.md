@@ -1,5 +1,41 @@
 # the ride connector, for agents
 
+<!-- architecture:begin ride-demo -->
+
+## Architecture: ride-to-the-barber demo
+
+The demo replaces the ride partner backend with the plugged-in phone path. The policy engine still asks every question.
+
+![ride-to-the-barber demo](../architecture/rendered/ride-demo.svg)
+
+Diagram source, generated from `docs/architecture/graph.mjs`:
+
+```mermaid
+flowchart LR
+  %% ride-to-the-barber demo
+  subgraph g_person["person"]
+  owner(("Owner"))
+  agent(("Personal agent"))
+  end
+  subgraph g_core["core"]
+  contract["connectors/ride contract"]
+  policy["lib/policy_engine.py"]
+  end
+  phone["phone path"]
+  subgraph g_data["data"]
+  card[("booking card")]
+  audit[("lib/audit.sh")]
+  end
+  owner -->|take me to the barber| agent
+  agent -->|ride request| contract
+  contract -->|decide| policy
+  policy -->|allowed| phone
+  phone -->|write| card
+  contract -->|log| audit
+```
+
+<!-- architecture:end ride-demo -->
+
 The ride connector is a model context protocol server your personal agent calls to get a ride: ask for options, book one, follow it, cancel it. It is service-agnostic. Your agent never learns which backend produced an option; the ride service appears only as the value of `provider`.
 
 This folder is the agent-facing guide. The contract itself is the schema at `connectors/ride/schemas/v1/ride-connector.schema.json` together with the contract document `docs/ride-connector-contract.md`. This guide teaches the contract by example and never redefines it. When the two disagree, the contract wins, and the disagreement is a bug in this guide.

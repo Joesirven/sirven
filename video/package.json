@@ -16,5 +16,8 @@
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "remotion": "4.0.525"
+  },
+  "devDependencies": {
+    "pretty-mermaid": "0.1.0"
   }
 }

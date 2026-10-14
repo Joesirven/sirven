@@ -1,5 +1,41 @@
 # Ride to the barber: the end to end rehearsal
 
+<!-- architecture:begin ride-demo -->
+
+## Architecture: ride-to-the-barber demo
+
+The demo replaces the ride partner backend with the plugged-in phone path. The policy engine still asks every question.
+
+![ride-to-the-barber demo](../../docs/architecture/rendered/ride-demo.svg)
+
+Diagram source, generated from `docs/architecture/graph.mjs`:
+
+```mermaid
+flowchart LR
+  %% ride-to-the-barber demo
+  subgraph g_person["person"]
+  owner(("Owner"))
+  agent(("Personal agent"))
+  end
+  subgraph g_core["core"]
+  contract["connectors/ride contract"]
+  policy["lib/policy_engine.py"]
+  end
+  phone["phone path"]
+  subgraph g_data["data"]
+  card[("booking card")]
+  audit[("lib/audit.sh")]
+  end
+  owner -->|take me to the barber| agent
+  agent -->|ride request| contract
+  contract -->|decide| policy
+  policy -->|allowed| phone
+  phone -->|write| card
+  contract -->|log| audit
+```
+
+<!-- architecture:end ride-demo -->
+
 "Book me a ride to the barber after my 2pm meeting, Waymo preferred, under $25", carried
 through the sirven agent from the calendar back to the calendar, with the Waymo booking done
 by a person at the concierge console, and Uber and Lyft booked on the owner's own iPhone.
