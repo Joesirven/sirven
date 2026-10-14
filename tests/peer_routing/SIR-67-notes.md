@@ -93,6 +93,11 @@ Response to the strict review of `ff686fc`.
 - N1: the clock is read under the lock, so an envelope cannot be accepted after its expiry by
   the length of the wait.
 
+Measured on the final tree (`263a267`): `make test` 419 passed, 3 known installer failures,
+exit status 2. `make lint` exit status 0 (shellcheck not installed, so only the syntax check ran).
+Peer routing suite: 32 tests, exit status 0. Attestation shell tests: 23 passed. Node attestation
+library tests: 49 passed. End-to-end class stress, 40 runs: 40 passed.
+
 Not done, and left open:
 
 - N2: `SIRVEN_ATTESTATION_TEST_HOLD_MS` is still honoured by the production verify path. A process
