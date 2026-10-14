@@ -138,7 +138,7 @@ on linux, for builder on `/home/you/project`, with a snapshot line before each c
 setfacl -m u:agent:x /home
 setfacl -m u:agent:x /home/you
 setfacl -R -P -m u:agent:rwX /home/you/project
-setfacl -R -P -d -m g::---,o::---,u:agent:rwX,u:you:rwX /home/you/project
+setfacl -R -P -d -m g::---,o::---,u:AGENT_NUMBER:rwX,u:OWNER_NUMBER:rwX /home/you/project
 ```
 
 `-P` keeps the walk from following symbolic links out of the granted folder. capital `X` gives
@@ -148,7 +148,8 @@ the `-d` line makes new files inherit the grant, and it is the one that needs ca
 list overrides the umask of whoever creates a file, and its group and other entries come from
 the folder's own mode unless they are written out. so the line writes them out as `---`: a new
 file gets nothing for group and other, whatever the creator's umask. the agent gets the grant
-by name, and so does the folder's owner (looked up when the step runs), because a file the agent
+by account number, and so does the folder's owner (both looked up when the step runs, so an
+owner with no account name works; root and the agent are not added as the owner), because a file the agent
 creates would otherwise be unreadable to the owner. the result is never wider than a umask of
 077 would give. it can be narrower: a creator whose umask is 022 gets a private file here, not
 a group-readable one. `ls -l` and `stat` show the mask in the group position, because the
@@ -158,15 +159,17 @@ mask must admit the named entries. that display is not a grant to the group: `ge
 on macos, for builder on `/Users/you/code/app`:
 
 ```
-/bin/chmod +a 'agent allow search' /Users
-/bin/chmod +a 'agent allow search' /Users/you
-/bin/chmod +a 'agent allow search' /Users/you/code
-/usr/bin/find /Users/you/code/app -type f -exec /bin/chmod +a 'agent allow read,write,append,readattr,writeattr,readextattr,writeextattr,readsecurity' {} +
-/usr/bin/find /Users/you/code/app -type d -exec /bin/chmod +a 'agent allow list,search,add_file,add_subdirectory,delete_child,readattr,writeattr,readextattr,writeextattr,readsecurity,file_inherit,directory_inherit' {} +
+/bin/chmod -h +a 'agent allow search' /Users
+/bin/chmod -h +a 'agent allow search' /Users/you
+/bin/chmod -h +a 'agent allow search' /Users/you/code
+/usr/bin/find -P /Users/you/code/app -type f -exec /bin/chmod -h +a 'agent allow read,write,append,readattr,writeattr,readextattr,writeextattr,readsecurity' {} +
+/usr/bin/find -P /Users/you/code/app -type d -exec /bin/chmod -h +a 'agent allow list,search,add_file,add_subdirectory,delete_child,readattr,writeattr,readextattr,writeextattr,readsecurity,file_inherit,directory_inherit' {} +
 ```
 
 files and folders get separate rights so plain files do not pick up folder rights. `find`
-does not follow symbolic links.
+does not follow symbolic links (`-P`), and every `chmod +a` and `chmod -a` has `-h`, so a file swapped for a link
+between `find` and `chmod` never gets an entry on whatever the link points at. `-h` protects the last path
+component only; a swapped intermediate folder is a remaining risk, not run on a Mac.
 
 `revoke` emits the matching removals, the grant first and the pass-through entries last.
 
@@ -223,28 +226,61 @@ the kill switch reads it to know what to remove.
   recorded: the package did not create them.
 - **inspect.** `bin/sirven grant inspect` reads the grant records, says whether the installed
   policy copy still matches `levels/`, and shows the last grant entry from the audit log.
-- **snapshot and restore (linux).** before a grant changes a folder, install records what getfacl
-  shows for it: for a granted folder, the folder and everything inside it; for a parent the agent
-  only passes through, the folder alone. the record is a root-only file in
-  `/var/lib/<package>/access-lists/`, named after a hash of the path. undo runs
-  `lib/access_control_snapshot.sh restore` from the pinned copy: it removes every extended entry
-  under the folder with `setfacl -b`, then puts back the recorded entries of the folders and files
-  that had extended entries before the grant and still exist, and deletes the snapshot. a folder
-  with no list before the grant has none after. a file deleted while the grant was in force is
-  skipped, not an error. files the owner or agent created under the grant keep their contents and
-  lose the grant's entries. their group and other bits go with the entries: `setfacl -b` takes the
-  group bits from the stored group entry, which the default list set to `---`.
-  the snapshot restores modes and extended entries exactly for the paths it recorded, so a chmod
-  the owner made to one of those files during the grant is put back too. a restore with no
-  snapshot only removes the named entry for the agent, which is what grants made before snapshots
-  existed get.
+- **refusal (linux).** before anything changes, the plan reads the granted folders and the parents the
+  agent passes through (`lib/access_control_snapshot.sh check`). the grant recalculates the mask, which
+  would widen another account where a named entry for that account, or a mask, already exists (a file
+  with `user:bob:rw-` and `mask::r--` lets bob only read; after the grant he can write). so such a tree
+  is refused, with up to ten paths listed and how to go on: remove those lists, or grant another
+  folder. the agent's own entries and the folder owner's own entries, left by an earlier grant, do
+  not count, so a re-install, a nested second install and a rollback still apply. the check is read
+  only, and under `--dry-run` as an ordinary user it says it could not read every path instead of
+  refusing.
+- **snapshot and restore (linux).** before a grant changes a folder, install records it:
+  for a granted folder, every folder in it (path, device, inode), the default list of each, and any
+  entries of the agent or the folder owner from an earlier grant; for a parent the agent only passes
+  through, the folder alone. the record is a root-only file in `/var/lib/<package>/access-lists/`,
+  named after a hash of the path. names are recorded as bytes, so a newline or a backslash in a name
+  is safe.
+
+  **exactly what undo changes**, and nothing else: on every path in the tree, the named entries for the
+  agent (and for the folder owner, where the agent's entry is also there); on folders, the default list
+  when it carries the agent's entry, replaced by the one recorded before the grant (if there was one).
+  when no named entry is left on a path, its list collapses to a plain mode: the group bits become the
+  group entry AND the mask, which is what the group could really do. it **never changes an owner, a
+  group, or any mode bit**, special bits included. so a `chmod 600` the owner made during the grant,
+  a `chown` or `chmod` by root, and a `chmod 700` on a pass-through parent all stay.
+  this holds for uninstall, rollback and the kill switch alike.
+
+  **links.** undo never follows a link. it opens the granted folder one component at a time without
+  following links and checks it is still the folder that was recorded (same device and inode),
+  then walks down by file descriptor and reads and writes the list on the open descriptor, so there is
+  no path to swap under it. a folder the agent replaced with a link is skipped, and a warning
+  event goes to the audit log. before the first list is put back, undo expires the agent's account and
+  ends its processes, so nothing the agent runs can change the folders meanwhile (rollback keeps the
+  account running, and relies on the descriptor method alone).
+
+  **a missing or unusable snapshot.** undo does not treat that as done. the step's check is the state
+  of the folder (an entry of the agent left, or the snapshot still there), not whether the snapshot
+  file exists. with no snapshot it still removes everything the grant added, prints `warning: could
+  not restore the earlier access control lists ...`, and writes a `warning` event to the audit log. it
+  exits 0, because a non-zero exit would stop uninstall before the account is removed. what it cannot
+  put back is a default list the folder had before the grant. look with `getfacl -R -p FOLDER`.
+  a pipe, socket or device in the tree is reached through an `O_PATH` descriptor, never opened.
+
+  **installs made before this change.** the install record stores the undo command text, so an install
+  made by an earlier version keeps its old undo (`setfacl -R -P -x u:agent` and `-d -x`, or the
+  first version of the snapshot helper), which leaves the default list, the mask and the folder
+  owner's entry behind. the alpha cut applies only inside throwaway containers, so none exist outside
+  them. to repair one, from a checkout of this package, as root:
+  `bash lib/access_control_snapshot.sh repair FOLDER yes AGENT` for each granted folder, and
+  `... repair PARENT no AGENT` for each pass-through parent, before running uninstall. repair is
+  the no-snapshot removal above and changes no mode.
 - **rollback.** `bin/sirven grant rollback` takes the newest `grant` entry, refuses if the grant
   record no longer matches it, removes every current entry, and grants the earlier level and
   paths again. it writes its own `grant` entry with the reason `rollback`, so a second rollback
-  undoes the first. the removal restores each folder from its snapshot, the same way uninstall
-  does, and the earlier grant takes a new snapshot. what it grants goes into the install record too.
-- **kill switch.** `install.sh revoke --all` restores each folder from its snapshot, or removes the
-  named entry when there is none, and renames the grant record to `<user>.json.revoked`. plan output
+  undoes the first. the removal undoes the grant the same way uninstall does (see exactly what undo changes), so an
+  owner's chmod made since the install survives it, and the earlier grant takes a new snapshot. what it grants goes into the install record too.
+- **kill switch.** `install.sh revoke --all` runs the same undo for each folder, with or without a snapshot, and renames the grant record to `<user>.json.revoked`. plan output
   in the alpha cut.
 - **uninstall.** `uninstall.sh` reverses the install record in reverse order: the snapshots restore
   each folder first, then the service user, then files and folders, which are removed only when
@@ -273,10 +309,23 @@ revoke <invite>
 - macos entries are plan output only. they need a run in a macos virtual machine before apply
   is turned on. the macos entries name the agent only, so no group or other entry is copied and
   the linux default-list problem has no macos form, as far as the entries show. macos undo is
-  unchanged: it removes the entries it added by their exact text. not run on a Mac. the manual
-  check: on a test Mac, `ls -le` the granted folder before and after apply; `umask 077` then
-  create a file and `ls -le` it, and confirm the agent's inherited entry is the only one for it;
-  then revoke and confirm `ls -le` matches the before listing.
+  unchanged in kind: it removes the entries it added by their exact text, now with `-h`. not run on a Mac.
+  the manual check, on a test Mac: (1) `ls -lde` the granted folder, a file in it, and every parent up to
+  `/Users/you` (the parents show the pass-through entry), before apply. (2) apply, then `ls -le` the
+  same paths and confirm the agent's entries are the only new ones. (3) `umask 077`, create a file in the
+  folder, `ls -le` it, and confirm the agent's inherited entry is the only one for it. (4) as the owner,
+  `chmod 600` a pre-existing file in the folder, then revoke or uninstall, and confirm that file is
+  still 600 and `ls -le` of every path matches the listing from step 1. (5) make a link inside the
+  granted folder that points at a folder outside it (`ln -s ~/.ssh /granted/link`) before apply, and
+  confirm `ls -le ~/.ssh` is the same after apply and after revoke.
+- a grant over a tree that already has named entries for other accounts, or a mask, is refused, not
+  merged. nested grants by two different folder owners are refused for the same reason (the second
+  owner's entries look like foreign lists).
+- files and folders the owner creates during a grant stay private after undo: a new file gets nothing
+  for group and other, and undo leaves the mode as it is. with umask 022, folders end as 755 with files
+  inside at 600, and copies are 660 during the grant. a web server or teammate who read by group or
+  other cannot read files made during the grant, and a shared setgid folder loses group sharing for new
+  files while the grant is in force. this is the safe direction.
 - the default list makes group and other bits show the mask. no grant with a named entry can show
   `600` for a new file; the effective access is what to check.
 - on macos, `file_inherit` copies the folder entry onto new files, and folder `list` and

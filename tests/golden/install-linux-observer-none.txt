@@ -52,6 +52,7 @@ access to paths, level observer
      note: observer: read only inside granted paths. sees files, changes nothing.
    16. install the observer level as policy (to do)
        $ cp levels/observer.json <prefix>/etc/sirven/levels/observer.json && chmod 0644 <prefix>/etc/sirven/levels/observer.json
+     note: undo removes only what this grant adds: the entries for agent and the folder owner, and the default list on folders. it never changes an owner, a group, or a mode, so a chmod or chown made while the grant is in force stays. it never follows a link.
    17. record the grant for agent (to do)
        # write <prefix>/etc/sirven/grants/agent.json (mode 0644): level observer on the paths below, no expiry, cannot grant further
    18. record the access control lists of /home before the grant (to do, recorded not run under --prefix)
