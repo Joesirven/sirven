@@ -155,12 +155,18 @@ sirven_gate() {
   if [ -f "$SIRVEN_KEPT/$entry" ]; then kept="$(cd -P "$SIRVEN_KEPT" && pwd -P)"; fi
   if [ -n "$kept" ] && [ "$ROOT_DIR" != "$kept" ]; then
     if [ "$kind" = install ] && sirven_vet "$ROOT_DIR" "$owner" >/dev/null 2>&1; then return 0; fi
-    if ! output="$(sirven_vet "$kept" "$owner" 2>&1)"; then
-      printf 'error: refusing to run as root: the kept copy %s can be changed by %s, so it is not trusted either:\n%s\nnothing was changed.\n' "$kept" "$who" "$output" >&2
-      exit 2
+    if output="$(sirven_vet "$kept" "$owner" 2>&1)"; then
+      printf 'running the kept copy %s instead of %s: root runs the root-owned copy, not a folder an agent may have changed.\n' "$kept" "$ROOT_DIR" >&2
+      exec "$BASH" "$kept/$entry" "$@"
     fi
-    printf 'running the kept copy %s instead of %s: root runs the root-owned copy, not a folder an agent may have changed.\n' "$kept" "$ROOT_DIR" >&2
-    exec "$BASH" "$kept/$entry" "$@"
+    # the kept copy is not trusted (somebody loosened the state directory). the folder this was started from may still be:
+    # an emergency command must not be refused for that, but it runs only if this folder passes the same check
+    if sirven_vet "$ROOT_DIR" "$owner" >/dev/null 2>&1; then
+      printf 'warning: the kept copy %s can be changed by %s, so it was not used; running %s, which only root and %s can write.\n%s\n' "$kept" "$who" "$ROOT_DIR" "$owner" "$output" >&2
+      return 0
+    fi
+    printf 'error: refusing to run as root: the kept copy %s can be changed by %s, and so can %s:\n%s\nnothing was changed.\n' "$kept" "$who" "$ROOT_DIR" "$output" >&2
+    exit 2
   fi
   if ! output="$(sirven_vet "$ROOT_DIR" "$owner" 2>&1)"; then
     printf 'error: refusing to run as root from %s: %s can change the code there, and it would run as root:\n%s\n' "$ROOT_DIR" "$who" "$output" >&2
