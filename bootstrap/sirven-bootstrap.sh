@@ -135,7 +135,11 @@ main() {
   mkdir "$SIRVEN_BOOTSTRAP_DIR/unpacked"
   tar -xzf "$SIRVEN_BOOTSTRAP_DIR/$archive" -C "$SIRVEN_BOOTSTRAP_DIR/unpacked"
   # the archive's one top folder is named after the tag, so it is found rather than guessed.
-  installer="$(ls "$SIRVEN_BOOTSTRAP_DIR"/unpacked/*/install.sh 2>/dev/null | head -n 1 || true)"
+  installer=""
+  for candidate in "$SIRVEN_BOOTSTRAP_DIR"/unpacked/*/install.sh; do
+    # an unmatched pattern stays as the literal text, which does not exist, so it is skipped
+    if [ -e "$candidate" ] || [ -L "$candidate" ]; then installer="$candidate"; break; fi
+  done
   [ -n "$installer" ] && [ -f "$installer" ] || fail "release $SIRVEN_PINNED_TAG does not contain install.sh"
 
   # Standard input is this piped script, so the installer gets none; it asks its questions on

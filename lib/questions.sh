@@ -111,6 +111,7 @@ _setup_ask_path() {
   say "  the one folder the agent may use at $LEVEL. add more later with --path. none grants nothing." >&2
   while :; do
     _setup_ask "path to grant" "$shown"
+    # shellcheck disable=SC2088 # the quoted "~/" is a literal prefix the person typed, matched on purpose
     case "$SETUP_ANSWER" in
       none) GRANT_PATHS=(); return 0 ;;
       "~") SETUP_ANSWER="$HOME" ;;
@@ -191,6 +192,7 @@ setup_questions() {
     return 0
   fi
 
+  # shellcheck disable=SC2034 # the documented output in the header above; no file in this repository reads it yet
   SETUP_MODE=defaults
   LEVEL="${LEVEL:-$SETUP_DEFAULT_LEVEL}"
   say "using defaults ($SETUP_REASON): level $LEVEL, paths $(setup_describe_paths)." >&2

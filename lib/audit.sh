@@ -91,7 +91,7 @@ audit_now() {
 # audit_json_string VALUE: VALUE as a JSON string, quotes included. backslash, quote, newline,
 # tab, and carriage return are escaped; other control characters are dropped.
 audit_json_string() {
-  local value="$1" backslash='\' quote='"' newline tab carriage
+  local value="$1" backslash="\\" quote='"' newline tab carriage
   newline="
 "
   tab="$(printf '\t')"
