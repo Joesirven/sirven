@@ -228,7 +228,9 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then sirven_gate bin/sirven sirven "$@"; fi
 # shellcheck source=lib/lock.sh
 . "$ROOT_DIR/lib/lock.sh"
 
-AFTER_ALPHA_SESSIONS="sessions already open keep the rights they started with until they end. ending them belongs to the forced-command wrapper, built after alpha. to cut everything now: sudo /usr/local/sbin/sirven revoke --all (add --dry-run to read the plan first)"
+after_alpha_sessions() {
+  printf 'sessions already open keep the rights they started with until they end. ending them belongs to the forced-command wrapper, built after alpha. to cut everything now: %s (add --dry-run to read the plan first)' "$(layout_root_command revoke)"
+}
 
 usage() {
   cat <<END
@@ -585,7 +587,7 @@ build_rollback_plan() {
   fi
   plan_access_control_release
   plan_section "after alpha"
-  plan_note "$AFTER_ALPHA_SESSIONS"
+  plan_note "$(after_alpha_sessions)"
 }
 
 rollback_apply() {

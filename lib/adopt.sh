@@ -308,7 +308,7 @@ adopt_refuse_conflicts() {
     active)
       if [ "${#GRANT_PATHS[@]}" -eq 0 ]; then
         _adopt_conflict "a grant is in force for $SERVICE_USER: level $ADOPT_GRANT_LEVEL on $(_adopt_describe_paths). this request grants no path, and installing would leave that grant in force while saying none." \
-          "keep it: run again without --path. take it back: sudo /usr/local/sbin/sirven revoke --all --dry-run shows the kill switch."
+          "keep it: run again without --path. take it back: $(layout_root_command revoke) --dry-run shows the kill switch."
       fi
       ;;
   esac

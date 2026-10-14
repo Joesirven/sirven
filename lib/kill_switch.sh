@@ -336,7 +336,7 @@ kill_switch_report_failure() {
     printf 'the kill switch did not finish, and %s is NOT confirmed locked. do it by hand now, as root: usermod --lock --expiredate 1 --shell %s %s; pkill -KILL -u %s\n' \
       "$SERVICE_USER" "$KILL_SWITCH_NOLOGIN" "$SERVICE_USER" "$SERVICE_USER" >&2
   fi
-  printf 'fix the causes printed above and run the same command again: sudo /usr/local/sbin/sirven revoke --all. finished steps are skipped.\n' >&2
+  printf 'fix the causes printed above and run the same command again: %s. finished steps are skipped.\n' "$(layout_root_command revoke)" >&2
   printf 'the revoke marker stays, so a plain install will not turn the account back on; only install --reinstate does.\n' >&2
 }
 

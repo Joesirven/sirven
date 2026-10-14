@@ -113,6 +113,37 @@ LAYOUT_PACKAGE_MARKER="PINNED-COPY"
 # copy in a folder the agent can write. it sets its own search path and reads nothing but the kept copy.
 LAYOUT_LAUNCHER="/usr/local/sbin/sirven"
 
+# layout_launcher_safe: true when the folder the launcher goes in, and every folder above it, can be written by root alone, so a
+# launcher put there cannot be replaced by anyone else and then run as root. judged with the gate's own checker (sirven_vet, from the
+# entry script), on a real linux machine only; a fake root and other systems have nothing real to judge. a folder that does not exist
+# yet is judged by the nearest one that does, since the install creates the rest as root.
+layout_launcher_safe() {
+  local folder
+  [ -z "$PREFIX" ] && [ "$OPERATING_SYSTEM" = linux ] || return 0
+  command -v sirven_vet >/dev/null 2>&1 || return 1
+  folder="$(dirname "$LAYOUT_LAUNCHER")"
+  while [ ! -d "$folder" ] && [ "$folder" != / ]; do folder="$(dirname "$folder")"; done
+  sirven_vet "$folder" root >/dev/null 2>&1
+}
+
+# layout_root_command KIND: the command to give the owner for a root command (revoke, uninstall or rollback): the launcher, unless its
+# folder is not safe (or the launcher was refused for that), in which case the kept copy. never a path that was not secured.
+layout_root_command() {
+  if layout_launcher_safe; then
+    case "$1" in
+      revoke) printf 'sudo %s revoke --all' "$LAYOUT_LAUNCHER" ;;
+      uninstall) printf 'sudo %s uninstall' "$LAYOUT_LAUNCHER" ;;
+      rollback) printf 'sudo %s grant rollback' "$LAYOUT_LAUNCHER" ;;
+    esac
+  else
+    case "$1" in
+      revoke) printf 'sudo bash %s/install.sh revoke --all' "$(layout_package_copy)" ;;
+      uninstall) printf 'sudo bash %s/uninstall.sh' "$(layout_package_copy)" ;;
+      rollback) printf 'sudo bash %s/bin/sirven grant rollback' "$(layout_package_copy)" ;;
+    esac
+  fi
+}
+
 # layout_launcher_current PATH: the launcher is there with this text, mode 0755, and (a real root) owned by root. read only.
 layout_launcher_current() {
   layout_launcher_text | cmp -s - "$1" || return 1
@@ -125,6 +156,8 @@ layout_launcher_current() {
 
 # layout_install_launcher PATH: write it beside, set mode and owner, move it into place, so it is never half written.
 layout_install_launcher() {
+  # judged again now, not only when the plan was made: the folder may have changed since
+  layout_launcher_safe || { printf 'error: %s is no longer safe for the launcher (an account other than root can change it); nothing was written\n' "$(dirname "$1")" >&2; return 1; }
   mkdir -p "$(dirname "$1")" || return 1
   layout_launcher_text > "$1.new" || return 1
   chmod 0755 "$1.new" || { rm -f "$1.new"; return 1; }
@@ -282,9 +315,13 @@ plan_layout() {
     plan_undo "remove the pinned copy of this package in $(layout_package_copy), if this package made it" \
       "[ ! -e $copy ]" "layout_remove_package_copy $copy" "rm -rf $copy   # only when it holds $LAYOUT_PACKAGE_MARKER"
   fi
-  plan_step system "install the launcher $LAYOUT_LAUNCHER, root-owned, mode 0755: the one command that runs the kept copy" \
-    "layout_launcher_current $launcher" "layout_install_launcher $launcher"
-  plan_undo "remove the launcher $LAYOUT_LAUNCHER" "[ ! -e $launcher ]" "rm -f $launcher"
-  plan_note "from now on run every root command through the launcher, not from a folder the agent may have been granted: sudo $LAYOUT_LAUNCHER revoke --all (cut the agent off, keep the records), sudo $LAYOUT_LAUNCHER uninstall, sudo $LAYOUT_LAUNCHER grant rollback. each runs the root-owned copy in $(layout_package_copy)."
+  if layout_launcher_safe; then
+    plan_step system "install the launcher $LAYOUT_LAUNCHER, root-owned, mode 0755: the one command that runs the kept copy" \
+      "layout_launcher_current $launcher" "layout_install_launcher $launcher"
+    plan_undo "remove the launcher $LAYOUT_LAUNCHER" "[ ! -e $launcher ]" "rm -f $launcher"
+    plan_note "from now on run every root command through the launcher, not from a folder the agent may have been granted: sudo $LAYOUT_LAUNCHER revoke --all (cut the agent off, keep the records), sudo $LAYOUT_LAUNCHER uninstall, sudo $LAYOUT_LAUNCHER grant rollback. each runs the root-owned copy in $(layout_package_copy)."
+  else
+    plan_note "the launcher $LAYOUT_LAUNCHER is NOT installed: $(dirname "$LAYOUT_LAUNCHER"), or a folder above it, can be changed by an account other than root, so a launcher there could be replaced and then run as root. nothing was written there. fix who can write it and run this again, or run every root command with the kept copy: $(layout_root_command revoke) (cut the agent off, keep the records), $(layout_root_command uninstall), $(layout_root_command rollback)."
+  fi
   plan_note "the folder you unpacked this package in is code the agent can change if you granted it. delete it after the install, or grant a path that does not hold it."
 }

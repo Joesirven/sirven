@@ -491,7 +491,7 @@ finish() {
       say "applying would stop before any change: the plan has plan-only steps the alpha cut does not apply yet."
     fi
     if [ "$COMMAND" = install ]; then
-      say "to cut the agent off later: sudo /usr/local/sbin/sirven revoke --all --dry-run to read the plan; to remove everything: sudo /usr/local/sbin/sirven uninstall --dry-run"
+      say "to cut the agent off later: $(layout_root_command revoke) --dry-run to read the plan; to remove everything: $(layout_root_command uninstall) --dry-run"
     fi
     return 0
   fi
