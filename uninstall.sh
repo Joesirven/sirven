@@ -22,7 +22,8 @@ set -euo pipefail
 # ---- root gate: begin. the same text is at the top of install.sh, uninstall.sh and bin/sirven; tests/unit/test_gate.sh keeps it so.
 # when this runs as root, every line of code and every tool it uses must come from a place that only root (and the owner who
 # ran sudo) controls. nothing here asks the folder it is judging where the trusted copy is, or lets that folder judge itself:
-#   - the search path is reset and every tool the gate uses is named by its absolute path;
+#   - the search path is reset (/usr/local/sbin and /usr/local/bin are added back only if root alone controls them) and every tool
+#     the gate uses is named by its absolute path;
 #   - the kept copy is the fixed path below, never read from project.json or any other file of the folder under test;
 #   - the checker is the text of this block, not a file of the folder under test;
 #   - the folder is resolved to its physical path once, and every library is read through that path;
@@ -142,7 +143,7 @@ PY
 # KIND is install for an install, anything else for the rest. ROOT_DIR is this script's physical folder. as root on linux it
 # either returns, having vetted the folder it will read its libraries from, or runs the kept copy instead, or refuses.
 sirven_gate() {
-  local entry="$1" kind="$2" owner="${SUDO_USER:-root}" kept="" output who
+  local entry="$1" kind="$2" owner="${SUDO_USER:-root}" kept="" output who dir
   shift 2
   [ "$EUID" -eq 0 ] || return 0
   [ "$(/usr/bin/uname -s)" = Linux ] || return 0
@@ -150,6 +151,17 @@ sirven_gate() {
     printf 'error: refusing to run as root: there is no /usr/bin/python3 to check the code with, and the check does not use any other. nothing was changed.\n' >&2
     exit 2
   fi
+  # tools under /usr/local (tailscale, cloudflared, bb) are found only if root alone controls the folder and every folder above
+  # it, checked now with the same checker; they come after the system folders, and a folder that fails is left out and said so
+  for dir in /usr/local/sbin /usr/local/bin; do
+    [ -d "$dir" ] || continue
+    if output="$(sirven_vet "$dir" root 2>&1)"; then
+      PATH="$PATH:$dir"
+    else
+      printf 'warning: %s is not on root'"'"'s search path: somebody besides root can change it or something in it:\n%s\n' "$dir" "$output" >&2
+    fi
+  done
+  export PATH
   who="any account other than root"
   [ "$owner" = root ] || who="any account other than root and $owner"
   if [ -f "$SIRVEN_KEPT/$entry" ]; then kept="$(cd -P "$SIRVEN_KEPT" && pwd -P)"; fi

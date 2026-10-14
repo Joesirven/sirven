@@ -395,7 +395,9 @@ the kill switch reads it to know what to remove.
   command and every flag (`--dry-run`, `--help` and `--prefix` included, because a dry run reads the same code):
   the same block of text sits at the top of `install.sh`, `uninstall.sh` and `bin/sirven` (a test keeps the three equal) and runs
   before any library is read. it resets the search path to `/usr/sbin:/usr/bin:/sbin:/bin` and names the tools it uses by absolute
-  path; it takes the kept copy from the constant `/var/lib/sirven/package`, never from `project.json` or any file of the folder
+  path (`/usr/local/sbin` and `/usr/local/bin` are added after those only when root alone controls each one, the folders above it
+  and what is in it, checked at that moment; a folder that fails is left out and the run says so, so tailscale or cloudflared installed
+  there are found, and a folder the agent can write never is); it takes the kept copy from the constant `/var/lib/sirven/package`, never from `project.json` or any file of the folder
   under test (the package name must also be a plain lowercase name, and a `--prefix` that is or resolves to `/` is refused,
   because it used to turn into a real run); the checker is the text of the block, not a file of the folder it judges; the
   folder is resolved to its physical path once and every library is read through that path, so a link swapped in later changes
