@@ -397,7 +397,8 @@ the kill switch reads it to know what to remove.
   before any library is read. it resets the search path to `/usr/sbin:/usr/bin:/sbin:/bin` and names the tools it uses by absolute
   path (`/usr/local/sbin` and `/usr/local/bin` are added after those only when root alone controls each one, the folders above it
   and what is in it, checked at that moment; a folder that fails is left out and the run says so, so tailscale or cloudflared installed
-  there are found, and a folder the agent can write never is); it takes the kept copy from the constant `/var/lib/sirven/package`, never from `project.json` or any file of the folder
+  there are found, and a folder the agent can write never is; each is resolved to its physical path first and that path is the one checked and
+  used, so a link that can be swapped after the check changes nothing); it takes the kept copy from the constant `/var/lib/sirven/package`, never from `project.json` or any file of the folder
   under test (the package name must also be a plain lowercase name, and a `--prefix` that is or resolves to `/` is refused,
   because it used to turn into a real run); the checker is the text of the block, not a file of the folder it judges; the
   folder is resolved to its physical path once and every library is read through that path, so a link swapped in later changes
@@ -408,8 +409,11 @@ the kill switch reads it to know what to remove.
   file and folder of the package tree and every folder on the way to it: owner, mode, group members, and access list entries; a
   link that leaves the package is refused; a read-only mount is **not** taken as safe, because the same files can be writable
   through another mount. the state directory is forced to mode 0700 and root as owner whether or not this run made it.
+  a `--prefix` with a `.` or `..` component is refused whether or not the folders exist, and a started-from-standard-input script is refused.
   the safe way to run any root command is the launcher `/usr/local/sbin/sirven`, written by install, root-owned, mode 755: it
-  sets its own search path and runs the kept copy (`sudo /usr/local/sbin/sirven revoke --all`, `... uninstall`, `... grant rollback`,
+  sets its own search path and runs the kept copy. install writes it only if `/usr/local/sbin` and every folder above it can be written by
+  root alone (the same checker); otherwise it writes nothing, says so, and every message gives the kept-copy command instead
+  (`sudo bash /var/lib/sirven/package/install.sh revoke --all`). with the launcher (`sudo /usr/local/sbin/sirven revoke --all`, `... uninstall`, `... grant rollback`,
   `... install --reinstate`). the one limit left is the first install: it runs from the folder it was unpacked in, so unpack it where
   only you can write, and delete it afterwards, or grant a path that does not hold it. the harness covers each route the reviews
   found (scenarios 40 and 46 to 53, and `tests/harness/run-ro-bind.sh`).

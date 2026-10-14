@@ -32,9 +32,14 @@ set -euo pipefail
 # exception, to upgrade, and only from a folder that nobody but root and the owner can write). with no kept copy, the folder it
 # runs from must be one that nobody but root and the owner can write, the whole way down and up. the kept copy itself must be
 # that too. the safe way to run any root command is the launcher /usr/local/sbin/sirven, which runs the kept copy.
+if [ -z "${BASH_SOURCE[0]:-}" ]; then
+  printf 'error: run this as a file, for example: bash install.sh ... . started from standard input or with -c it cannot tell which folder it belongs to, and so cannot check the code it would read. nothing was changed.\n' >&2
+  exit 2
+fi
 if [ "$EUID" -eq 0 ]; then
   PATH=/usr/sbin:/usr/bin:/sbin:/bin
   export PATH
+  # (bash has already read BASH_ENV and ENV before this line, for this script; sudo removes them. this protects what is started from here.)
   unset BASH_ENV ENV CDPATH LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT PYTHONPATH PYTHONHOME PYTHONSTARTUP
 fi
 SIRVEN_KEPT=/var/lib/sirven/package
@@ -112,19 +117,25 @@ try:
             reason = writers(path, info, index < len(parts))
             if reason:
                 problems.append((path, reason))
-    for current, folders, files in os.walk(real, followlinks=False):
-        for item in [current] + [os.path.join(current, entry) for entry in folders + files]:
-            info = os.lstat(item)
-            if stat.S_ISLNK(info.st_mode):
-                target = os.path.realpath(item)
-                if not (target + "/").startswith(real + "/"):
-                    problems.append((item, "a link to %s, outside the package" % target))
-                continue
-            reason = writers(item, info, False)
-            if reason:
-                problems.append((item, reason))
+    pending = [real]
+    while pending:
+        item = pending.pop()
+        info = os.lstat(item)
+        if stat.S_ISLNK(info.st_mode):
+            target = os.path.realpath(item)
+            if not (target + "/").startswith(real + "/"):
+                problems.append((item, "a link to %s, outside the package" % target))
+            continue
+        reason = writers(item, info, False)
+        if reason:
+            problems.append((item, reason))
+        if stat.S_ISDIR(info.st_mode):
+            with os.scandir(item) as listing:
+                pending.extend(entry.path for entry in listing)
 except OSError as error:
     problems.append((error.filename or folder, "cannot be examined (%s)" % error.strerror))
+except Exception as error:
+    problems.append((folder, "cannot be examined (%s: %s)" % (type(error).__name__, error)))
 seen, shown = set(), 0
 for path, reason in problems:
     if path in seen:

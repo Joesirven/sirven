@@ -7,6 +7,11 @@
 
 # layout_set_directories: the package directories, named after the package.
 layout_set_directories() {
+  # the kept copy is at the fixed path /var/lib/sirven/package (the gate and the launcher use that constant), so the directories must
+  # be named sirven too; another name would install and then leave root commands unable to find the kept copy
+  if [ "$PACKAGE" != sirven ]; then
+    DIE_STATUS=2 die "the package name is '$PACKAGE', but the root gate and the launcher run the kept copy at /var/lib/sirven/package, so this build would install and then find nothing to run. keep the name sirven. nothing was changed."
+  fi
   CONFIG_DIR="/etc/$PACKAGE"
   STATE_DIR="/var/lib/$PACKAGE"
   AUDIT_DIR="/var/log/$PACKAGE"
