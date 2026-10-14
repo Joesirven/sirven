@@ -24,7 +24,7 @@ world_unchanged "the machine is unchanged by the refusals" files /tmp/before.fil
 
 # the real thing, confirmed on the terminal (stdin stands in for it).
 check_exit "typing yes applies the plan" 0 bash -c 'echo yes | SIRVEN_INTERACTIVE=yes bash install.sh --level observer --transport none --path /srv/app'
-check "install says it applied 23 steps" grep -q 'applied 23 steps' <<< "$LAST_OUTPUT"
+check "install says it applied 25 steps" grep -q 'applied 25 steps' <<< "$LAST_OUTPUT"
 check "the install is not marked as a container run in the output" bash -c '! grep -qi container <<< "$0"' "$LAST_OUTPUT"
 
 check "service user agent exists" id -u agent

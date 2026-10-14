@@ -29,13 +29,13 @@ cp /etc/sirven/grants/agent.json /tmp/grant.first
 check_exit "re-run with the same flags applies" 0 bash install.sh --yes --level builder --transport none --path /srv/work
 # one step runs on every re-run by design: the one that gives the agent's account back after the grant (it has
 # no "already done" check). its effect is the same each time, which the shadow comparison below shows.
-check "re-run did nothing twice: 22 steps skipped, only the give-back-the-account step ran" grep -q 'applied 1 steps, skipped 22 already done' <<< "$LAST_OUTPUT"
+check "re-run did nothing twice: 24 steps skipped, only the give-back-the-account step ran" grep -q 'applied 1 steps, skipped 24 already done' <<< "$LAST_OUTPUT"
 check "install record is byte for byte the same" cmp /tmp/record.first /var/lib/sirven/install-record.tsv
 check "grant record is byte for byte the same" cmp /tmp/grant.first /etc/sirven/grants/agent.json
 check "the service user is the same account, password field and expiry included" bash -c '[ "$({ getent passwd agent; getent shadow agent; })" = "$(cat /tmp/agent.first)" ]'
 
 check_exit "re-run with no flags adopts the grant in force" 0 bash install.sh --yes --transport none
-check "adopting changed nothing: 22 steps skipped, only the give-back-the-account step ran" grep -q 'applied 1 steps, skipped 22 already done' <<< "$LAST_OUTPUT"
+check "adopting changed nothing: 24 steps skipped, only the give-back-the-account step ran" grep -q 'applied 1 steps, skipped 24 already done' <<< "$LAST_OUTPUT"
 check "install record is still the same" cmp /tmp/record.first /var/lib/sirven/install-record.tsv
 
 check_exit "uninstall applies" 0 bash /var/lib/sirven/package/uninstall.sh --yes
