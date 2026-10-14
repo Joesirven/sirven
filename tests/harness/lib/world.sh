@@ -13,6 +13,7 @@
 HARNESS_FAILED=0
 HARNESS_PASSED=0
 HARNESS_KNOWN=0
+HARNESS_SKIPPED=0
 SRC="${SRC:-/src}"
 
 pass() { HARNESS_PASSED=$((HARNESS_PASSED + 1)); printf 'ok      %s\n' "$1"; }
@@ -36,6 +37,12 @@ check_exit() {
   if [ "$status" -eq "$wanted" ]; then pass "$name (exit $status)"; else fail "$name: wanted exit $wanted, got $status" "$(printf '%s\n' "$LAST_OUTPUT" | tail -15)"; fi
 }
 
+# skip NAME REASON: an assertion that cannot run here (a missing credential, say). it reports as "skipped", does not
+# fail the run, and is counted, so a run that skipped what mattered says so on its last line.
+skip() {
+  HARNESS_SKIPPED=$((HARNESS_SKIPPED + 1)); printf 'skipped %s: %s\n' "$1" "$2"
+}
+
 # known_defect NAME TASK COMMAND...: the assertion the product should meet once TASK lands.
 known_defect() {
   local name="$1" task="$2" out
@@ -48,7 +55,7 @@ known_defect() {
 }
 
 finish() {
-  printf '%s passed, %s failed, %s known defects\n' "$HARNESS_PASSED" "$HARNESS_FAILED" "$HARNESS_KNOWN"
+  printf '%s passed, %s failed, %s known defects, %s skipped\n' "$HARNESS_PASSED" "$HARNESS_FAILED" "$HARNESS_KNOWN" "$HARNESS_SKIPPED"
   [ "$HARNESS_FAILED" -eq 0 ]
 }
 
