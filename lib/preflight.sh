@@ -97,6 +97,11 @@ preflight_python() {
   if ! version_at_least "$version" "$PREFLIGHT_MINIMUM_PYTHON"; then
     die "python3 $version is too old; the grant compiler needs $PREFLIGHT_MINIMUM_PYTHON or newer"
   fi
+  if [ "$operating_system" = linux ] && ! python3 -c 'import sqlite3' >/dev/null 2>&1; then
+    die "python3 on this machine has no sqlite3 module, which the access control snapshot needs.
+  install the python3 standard library package, for example 'apt install python3' on Ubuntu or Debian (a
+  'python3-minimal' install without the recommended packages leaves it out). nothing was changed."
+  fi
   printf 'preflight: ok python3 %s\n' "$version" >&2
 }
 

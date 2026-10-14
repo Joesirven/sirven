@@ -77,6 +77,23 @@ class Failure(Exception):
     pass
 
 
+class SnapshotDamaged(Failure):
+    """the snapshot cannot be read (it is damaged, or not a snapshot of this version)."""
+
+
+class SnapshotUnreadable(Failure):
+    """the snapshot may be fine, but this python3 cannot read it (no sqlite3 module). it is left where it is."""
+
+
+class SnapshotBusy(Failure):
+    """the snapshot is locked by another process. it is fine; it just cannot be read yet."""
+
+
+# what reading a snapshot can raise. sqlite3.Error is there only when the module is: a python3 without it
+# would otherwise make evaluating the except clause itself fail.
+SNAPSHOT_ERRORS = (OSError, ValueError, KeyError, TypeError, Failure) + ((sqlite3.Error,) if sqlite3 else ())
+
+
 # ---- the kernel's list format: a version, then 8 byte entries (tag, permissions, number) ----
 
 def parse(raw):
@@ -559,7 +576,7 @@ def start_checked(arguments, recursive, visit, errors):
             snapshot = Snapshot(arguments.snapshot)
             context = snapshot.context
             snapshot.close()
-        except (OSError, ValueError, KeyError, sqlite3.Error, Failure) as error:
+        except SNAPSHOT_ERRORS as error:
             raise Failure("no usable snapshot at %s (%s), so %s is not changed" % (arguments.snapshot, error, arguments.folder))
         if (context["dev"], context["ino"], context["resolved"]) != (info.st_dev, info.st_ino, resolved):
             raise Failure("%s is not the folder that was recorded before the grant; it was not changed" % arguments.folder)
@@ -812,60 +829,125 @@ def command_record(arguments):
     return 0
 
 
+def snapshot_wait():
+    """seconds to wait for a locked snapshot before giving up (SIRVEN_SNAPSHOT_WAIT, default 30)."""
+    try:
+        return float(os.environ.get("SIRVEN_SNAPSHOT_WAIT", "30"))
+    except ValueError:
+        return 30.0
+
+
+def database_error(error, path):
+    """a busy snapshot is a wait-and-retry condition; anything else means the file is damaged."""
+    text = str(error).lower()
+    if "locked" in text or "busy" in text:
+        return SnapshotBusy("the snapshot %s is in use by another process (%s) and stayed so for %s seconds. it was left "
+                            "untouched. end that process and run the same command again" % (path, error, snapshot_wait()))
+    return SnapshotDamaged("the snapshot %s is damaged (%s)" % (path, error))
+
+
 class Snapshot:
     """a snapshot on disk (a sqlite file, root only). nothing is loaded into memory: the paths that held a list
-    are looked up by device and inode as the walk meets them."""
+    are looked up by device and inode as the walk meets them. a snapshot that is damaged raises SnapshotDamaged,
+    at open (a quick check of the whole file) or later, when a lookup meets a damaged page; one that is locked
+    raises SnapshotBusy after a bounded wait."""
 
     def __init__(self, path, folder=None, recursive=None):
         if sqlite3 is None:
-            raise Failure("python3 has no sqlite3 module, so a snapshot cannot be read")
-        self.db = sqlite3.connect("file:%s?mode=ro" % urllib.parse.quote(path), uri=True)
+            raise SnapshotUnreadable("python3 has no sqlite3 module, so the snapshot %s cannot be read" % path)
+        self.path = path
+        self.db = sqlite3.connect("file:%s?mode=ro" % urllib.parse.quote(path), uri=True, timeout=snapshot_wait())
         try:
+            if self.db.execute("PRAGMA quick_check").fetchone()[0] != "ok":
+                raise SnapshotDamaged("the snapshot %s is damaged (its integrity check failed)" % path)
             meta = dict(self.db.execute("SELECT key, value FROM meta"))
-        except sqlite3.DatabaseError as error:
+            if meta.get("format") != str(FORMAT):
+                raise SnapshotDamaged("the snapshot %s is in another format (%s)" % (path, meta.get("format")))
+            if folder is not None and (meta.get("folder") != os.fsencode(folder).hex() or meta.get("recursive") != str(recursive)):
+                raise SnapshotDamaged("the snapshot %s is not for this folder" % path)
+            self.context = json.loads(meta["context"])
+            self.rows = self.db.execute("SELECT COUNT(*) FROM entries").fetchone()[0]
+        except sqlite3.Error as error:
             self.db.close()
-            raise ValueError("it is not a snapshot of this version (%s)" % error)
-        if meta.get("format") != str(FORMAT):
+            raise database_error(error, path)
+        except (ValueError, KeyError, TypeError) as error:
             self.db.close()
-            raise ValueError("it is in another format (%s)" % meta.get("format"))
-        if folder is not None and (meta.get("folder") != os.fsencode(folder).hex() or meta.get("recursive") != str(recursive)):
+            raise SnapshotDamaged("the snapshot %s is damaged (%s)" % (path, error))
+        except Failure:
             self.db.close()
-            raise ValueError("it is not for this folder")
-        self.context = json.loads(meta["context"])
-        self.rows = self.db.execute("SELECT COUNT(*) FROM entries").fetchone()[0]
+            raise
+
+    def _query(self, sql, values):
+        try:
+            return self.db.execute(sql, values).fetchone()
+        except sqlite3.Error as error:
+            raise database_error(error, self.path)
 
     def earlier(self, device, inode):
         """(access list, default list) the path held before the grant, as raw attribute bytes, or (None, None)."""
         if not self.rows:
             return None, None
-        row = self.db.execute("SELECT access, dflt FROM entries WHERE dev = ? AND ino = ?",
-                              (signed(device), signed(inode))).fetchone()
+        row = self._query("SELECT access, dflt FROM entries WHERE dev = ? AND ino = ?", (signed(device), signed(inode)))
         return row if row else (None, None)
 
     def folder_at(self, parent, name):
         """(device, inode) of the folder with this parent and name that held a list, or None."""
         if not self.rows or not parent:
             return None
-        row = self.db.execute("SELECT dev, ino FROM entries WHERE kind = 'd' AND pdev = ? AND pino = ? AND name = ?",
-                              (signed(parent[0]), signed(parent[1]), name)).fetchone()
+        row = self._query("SELECT dev, ino FROM entries WHERE kind = 'd' AND pdev = ? AND pino = ? AND name = ?",
+                          (signed(parent[0]), signed(parent[1]), name))
         return (row[0] % (1 << 64), row[1] % (1 << 64)) if row else None
 
     def close(self):
-        self.db.close()
+        try:
+            self.db.close()
+        except Exception:
+            pass
+
+
+def set_aside(path):
+    """rename an unusable snapshot out of the way instead of deleting it, so the lists in it can still be read.
+    returns the new name, or None when it could not be renamed."""
+    stamp = time.strftime("%Y%m%dT%H%M%S")
+    target, number = "%s.unusable-%s" % (path, stamp), 0
+    while os.path.exists(target):
+        number += 1
+        target = "%s.unusable-%s-%d" % (path, stamp, number)
+    try:
+        os.rename(path, target)
+    except OSError:
+        return None
+    return target
+
+
+def unusable(warnings, snapshot_path, folder, reason):
+    """warn that the earlier lists of the folder cannot be put back, and set the snapshot aside."""
+    aside = set_aside(snapshot_path)
+    where = ("it was set aside as %s (a sqlite file; the lists are in its entries table), so nothing is lost" % aside
+             if aside else "it could not be renamed and is still at %s" % snapshot_path)
+    warnings.add("could not restore the earlier access control lists of %s: %s. %s. the entries the grant added are "
+                 "removed anyway; a default list or mask the folder had before the grant is not put back. look at "
+                 "what is left with: getfacl -R -p %s" % (folder, reason, where, folder))
 
 
 def load_snapshot(path, folder, recursive, warnings):
-    """the snapshot, or None with a warning saying why it cannot be used."""
+    """the snapshot, or None with a warning saying why it cannot be used. a missing one is warned about and a
+    damaged one is set aside; a busy one raises SnapshotBusy (the file is left alone and the run fails)."""
     try:
         return Snapshot(path, folder, recursive)
     except FileNotFoundError:
         warnings.add("could not restore the earlier access control lists of %s: there is no snapshot at %s. "
                      "the entries the grant added are removed anyway; look at what is left with: getfacl -R -p %s"
                      % (folder, path, folder))
-    except (OSError, ValueError, KeyError, TypeError, sqlite3.Error) as error:
-        warnings.add("could not restore the earlier access control lists of %s: the snapshot %s cannot be used (%s). "
-                     "the entries the grant added are removed anyway; look at what is left with: getfacl -R -p %s"
-                     % (folder, path, error, folder))
+    except SnapshotBusy:
+        raise
+    except SnapshotUnreadable as error:
+        warnings.add("could not restore the earlier access control lists of %s: %s. the file was left where it is, so "
+                     "installing the python3 standard library (on Ubuntu: apt install python3) and running the same "
+                     "command again can still use it. the entries the grant added are removed anyway; look at what is "
+                     "left with: getfacl -R -p %s" % (folder, error, folder))
+    except SNAPSHOT_ERRORS as error:
+        unusable(warnings, path, folder, str(error))
     return None
 
 
@@ -1016,16 +1098,34 @@ def restore_folder(arguments):
                      % arguments.folder)
         return 0
     owner = snapshot.context["owner"] if snapshot else info.st_uid
+    current = [snapshot]
     changes, errors = Capped(), Capped()
 
+    def going_bad(error):
+        """the snapshot went bad in the middle of the walk: warn, set it aside, and carry on without it. the rest of
+        the paths lose only the lists the snapshot would have put back."""
+        current[0].close()
+        arguments.opened = None
+        current[0] = None
+        unusable(warnings, arguments.snapshot, arguments.folder, str(error))
+
+    def lookup(method, *values):
+        if current[0] is None:
+            return None
+        try:
+            return getattr(current[0], method)(*values)
+        except SnapshotDamaged as error:
+            going_bad(error)
+            return None
+
     def replaced(parent, name, path, what):
-        if snapshot and snapshot.folder_at(parent, name) is not None:
+        if lookup("folder_at", parent, name) is not None:
             warnings.add("%s was a folder when the grant was made and is now %s; it was not followed" % (printable(path), what))
 
     def visit(fd, item, where, is_folder, parent=None):
-        earlier_access, earlier_default = snapshot.earlier(item.st_dev, item.st_ino) if snapshot else (None, None)
-        if is_folder and parent and snapshot:
-            place = snapshot.folder_at(parent, where.name)
+        earlier_access, earlier_default = lookup("earlier", item.st_dev, item.st_ino) or (None, None)
+        if is_folder and parent:
+            place = lookup("folder_at", parent, where.name)
             if place is not None and place != (item.st_dev, item.st_ino):
                 warnings.add("%s is not the folder that was recorded (it was replaced during the grant)" % printable(where))
         try:
@@ -1055,12 +1155,13 @@ def command_restore(arguments):
     arguments.opened = None
     try:
         status = restore_folder(arguments)
+        used_to_the_end = arguments.opened is not None
     finally:
         if arguments.opened is not None:
             arguments.opened.close()
-    if status == 0 and arguments.snapshot:
-        # a snapshot that was used is spent, and one that could not be used or applied was already warned
-        # about, so none is kept: a rerun would only warn again.
+    if status == 0 and arguments.snapshot and used_to_the_end:
+        # a snapshot that was read to the end is spent. one that could not be used was set aside (or left where it
+        # is when python3 cannot read it) and warned about; none is deleted.
         try:
             os.unlink(arguments.snapshot)
             os.rmdir(os.path.dirname(arguments.snapshot))
