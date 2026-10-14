@@ -856,7 +856,12 @@ class Snapshot:
         if sqlite3 is None:
             raise SnapshotUnreadable("python3 has no sqlite3 module, so the snapshot %s cannot be read" % path)
         self.path = path
-        self.db = sqlite3.connect("file:%s?mode=ro" % urllib.parse.quote(path), uri=True, timeout=snapshot_wait())
+        if not os.path.exists(path):
+            raise FileNotFoundError(errno.ENOENT, "no snapshot", path)
+        try:
+            self.db = sqlite3.connect("file:%s?mode=ro" % urllib.parse.quote(path), uri=True, timeout=snapshot_wait())
+        except sqlite3.Error as error:
+            raise database_error(error, path)
         try:
             if self.db.execute("PRAGMA quick_check").fetchone()[0] != "ok":
                 raise SnapshotDamaged("the snapshot %s is damaged (its integrity check failed)" % path)

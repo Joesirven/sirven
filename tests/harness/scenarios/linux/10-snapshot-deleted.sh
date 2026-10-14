@@ -15,6 +15,7 @@ check_exit "install builder on /srv/work applies" 0 bash install.sh --yes --leve
 rm -rf /var/lib/sirven/access-lists
 check_exit "uninstall applies" 0 bash /var/lib/sirven/package/uninstall.sh
 check "the output says the earlier lists could not be restored" grep -qi 'could not restore' <<< "$LAST_OUTPUT"
+check "the warning says there is no snapshot, not that one is damaged" bash -c 'grep -q "there is no snapshot at" <<< "$0" && ! grep -q "damaged\|set aside" <<< "$0"' "$LAST_OUTPUT"
 check "the audit log has a warning about the missing snapshot" \
   bash -c 'grep "\"event\": \"warning\"" /var/log/sirven/audit.jsonl | grep -qi "snapshot"'
 check "the restore step was not reported as already done" bash -c '! grep -B1 -A3 "put back\|as they were before the grant" <<< "$0" | grep -q "already done"' "$LAST_OUTPUT"
