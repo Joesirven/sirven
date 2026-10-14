@@ -343,16 +343,19 @@ def load_snapshot(path, folder, recursive, warnings):
     return None
 
 
-def undo_access(fd, agent, owner, recorded, changes):
-    """take the grant's entries off one path's access list, collapse it when no named entry is left."""
-    current = read_list(fd, ACCESS)
-    if current is None:
-        return
+def access_without_grant(current, agent, owner, recorded):
+    """the access list a path should have once the grant's entries are gone, or None when the path
+    holds none of them. pure: no file is touched here.
+
+    the agent's named entries go, and the folder owner's where the agent's is there too. entries the
+    path had before an earlier grant come back (with the mask no wider than before). with no named
+    entry left, the list collapses to a plain mode: the group entry AND the mask, and no mask.
+    """
     has_agent = any(tag == USER and number == agent for tag, _, number in current)
     kept = [entry for entry in current
             if not (entry[0] == USER and (entry[2] == agent or (entry[2] == owner and has_agent)))]
     if len(kept) == len(current):
-        return
+        return None
     if recorded:
         before = parse(base64.b64decode(recorded))
         again = [entry for entry in before if entry[0] == USER and entry[2] in (agent, owner)]
@@ -360,12 +363,22 @@ def undo_access(fd, agent, owner, recorded, changes):
         masks = [entry[1] for entry in before if entry[0] == MASK]
         if again and masks:
             kept = [(tag, perm & masks[0], number) if tag == MASK else (tag, perm, number) for tag, perm, number in kept]
+    kept.sort(key=lambda e: (e[0], e[2] if e[0] in (USER, GROUP) else 0))
     if has_named(kept):
-        os.setxattr(fd, ACCESS, build(kept))
-    else:
-        mask = next((perm for tag, perm, _ in kept if tag == MASK), 7)
-        plain = [(tag, perm & mask if tag == GROUP_OBJ else perm, number) for tag, perm, number in kept if tag != MASK]
-        os.setxattr(fd, ACCESS, build(plain))
+        return kept
+    mask = next((perm for tag, perm, _ in kept if tag == MASK), 7)
+    return [(tag, perm & mask if tag == GROUP_OBJ else perm, number) for tag, perm, number in kept if tag != MASK]
+
+
+def undo_access(fd, agent, owner, recorded, changes):
+    """take the grant's entries off one path's access list."""
+    current = read_list(fd, ACCESS)
+    if current is None:
+        return
+    wanted = access_without_grant(current, agent, owner, recorded)
+    if wanted is None:
+        return
+    os.setxattr(fd, ACCESS, build(wanted))
     changes.append(1)
 
 
