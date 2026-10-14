@@ -328,7 +328,7 @@ the kill switch reads it to know what to remove.
   **installs made before this change.** the install record stores the undo command text, so an install
   made by an earlier version keeps its old undo (`setfacl -R -P -x u:agent` and `-d -x`, or the
   first version of the snapshot helper), which leaves the default list, the mask and the folder
-  owner's entry behind. real Linux machines are applied only from the version that added real apply, and macOS apply is switched off by default, so no such install is expected outside throwaway containers. to repair one, from a checkout of this package, as root:
+  owner's entry behind. an install of that kind exists only if an earlier version was applied to a real machine: before real apply on Linux the alpha cut applied only in throwaway containers, and macOS apply is off by default. to repair one, from a checkout of this package, as root:
   `bash lib/access_control_snapshot.sh repair FOLDER yes AGENT` for each granted folder, and
   `... repair PARENT no AGENT` for each pass-through parent, before running uninstall. repair is
   the no-snapshot removal above and changes no mode.

@@ -142,7 +142,7 @@ test_real_apply_on_linux_is_allowed_for_root() {
   assert_contains "$(plan_real_apply_refusal)" "applying needs root"
 }
 
-# stubs for the confirmation gate: where answers could be read from, and whether this is a container.
+# stubs for the confirmation gate: where answers could be read from, and a container marker the gate must ignore.
 # shellcheck disable=SC2329 # called by plan_confirm_real_apply in lib/plan.sh
 gate_stubs() {
   in_container() { return "${STUB_CONTAINER:-1}"; }
@@ -166,7 +166,7 @@ test_confirm_gate_needs_yes_flag_or_a_typed_yes_on_a_real_machine() {
   assert_eq 0 "$CAPTURED_STATUS"
 }
 
-test_confirm_gate_is_skipped_for_consent_a_prefix_or_a_container() {
+test_confirm_gate_is_skipped_only_for_consent_or_a_prefix() {
   gate_stubs
   STUB_TERMINAL=""
   unset SIRVEN_YES
@@ -175,11 +175,19 @@ test_confirm_gate_is_skipped_for_consent_a_prefix_or_a_container() {
   assert_status 0 plan_confirm_real_apply
   ASSUME_YES=no
   SIRVEN_YES=1 assert_status 0 plan_confirm_real_apply
-  STUB_CONTAINER=0
-  assert_status 0 plan_confirm_real_apply
-  STUB_CONTAINER=1
   PLAN_PREFIX="$TEST_TMP/fake"
   assert_status 0 plan_confirm_real_apply
+}
+
+test_a_container_is_not_consent() {
+  gate_stubs
+  unset SIRVEN_YES
+  PLAN_PREFIX=""
+  ASSUME_YES=no
+  STUB_CONTAINER=0
+  STUB_TERMINAL=""
+  assert_status 3 plan_confirm_real_apply
+  assert_contains "$CAPTURED_STDERR" "with --yes"
 }
 
 test_a_confirmation_already_given_is_not_asked_again() {

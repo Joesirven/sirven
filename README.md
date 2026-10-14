@@ -43,8 +43,8 @@ root-owned kept copy in `/var/lib/sirven/package`; every root command after that
 `sudo /usr/local/sbin/sirven revoke --all`.
 
 The installer applies its plan to a real Linux machine when it is run as root (`sudo`). It prints the
-plan first and then asks you to type `yes`; with `--yes` it asks nothing. On macOS it stops before
-any change: use `--dry-run` to read the plan, or `--prefix` for a fake root. `sudo bash uninstall.sh`
+plan first and then asks you to type `yes` on a terminal; a container, or a machine that merely looks like one, is asked too. With no terminal it applies nothing and exits with status 3 unless you pass `--yes` or set `SIRVEN_YES=1`, which are your consent and skip the question (`--prefix` and `--dry-run` change no real machine, so they never ask). On macOS it stops before
+any change: use `--dry-run` to read the plan, or `--prefix` for a fake root. The one exception is the owner's real install check, which needs root and `SIRVEN_MACOS_REAL_APPLY=1`; on macOS the check that vets the code about to run as root does not run, so run it only from a folder only you can write, such as the bootstrap's temporary folder, never from a folder the agent can write. `sudo bash uninstall.sh`
 removes what the install created. With the npm package (`npm install -g @joesirven/sirven`),
 `sirven` is on your path directly.
 

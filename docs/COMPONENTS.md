@@ -20,7 +20,7 @@ sirven remove crm --dry-run       print the removal plan
 end state, a step that is already done shows as already done and is skipped, `--dry-run` changes
 nothing, and applying writes every step to the installer's audit log, with the operation
 `add crm` or `remove crm`. Applying follows the same rule as `install.sh` in the alpha cut: a fake
-root with `--prefix`, or a throwaway linux container as root. Applying also needs the audit log,
+root with `--prefix`, or a real linux machine as root after the plan is confirmed (a typed yes, or `--yes`). A real macOS machine is refused unless the owner switches it on for the real install check (see the README). Applying also needs the audit log,
 so install sirven first.
 
 Components are never written to the install record, so `./uninstall.sh` leaves them alone. Remove

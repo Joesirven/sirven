@@ -426,11 +426,11 @@ _plan_recheck() {
 }
 
 # plan_confirm_real_apply: the first change to a real machine is never silent. a real machine is
-# one with no --prefix that is not a container, on any operating system. --yes (ASSUME_YES, or
-# SIRVEN_YES) is the owner's explicit consent; otherwise the plan just printed must be answered
-# with the word yes on a terminal. with no terminal and no --yes, nothing is applied (returns 3).
-# PLAN_CONFIRMED=yes means the caller already asked and was answered (the kill switch's typed word revoke), so it is not asked twice.
-# a container is a throwaway machine, so it is not asked. plan_apply calls this after the checks
+# any run with no --prefix, on any operating system, and that includes a container: markers such as /.dockerenv or
+# container= are written by the machine itself, so they are never taken as consent. --yes (ASSUME_YES, or SIRVEN_YES)
+# is the owner's explicit consent; otherwise the plan just printed must be answered with the word yes on a terminal.
+# with no terminal and no --yes, nothing is applied (returns 3). PLAN_CONFIRMED=yes means the caller already asked and
+# was answered (the kill switch's typed word revoke), so it is not asked twice. plan_apply calls this after the checks
 # that cannot be fixed by typing yes, so nobody confirms a plan that is then refused.
 plan_confirm_real_apply() {
   local terminal answer=""
@@ -438,7 +438,6 @@ plan_confirm_real_apply() {
   [ "${ASSUME_YES:-no}" != yes ] || return 0
   [ "${PLAN_CONFIRMED:-no}" != yes ] || return 0
   case "$(lowercase "${SIRVEN_YES:-}")" in 1 | yes | true) return 0 ;; esac
-  ! in_container || return 0
   terminal="$(_setup_terminal)"
   if [ -z "$terminal" ]; then
     printf '\nnot applied: this is a real machine and there is no terminal to confirm the plan on; read the plan above, then run again with --yes\n' >&2

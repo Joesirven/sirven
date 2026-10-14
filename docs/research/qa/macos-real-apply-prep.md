@@ -28,6 +28,13 @@ switched off (below).
 | Refusals before any change | none on macos | a granted path or pass-through parent that is a link (find -P on a link grants nothing); an existing entry for the account in the tree; an account of that name this package did not make (its real name is not `sirven agent`). Read only; real root only. |
 | Real apply | refused always | refused unless `SIRVEN_MACOS_REAL_APPLY=1` is set **and** the user is root. Off by default. |
 
+### Run the opt-in only from a folder only the owner can write
+
+On macOS the root-trust check at the top of `install.sh`, `uninstall.sh` and `bin/sirven` returns at once, so with
+`SIRVEN_MACOS_REAL_APPLY=1` as root it does not vet the folder the code runs from, and code in a folder the agent can
+write would run as root unchecked. Run the macOS opt-in only from a folder only the owner can write, such as the
+bootstrap's temporary folder, never from a folder the agent has been granted.
+
 ### Why the undo is a sweep (found by running `chmod` in a temporary folder)
 
 The old macos undo subtracted the exact rights the grant added. On this Mac that fails in four ways:

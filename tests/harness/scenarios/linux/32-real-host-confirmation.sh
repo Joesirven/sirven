@@ -26,6 +26,18 @@ world_unchanged "files are unchanged by the refusal" files /tmp/before.files
 world_unchanged "accounts are unchanged by the refusal" accounts /tmp/before.accounts
 world_unchanged "the content of /etc is unchanged by the refusal" etc_content /tmp/before.etc
 
+# container markers are not consent: with /.dockerenv present, and again with container= set, no terminal and no --yes
+# still refuses, exit 3, and changes nothing.
+touch /.dockerenv
+check_exit "with /.dockerenv present, no terminal and no --yes is refused" 3 bash -c "printf '' | setsid -w bash install.sh $INSTALL"
+check "it asks for --yes and created nothing" bash -c 'grep -q "with --yes" <<< "$0" && ! getent passwd agent' "$LAST_OUTPUT"
+rm -f /.dockerenv
+check_exit "with container=lxc set, no terminal and no --yes is refused" 3 bash -c "printf '' | container=lxc setsid -w bash install.sh $INSTALL"
+check "it asks for --yes and created nothing" bash -c 'grep -q "with --yes" <<< "$0" && ! getent passwd agent' "$LAST_OUTPUT"
+world_unchanged "files are unchanged by the marker refusals" files /tmp/before.files
+world_unchanged "accounts are unchanged by the marker refusals" accounts /tmp/before.accounts
+world_unchanged "the content of /etc is unchanged by the marker refusals" etc_content /tmp/before.etc
+
 # plan-only steps are refused before anyone is asked to type yes, even on a terminal.
 check_exit "a plan with plan-only steps is refused" 3 ON_TERMINAL "type yes" yes bash -c "printf '' | bash install.sh --with-bb $INSTALL"
 check "it says not yet" grep -q 'not yet' <<< "$LAST_OUTPUT"
