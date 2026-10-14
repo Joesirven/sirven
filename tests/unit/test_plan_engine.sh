@@ -182,6 +182,21 @@ test_confirm_gate_is_skipped_for_consent_a_prefix_or_a_container() {
   assert_status 0 plan_confirm_real_apply
 }
 
+test_a_confirmation_already_given_is_not_asked_again() {
+  gate_stubs
+  STUB_TERMINAL=stdin
+  unset SIRVEN_YES
+  PLAN_PREFIX=""
+  ASSUME_YES=no
+  PLAN_CONFIRMED=yes
+  capture plan_confirm_real_apply < /dev/null
+  assert_eq 0 "$CAPTURED_STATUS"
+  assert_eq "" "$CAPTURED_STDERR" "no second question"
+  PLAN_CONFIRMED=no
+  capture plan_confirm_real_apply <<< "no"
+  assert_eq 3 "$CAPTURED_STATUS"
+}
+
 test_plan_blockers_are_refused_before_asking_for_yes() {
   setup_fake_root
   gate_stubs
