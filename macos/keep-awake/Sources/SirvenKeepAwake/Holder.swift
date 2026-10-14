@@ -132,25 +132,25 @@ public final class KeepAwakeHolder {
     private func setLidClosed(_ wanted: Bool) {
         if !wanted { lidClosedProblem = nil }
         let time = now()
-        // while it is wanted, ask again every resendInterval: the helper forgets a connection that
-        // dropped, and a helper restarted by launchd starts with the setting reverted.
+        // a request while lid-closed operation is wanted goes out at most once per resendInterval: a
+        // helper that restarted has forgotten the request, and a refused one must not be retried every pass.
+        // turning it off is never held back.
         let due = lastAsked.map { time.timeIntervalSince($0) >= Self.resendInterval } ?? true
-        guard wanted != lidClosedActive || (wanted && due) else { return }
+        guard wanted ? due : lidClosedActive else { return }
         guard let helper else {
             if wanted { lidClosedProblem = "lid-closed operation needs the helper, which ships in the signed sirven app" }
             return
         }
+        lastAsked = time
         do {
             try helper.setSleepDisabled(wanted)
             if wanted != lidClosedActive { store.log(wanted ? "lid-closed-on" : "lid-closed-off") }
             lidClosedActive = wanted
-            lastAsked = time
             lidClosedProblem = nil
         } catch {
             lidClosedProblem = "\(error)"
-            // when the helper refuses, the state is false, and the next pass asks again.
+            // a refused request leaves the state off, and the next request waits out the interval.
             lidClosedActive = false
-            lastAsked = nil
             store.log("lid-closed-failed", ["error": "\(error)"])
         }
     }

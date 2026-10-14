@@ -362,4 +362,31 @@ final class LifecycleTests: XCTestCase {
         _ = holder.reconcile()
         XCTAssertEqual(helper.calls, [true, true], "asked again once, however many passes ran in that time")
     }
+
+    func testARefusedLidClosedRequestWaitsOutTheIntervalBeforeItIsSentAgain() throws {
+        helper.fail = true
+        client.setLidClosed(true)
+        try client.begin(task: "inbox", reason: "summarize the inbox", owner: 100)
+        _ = holder.reconcile()
+        _ = holder.reconcile()
+        clock += 1
+        _ = holder.reconcile()
+        XCTAssertEqual(helper.calls, [true], "a refused request is not retried on every pass")
+        XCTAssertEqual(holder.reconcile().lidClosedActive, false)
+        clock += 14
+        _ = holder.reconcile()
+        XCTAssertEqual(helper.calls, [true, true], "the request goes out again once the interval has passed")
+        helper.fail = false
+        clock += 15
+        XCTAssertTrue(holder.reconcile().lidClosedActive)
+    }
+
+    func testTurningLidClosedOffIsNeverHeldBackByTheInterval() throws {
+        client.setLidClosed(true)
+        try client.begin(task: "inbox", reason: "summarize the inbox", owner: 100)
+        _ = holder.reconcile()
+        client.setLidClosed(false)
+        XCTAssertFalse(holder.reconcile().lidClosedActive)
+        XCTAssertEqual(helper.calls, [true, false])
+    }
 }
