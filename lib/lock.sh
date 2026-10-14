@@ -8,10 +8,11 @@
 
 LOCK_DESCRIPTOR=8
 
-# lock_take SECONDS refuse|go_on: wait up to SECONDS for the lock. refuse stops the run (exit 75); go_on warns.
+# lock_take SECONDS refuse|go_on: wait up to SECONDS (SIRVEN_LOCK_WAIT overrides, for tests) for the lock. refuse stops
+# the run (exit 75); go_on warns.
 # nothing is locked before the state directory exists, which is the first thing the first install makes.
 lock_take() {
-  local seconds="$1" mode="$2" directory="${PREFIX}${STATE_DIR}"
+  local seconds="${SIRVEN_LOCK_WAIT:-$1}" mode="$2" directory="${PREFIX}${STATE_DIR}"
   command -v flock >/dev/null 2>&1 || return 0
   [ -d "$directory" ] && [ -r "$directory" ] || return 0
   exec 8< "$directory"

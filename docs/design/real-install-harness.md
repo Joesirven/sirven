@@ -69,7 +69,7 @@ docker run --rm --network none -v "$PWD":/src:ro sirven-harness-linux bash -c \
 | Permission lists | `agent` can read `/srv/app`, cannot write it, cannot read `/root`; new files inherit read access through a default list (which has a side effect, section 3) |
 | Records | `/var/lib/sirven/install-record.tsv` (0600 root), pinned copy in `/var/lib/sirven/package`, audit log with a `finished` entry |
 | Re-run | exit 0; "applied 1 steps, skipped 18" (the one step tagged `always`) |
-| `install.sh revoke --all` | exit 3, "not yet", nothing changed at the time of this first run; applied since SIR-32, see scenarios 03 and 30 to 36 |
+| `install.sh revoke --all` | exit 3, "not yet", nothing changed at the time of this first run; applied since SIR-32, see scenarios 03 and 30 to 44 |
 | `uninstall.sh` from the pinned copy | exit 0; user, group, files, directories removed; home folder and audit log kept on purpose |
 | Real apply as an ordinary user | exit 3, "applying needs root"; nothing changed |
 | `--transport tailscale` real apply | exit 3, refused because step 24 (`tailscale up`) is plan only |
@@ -126,6 +126,15 @@ Four kinds, all in `tests/harness/lib/world.sh`:
 4. Known defects: `known_defect NAME TASK COMMAND`. Reports `known` while the product fails the assertion; fails the run when it passes. This turns each open task into an acceptance test that is written before the fix. None are open today (scenarios 37 and 38 cover install after revoke and uninstall after planted links): the lines for SIR-70 and SIR-32 are plain assertions now (scenario 03 and scenarios 30 to 36 for the kill switch). A known defect line must have a matching positive precondition (scenario 03 starts a process as the agent first), or it can "fail" for the wrong reason. The same holds for a "left it alone" assertion: it passes for a command that did nothing, so the kill switch scenarios pair each with proof that it ran (`world_unchanged_if`).
 
 Output uses the same `ok` / `not ok` lines as `tests/run.sh`, plus `known`.
+
+### 4.3a Running it on a server
+
+Docker Desktop on Omashu may not start (task SIR-76). The same scenarios run on the server ba-sing-se over SSH, one container at a
+time and capped: `--memory 256m --memory-swap 256m --pids-limit 256 --cpus 1 --network none --cap-drop NET_RAW`, with available
+memory checked before every run (stop below 800 MB), existing containers never touched, and every container and image the run
+made removed afterwards. Scenarios 26 and 27 ask for more memory and are skipped there. The image now also holds `openssh-server`,
+`openssh-client`, `cron` and `at`, so key logins, cron jobs and at jobs are real; systemd is not there, so scenario 36 uses stand-ins
+for `systemctl` and `loginctl`.
 
 ### 4.4 Invocation from make
 

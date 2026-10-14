@@ -56,7 +56,7 @@ options:
 
 only steps recorded in the install record are reversed. the service user's home folder is
 kept, with whatever the agent left in it. to cut access now without removing anything, use
-the kill switch: sudo bash install.sh revoke --all (--dry-run reads the plan first)
+the kill switch: sudo bash /var/lib/sirven/package/install.sh revoke --all (--dry-run reads the plan first)
 
 examples:
   ./uninstall.sh --dry-run

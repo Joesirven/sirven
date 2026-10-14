@@ -65,7 +65,7 @@ fi
 # shellcheck source=lib/lock.sh
 . "$ROOT_DIR/lib/lock.sh"
 
-AFTER_ALPHA_SESSIONS="sessions already open keep the rights they started with until they end. ending them belongs to the forced-command wrapper, built after alpha. to cut everything now: sudo bash install.sh revoke --all (add --dry-run to read the plan first)"
+AFTER_ALPHA_SESSIONS="sessions already open keep the rights they started with until they end. ending them belongs to the forced-command wrapper, built after alpha. to cut everything now: sudo bash /var/lib/sirven/package/install.sh revoke --all (add --dry-run to read the plan first)"
 
 usage() {
   cat <<END
