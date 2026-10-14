@@ -9,6 +9,7 @@
 layout_set_directories() {
   CONFIG_DIR="/etc/$PACKAGE"
   STATE_DIR="/var/lib/$PACKAGE"
+  # shellcheck disable=SC2034 # read by lib/audit.sh and lib/adopt.sh, which this file does not source
   AUDIT_DIR="/var/log/$PACKAGE"
 }
 
@@ -29,6 +30,7 @@ rooted() {
 
 # stage_file NAME: copy standard input into the staging directory and print the staged path.
 stage_file() {
+  # shellcheck disable=SC2153 # STAGE_DIR is set by the entry script (install.sh, uninstall.sh, bin/sirven) before this runs
   local staged="$STAGE_DIR/$1"
   cat > "$staged"
   printf '%s' "$staged"
