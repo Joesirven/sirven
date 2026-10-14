@@ -32,7 +32,7 @@ world_unchanged "access control lists match the machine before the install" acls
 check "the install record, the audit log and the revoked grant record are kept" bash -c '
   [ -s /var/lib/sirven/install-record.tsv ] && [ -s /var/log/sirven/audit.jsonl ] &&
   [ -f /etc/sirven/grants/agent.json.revoked ] && [ ! -e /etc/sirven/grants/agent.json ]'
-check "the earlier state marker is gone, so no later step unlocks the account" bash -c '[ ! -e /var/lib/sirven/agent-quiesce.json ]'
+check "the earlier state marker is gone, so no later step unlocks the account" bash -c '[ -f /etc/sirven/grants/agent.json.revoked ] && [ ! -e /var/lib/sirven/agent-quiesce.json ]'
 
 # a real apply as an ordinary user is refused before any change.
 check_exit "an ordinary user is refused" 3 setpriv --reuid=65534 --regid=65534 --clear-groups bash install.sh --yes --level observer --transport none

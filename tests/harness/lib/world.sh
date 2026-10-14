@@ -86,3 +86,12 @@ world_unchanged() {
   "world_$kind" "$@" > "$before.now"
   if shift_out="$(diff "$before" "$before.now")"; then pass "$name"; else fail "$name" "$(printf '%s\n' "$shift_out" | head -20)"; fi
 }
+
+# world_unchanged_if CONDITION NAME KIND BEFOREFILE [ARG...]: like world_unchanged, but only counts when CONDITION
+# (shell text) holds. a "left it alone" assertion would otherwise pass for a command that did nothing at all, so each
+# one is paired with proof that the command ran.
+world_unchanged_if() {
+  local condition="$1"
+  shift
+  if eval "$condition"; then world_unchanged "$@"; else fail "$1: not counted, because this is false: $condition"; fi
+}

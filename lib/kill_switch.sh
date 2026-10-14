@@ -4,8 +4,9 @@
 # services that run as it, puts every granted folder back exactly (lib/access_control_snapshot.sh),
 # marks the grant record revoked, and closes the transport. on macos it is still plan output.
 #
-# the order matters: lock first so nothing new starts and end what is running, then take the keys,
-# then undo the grants while nothing of the agent's can change a folder. a step that finds its end
+# the order matters: lock first so nothing new starts and end what is running, then stop the services that
+# would start it again (a unit with Restart=always would bring a process back while the grants are undone),
+# then take the keys, then undo the grants while nothing of the agent's can change a folder. a step that finds its end
 # state already in place is skipped, so running it again is safe and finishes a run that stopped.
 #
 # the agent owns its home folder, so nothing is done to a name inside it by path: the keys are
@@ -181,12 +182,12 @@ plan_kill_switch_linux() {
   plan_step system "end every process of $user and lock and expire its account, so nothing new starts" \
     "kill_switch_account_stopped $user" \
     "kill_switch_quiesce $user $marker"
-  plan_step system "set the shell of $user to $KILL_SWITCH_NOLOGIN" \
-    "kill_switch_shell_is_nologin $user" \
-    "usermod --shell $KILL_SWITCH_NOLOGIN $user"
   plan_step system "stop and disable every service that runs as $user, and end its systemd session" \
     "kill_switch_services_stopped $user" \
     "kill_switch_stop_services $user"
+  plan_step system "set the shell of $user to $KILL_SWITCH_NOLOGIN" \
+    "kill_switch_shell_is_nologin $user" \
+    "usermod --shell $KILL_SWITCH_NOLOGIN $user"
   plan_step system "remove every authorized key of $user, by name, without following a link" \
     "kill_switch_keys_gone $home" \
     "kill_switch_remove_keys $home"
