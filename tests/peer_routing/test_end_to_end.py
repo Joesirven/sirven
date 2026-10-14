@@ -21,6 +21,7 @@ import sys
 import tempfile
 import time
 import unittest
+import unittest.mock
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 sys.path.insert(0, os.path.join(REPO, "lib"))
@@ -230,9 +231,26 @@ class EndToEnd(unittest.TestCase):
         second = subprocess.run(command, input=data, capture_output=True, env=clock, timeout=60)
         first_err = first.stderr.read()
         first.wait(timeout=60)
+        first.stdout.close()
+        first.stderr.close()
         self.assertEqual(0, first.returncode, first_err.decode())
         self.assertEqual(3, second.returncode, second.stdout.decode())
         self.assertEqual("replayed", json.loads(second.stdout)["reason"])
+
+    def test_a_key_identifier_that_begins_with_a_dash_is_carried(self):
+        # key identifiers are base64url, so about one in 64 begins with "-". the ledger check
+        # must take it as a value, not as an option, or a valid carry is refused. the verifier is
+        # stubbed to name that key, so the case is hit every run rather than one run in 64.
+        dash_key = "-E-Wceyl3J9Xl5prQCYaww"
+        def verifier(state):
+            def verify(envelope, request, now):
+                return engine.Attestation("valid", "identity", request.domain, request.request_digest,
+                                          dash_key, "n" * 22, len(REQUEST))
+            return verify
+        with unittest.mock.patch.object(peer_routing, "attestation_verifier", verifier):
+            decision = self.carry(self.envelope())
+        self.assertEqual(engine.ALLOW_PEER_CARRIER, decision["action"], decision)
+        self.assertTrue(decision["details"]["reciprocity"]["within_cap"])
 
     def test_an_envelope_with_a_forged_signature_is_refused(self):
         envelope = dict(self.envelope())

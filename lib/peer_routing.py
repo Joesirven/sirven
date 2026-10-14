@@ -201,9 +201,11 @@ def carry(state, host, tier, authenticated, request_bytes, envelope, session, no
         return answer
     # the reciprocity ledger last: it is asked only for a request every other check allowed.
     ledger = subprocess.run([sys.executable, RECIPROCITY, "check", "--ledger", where["ledger"], "--now", str(now),
-                             "--direction", "carried", "--tier", LEDGER_TIERS[tier_name],
-                             "--domain", request.domain, "--session", session,
-                             "--peer", decision.details["key_id"], "--bytes", str(decision.details["maximum_bytes"])],
+                             "--direction", "carried", "--tier=" + LEDGER_TIERS[tier_name],
+                             # the = form: a key identifier or session can begin with "-", which
+                             # argparse would read as an option and refuse, failing the carry closed.
+                             "--domain=" + request.domain, "--session=" + session,
+                             "--peer=" + decision.details["key_id"], "--bytes=" + str(decision.details["maximum_bytes"])],
                             capture_output=True, timeout=30)
     if ledger.returncode == 3:
         return refusal("reciprocity_over_cap", REASONS["reciprocity_over_cap"], **answer["details"])

@@ -97,8 +97,9 @@ def record_transfer(state, tier_name, domain, session, peer_id, bytes_moved, now
     completed = subprocess.run(
         [sys.executable, RECIPROCITY, "record", "--ledger", ledger, "--now", str(now),
          "--direction", "carried", "--bytes", str(bytes_moved),
-         "--domain", domain, "--session", session, "--transfer", transfer_id,
-         "--peer", peer_id],
+         # the = form, as in peer_routing.carry: identifiers may begin with "-".
+         "--domain=" + domain, "--session=" + session, "--transfer=" + transfer_id,
+         "--peer=" + peer_id],
         capture_output=True, timeout=30)
     if completed.returncode != 0:
         return None
