@@ -2,7 +2,7 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!-- the launch daemon definition for the keep-awake helper. it ships inside the app bundle at
      Contents/Library/LaunchDaemons and is registered with SMAppService the first time the user
-     turns lid-closed operation on. launchd starts the helper only when sirven connects to it. -->
+     turns lid-closed operation on. launchd starts the helper at boot and keeps it running. -->
 <plist version="1.0">
 <dict>
 	<key>Label</key>
@@ -18,5 +18,11 @@
 	<array>
 		<string>xyz.sirven.app</string>
 	</array>
+	<!-- a launch at boot runs the helper's revert, so a setting left on by a crash or a power loss is put back.
+	     KeepAlive restarts the helper if it is killed; the restart reverts the setting too, and the holder asks again. -->
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<true/>
 </dict>
 </plist>

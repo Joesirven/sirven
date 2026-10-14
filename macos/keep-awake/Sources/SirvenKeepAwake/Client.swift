@@ -24,6 +24,8 @@ public struct KeepAwakeStatus: Codable {
     public var holdingSince: Date?
     public var lidClosedActive: Bool
     public var lidClosedProblem: String?
+    /// what the system reports for its sleep-disabled setting right now, nil when it cannot be read.
+    public var systemSleepDisabled: Bool?
     /// what the system itself lists for the holder process: the check that the claim is true.
     public var systemAssertions: [SystemAssertion]
     public var work: [Work]
@@ -98,7 +100,7 @@ public final class KeepAwakeClient {
         store.log(lidClosed ? "lid-closed-setting-on" : "lid-closed-setting-off")
     }
 
-    public func status(helper: LidClosedHelper? = nil) -> KeepAwakeStatus {
+    public func status(helper: LidClosedHelper? = nil, sleepSetting: SleepSettingBackend? = nil) -> KeepAwakeStatus {
         let settings = store.readSettings()
         let running = store.holderIsRunning()
         // a holder record left by a process that is gone says nothing about now.
@@ -115,7 +117,8 @@ public final class KeepAwakeClient {
                                holderRunning: running, holding: holder?.holding ?? false,
                                holderProcess: holder?.process, holdingSince: holder?.holdingSince,
                                lidClosedActive: holder?.lidClosedActive ?? false,
-                               lidClosedProblem: holder?.lidClosedProblem, systemAssertions: system, work: work,
+                               lidClosedProblem: holder?.lidClosedProblem, systemSleepDisabled: sleepSetting?.isDisabled(),
+                               systemAssertions: system, work: work,
                                releaseCommand: KeepAwakeIdentity.releaseCommand, credit: KeepAwakeIdentity.credit)
     }
 }

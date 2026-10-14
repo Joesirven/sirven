@@ -28,6 +28,8 @@ public protocol LidClosedHelper: AnyObject {
     /// ask the system to register the helper. the system, not sirven, asks the user.
     func register() throws -> HelperState
     func setSleepDisabled(_ disabled: Bool) throws
+    /// remove the helper's registration. the helper reverts the setting before it goes.
+    func unregister() throws
 }
 
 public final class ServiceManagementHelper: LidClosedHelper {
@@ -63,6 +65,17 @@ public final class ServiceManagementHelper: LidClosedHelper {
             throw KeepAwakeError.helper("the system did not register the helper: \(error.localizedDescription)")
         }
         return state
+    }
+
+    public func unregister() throws {
+        guard state == .enabled || state == .requiresApproval else { return }
+        connection?.invalidate()
+        connection = nil
+        do {
+            try service.unregister()
+        } catch {
+            throw KeepAwakeError.helper("the system did not remove the helper: \(error.localizedDescription)")
+        }
     }
 
     /// open the System Settings pane where the user allows the helper.
