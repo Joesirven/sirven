@@ -324,6 +324,7 @@ main() {
     [ -z "$refusal" ] || DIE_STATUS=3 die "not applied: $refusal"
   fi
   if [ "$COMMAND" = revoke ]; then
+    kill_switch_refuse_unsafe_user
     # the kill switch needs no transport tool and no SSH probe: it must work on a machine where
     # tailscale is gone or never was, and it must not stop on something it does not use.
     preflight_revoke "$OPERATING_SYSTEM" "$strict"

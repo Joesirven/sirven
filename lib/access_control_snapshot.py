@@ -721,8 +721,11 @@ def end_processes(user):
     """end every process of the user. one pass is not enough for a process that keeps starting others, so
     repeat until none is left, at most 20 times."""
     for _ in range(20):
+        # effective user and real user: a setuid program the agent started runs as someone else but is still its own
         subprocess.run(["pkill", "-KILL", "-u", user])
-        if subprocess.run(["pgrep", "-u", user], capture_output=True).returncode != 0:
+        subprocess.run(["pkill", "-KILL", "-U", user])
+        if (subprocess.run(["pgrep", "-u", user], capture_output=True).returncode != 0
+                and subprocess.run(["pgrep", "-U", user], capture_output=True).returncode != 0):
             return
         time.sleep(0.05)
     raise Failure("processes of %s keep starting and could not all be ended after 20 tries. its account is locked "

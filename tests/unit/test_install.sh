@@ -220,6 +220,14 @@ test_revoke_locks_before_it_stops_for_an_unreadable_record() {
   assert_contains "$(tail -1 "$root/var/log/sirven/audit.jsonl")" '"outcome": "failed"'
 }
 
+test_revoke_refuses_root_and_the_owner() {
+  assert_status 2 install_sh revoke --all --dry-run --prefix "$TEST_TMP/root" --user root
+  assert_contains "$CAPTURED_STDERR" "refusing to revoke root"
+  assert_status 2 install_sh revoke --all --dry-run --prefix "$TEST_TMP/root" --user example
+  assert_contains "$CAPTURED_STDERR" "the owner account"
+  assert_no_file "$TEST_TMP/root"
+}
+
 test_revoke_on_macos_is_still_plan_only() {
   TEST_OS=macos
   assert_status 0 install_sh revoke --all --dry-run --prefix "$TEST_TMP/root" --path /Users/example/code/app

@@ -156,6 +156,20 @@ kill_switch_report_failure() {
     "$KILL_SWITCH_NOLOGIN" "$SERVICE_USER" "$SERVICE_USER" >&2
 }
 
+# kill_switch_refuse_unsafe_user: the kill switch locks an account and ends its processes, so it refuses the accounts
+# that must never be locked by mistake (root, the owner, a system account) before it plans anything.
+kill_switch_refuse_unsafe_user() {
+  local number
+  if [ "$SERVICE_USER" = root ] || [ "$SERVICE_USER" = "$OWNER" ]; then
+    DIE_STATUS=2 die "refusing to revoke $SERVICE_USER: it is root or the owner account, which the kill switch would lock out. --user names the agent's account. nothing was changed."
+  fi
+  [ -z "$PREFIX" ] || return 0
+  number="$(id -u "$SERVICE_USER" 2>/dev/null)" || return 0
+  if [ "$number" -lt 500 ]; then
+    DIE_STATUS=2 die "refusing to revoke $SERVICE_USER: user number $number is a system account, not an agent account. nothing was changed."
+  fi
+}
+
 plan_kill_switch_macos() {
   local user="$SERVICE_USER" keys record
   keys="$(rooted "$(service_user_home)/.ssh/authorized_keys")"
