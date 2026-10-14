@@ -381,7 +381,7 @@ rollback() {
     [ -z "$refusal" ] || DIE_STATUS=3 die "not applied: $refusal"
   fi
   preflight_bash
-  preflight_python
+  preflight_python "$OPERATING_SYSTEM"
   case "$OPERATING_SYSTEM" in
     linux) preflight_commands "$strict" setfacl getfacl ;;
   esac

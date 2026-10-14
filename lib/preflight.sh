@@ -62,9 +62,32 @@ preflight_bash() {
   printf 'preflight: ok bash %s\n' "$have" >&2
 }
 
+# PREFLIGHT_SYSTEM_PYTHON: the python3 that macos ships. on a Mac without the command line
+# developer tools it is a placeholder that only opens a system dialog. a variable, so tests can
+# point it at a fake.
+PREFLIGHT_SYSTEM_PYTHON="${PREFLIGHT_SYSTEM_PYTHON:-/usr/bin/python3}"
+
+# _preflight_placeholder_python: true on a Mac where python3 is the placeholder. it asks
+# xcode-select first, so the placeholder itself is never run, and it never runs a python3 that
+# is not the system one: a Homebrew or pyenv python3 works without the developer tools.
+_preflight_placeholder_python() {
+  command -v xcode-select >/dev/null 2>&1 || return 1
+  if xcode-select -p >/dev/null 2>&1; then return 1; fi
+  case "$(command -v python3 2>/dev/null)" in
+    '' | "$PREFLIGHT_SYSTEM_PYTHON") return 0 ;;
+  esac
+  return 1
+}
+
 # python3 runs the grant compiler. without it there is no plan, so stop loudly.
+# preflight_python [OPERATING_SYSTEM]: the operating system decides the guidance on a Mac.
 preflight_python() {
-  local version
+  local operating_system="${1:-}" version
+  if [ "$operating_system" = macos ] && _preflight_placeholder_python; then
+    die "python3 is Apple's placeholder: the command line developer tools are not installed, so it only opens a system dialog.
+  install them with: xcode-select --install
+  wait for that install to finish (it is about 2 GB), then run this again. nothing was changed."
+  fi
   if ! command -v python3 >/dev/null 2>&1; then
     die "python3 was not found on PATH. the grant compiler needs python $PREFLIGHT_MINIMUM_PYTHON or newer.
   on macos: install the command line developer tools with 'xcode-select --install'
@@ -168,7 +191,7 @@ preflight_all() {
   PREFLIGHT_PROBLEMS=0
 PREFLIGHT_SSH_COMMAND="${PREFLIGHT_SSH_COMMAND:-ssh}"
   preflight_bash
-  preflight_python
+  preflight_python "$os"
   preflight_commands yes mkdir chmod cp cmp touch grep sed tr head id uname dirname
   case "$os" in
     linux) preflight_commands "$strict" useradd usermod getent id install setfacl getfacl chown pkill ;;

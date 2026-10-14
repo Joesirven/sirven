@@ -171,3 +171,60 @@ test_ssh_server_probe_is_skipped_in_a_dry_run_and_only_warns() {
   preflight_ssh_server yes 2>/dev/null
   assert_eq 0 "$PREFLIGHT_PROBLEMS" "a missing SSH server is never a blocking problem"
 }
+
+# make_placeholder_python: a fake python3 that is the system python3 here, and that leaves a
+# marker if it is ever run. the real placeholder opens a dialog when run, so running it is the bug.
+make_placeholder_python() {
+  mkdir -p "$TEST_TMP/bin"
+  printf '#!/bin/sh\ntouch "%s/python3-was-run"\necho "Python 3.9.6"\n' "$TEST_TMP" > "$TEST_TMP/bin/python3"
+  chmod +x "$TEST_TMP/bin/python3"
+  PREFLIGHT_SYSTEM_PYTHON="$TEST_TMP/bin/python3"
+}
+
+# make_xcode_select EXIT_STATUS: a fake xcode-select; 2 is what it says with no developer tools.
+make_xcode_select() {
+  mkdir -p "$TEST_TMP/bin"
+  printf '#!/bin/sh\n[ "$1" = -p ] || exit 1\nexit %s\n' "$1" > "$TEST_TMP/bin/xcode-select"
+  chmod +x "$TEST_TMP/bin/xcode-select"
+}
+
+test_mac_without_developer_tools_gets_the_install_command_and_never_runs_the_placeholder() {
+  make_placeholder_python
+  make_xcode_select 2
+  PATH="$TEST_TMP/bin:$PATH"
+  assert_status 1 preflight_python macos
+  assert_contains "$CAPTURED_STDERR" "xcode-select --install"
+  assert_contains "$CAPTURED_STDERR" "nothing was changed"
+  assert_no_file "$TEST_TMP/python3-was-run"
+}
+
+test_mac_with_developer_tools_checks_python_as_usual() {
+  make_placeholder_python
+  make_xcode_select 0
+  PATH="$TEST_TMP/bin:$PATH"
+  capture preflight_python macos
+  assert_eq 0 "$CAPTURED_STATUS" "python3 with the developer tools installed passes: $CAPTURED_STDERR"
+  assert_contains "$CAPTURED_STDERR" "preflight: ok python3 3.9.6"
+  assert_file_exists "$TEST_TMP/python3-was-run"
+}
+
+test_a_python_other_than_the_system_one_works_without_the_developer_tools() {
+  make_xcode_select 2
+  mkdir -p "$TEST_TMP/homebrew"
+  printf '#!/bin/sh\necho "Python 3.12.1"\n' > "$TEST_TMP/homebrew/python3"
+  chmod +x "$TEST_TMP/homebrew/python3"
+  PREFLIGHT_SYSTEM_PYTHON="$TEST_TMP/bin/python3"
+  PATH="$TEST_TMP/homebrew:$TEST_TMP/bin:$PATH"
+  capture preflight_python macos
+  assert_eq 0 "$CAPTURED_STATUS" "a Homebrew python3 is not the placeholder: $CAPTURED_STDERR"
+  assert_contains "$CAPTURED_STDERR" "preflight: ok python3 3.12.1"
+}
+
+test_linux_never_asks_about_the_developer_tools() {
+  make_placeholder_python
+  make_xcode_select 2
+  PATH="$TEST_TMP/bin:$PATH"
+  capture preflight_python linux
+  assert_eq 0 "$CAPTURED_STATUS"
+  assert_not_contains "$CAPTURED_STDERR" "xcode-select"
+}

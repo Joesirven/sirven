@@ -13,7 +13,7 @@ already on this machine, adopted as it is
      adopted: bb 0.42.1, installed for the account running this. kept as it is: never reinstalled or updated.
      adopted: the grant for agent from an earlier run: level builder on /home/example/project. kept as it is; its steps below show as already done.
      adopted: the builder policy /etc/sirven/levels/builder.json, the same as levels/builder.json. kept as it is.
-     adopted: the audit log /var/log/sirven/audit.jsonl, 26 entries. kept: new entries are appended, and nothing in it is rewritten.
+     adopted: the audit log /var/log/sirven/audit.jsonl, 27 entries. kept: new entries are appended, and nothing in it is rewritten.
      adopted: the install record /var/lib/sirven/install-record.tsv. kept: steps applied now are added after what it lists, so uninstall still reverses only what this package created.
 
 package directories
@@ -26,52 +26,55 @@ package directories
        $ mkdir -p <prefix>/etc/sirven/levels && chmod 0755 <prefix>/etc/sirven/levels
     4. create /etc/sirven/grants for grant records (already done)
        $ mkdir -p <prefix>/etc/sirven/grants && chmod 0755 <prefix>/etc/sirven/grants
+    5. keep a pinned copy of this package in /var/lib/sirven/package, so revoke, rollback, and uninstall need no download (already done)
+       # copies install.sh uninstall.sh bin lib levels project.json, and components when present, into a new folder, then moves it into place
+     note: later, without this repository: sudo bash /var/lib/sirven/package/uninstall.sh (revoke by uninstall until the kill switch applies)
 
 audit log
-    5. create the audit log directory /var/log/sirven (already done)
+    6. create the audit log directory /var/log/sirven (already done)
        $ mkdir -p <prefix>/var/log/sirven && chmod 0750 <prefix>/var/log/sirven
-    6. write the audit log format (already done)
+    7. write the audit log format (already done)
        # write <prefix>/etc/sirven/audit-format.json (mode 0644): the JSON lines format every entry follows
-    7. create the empty audit log (already done)
+    8. create the empty audit log (already done)
        $ touch <prefix>/var/log/sirven/audit.jsonl && chmod 0640 <prefix>/var/log/sirven/audit.jsonl
-    8. give the audit log directory to the owner, example (already done)
+    9. give the audit log directory to the owner, example (already done)
        $ chown -R example <prefix>/var/log/sirven
      note: capture comes from a forced-command wrapper on the agent's SSH key: designed, built after alpha.
 
 service user
-    9. create the service user agent, not an administrator (already done)
+   10. create the service user agent, not an administrator (already done)
        $ useradd --create-home --home-dir <prefix>/home/agent --shell /bin/bash --user-group --comment 'sirven agent' agent
-   10. turn off password login for agent, keys only (already done)
+   11. turn off password login for agent, keys only (already done)
        $ usermod --password '*' agent
-   11. confirm agent is not in sudo, wheel, or admin (already done)
+   12. confirm agent is not in sudo, wheel, or admin (already done)
        $ id -nG agent   # must not list sudo, wheel, or admin
-   12. create the SSH folder for agent (already done)
+   13. create the SSH folder for agent (already done)
        $ install -d -m 0700 -o agent -g agent <prefix>/home/agent/.ssh
-   13. create an empty authorized_keys file (already done)
+   14. create an empty authorized_keys file (already done)
        $ install -m 0600 -o agent -g agent /dev/null <prefix>/home/agent/.ssh/authorized_keys
-   14. add the public key of your agent client (owner, by hand)
+   15. add the public key of your agent client (owner, by hand)
        append its public key, one line, to /home/agent/.ssh/authorized_keys.
        keys only: no password is ever set, stored, or typed.
 
 access to paths, level builder
      note: builder: reads and writes inside granted paths. builds and tests there, nothing else.
-   15. install the builder level as policy (already done)
+   16. install the builder level as policy (already done)
        $ cp levels/builder.json <prefix>/etc/sirven/levels/builder.json && chmod 0644 <prefix>/etc/sirven/levels/builder.json
-   16. record the grant for agent (already done)
+   17. record the grant for agent (already done)
        # write <prefix>/etc/sirven/grants/agent.json (mode 0644): level builder on the paths below, no expiry, cannot grant further
-   17. let agent pass through /home (already done)
+   18. let agent pass through /home (already done)
        $ setfacl -m u:agent:x <prefix>/home
-   18. let agent pass through /home/example (already done)
+   19. let agent pass through /home/example (already done)
        $ setfacl -m u:agent:x <prefix>/home/example
-   19. grant agent rwX on /home/example/project and everything inside (already done)
+   20. grant agent rwX on /home/example/project and everything inside (already done)
        $ setfacl -R -P -m u:agent:rwX <prefix>/home/example/project
-   20. make new files in /home/example/project inherit the grant (already done)
+   21. make new files in /home/example/project inherit the grant (already done)
        $ setfacl -R -P -d -m u:agent:rwX <prefix>/home/example/project
 
 transport: tailscale
-   21. write the tailnet policy snippet (already done)
+   22. write the tailnet policy snippet (already done)
        # write <prefix>/etc/sirven/tailscale-policy-snippet.hujson (mode 0644): tag:agent, reachable only from your login, only on port 22
-   22. paste the policy snippet into your tailnet policy (owner, by hand)
+   23. paste the policy snippet into your tailnet policy (owner, by hand)
        tailscale admin console, access controls: merge /etc/sirven/tailscale-policy-snippet.hujson and put your login in place of you@example.com.
      note: this machine is already the agent node, adopted above: no auth key and no join. sirven never runs tailscale up on it.
      note: the agent client connects with: ssh agent@<this machine's tailnet name>. tailscale ssh stays off; the machine's own SSH server and keys are used.
@@ -79,7 +82,7 @@ transport: tailscale
 phone to agent channel
      note: bb is already installed, adopted above: nothing to install.
 
-summary: 22 steps. 0 to do, 20 already done, 2 by the owner, 0 plan only.
+summary: 23 steps. 0 to do, 21 already done, 2 by the owner, 0 plan only.
 dry run: nothing was changed. run the same command without --dry-run to apply this plan.
 to undo later: ./install.sh revoke --all --dry-run, or ./uninstall.sh --dry-run
 exit status: 0
