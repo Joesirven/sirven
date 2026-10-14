@@ -108,7 +108,7 @@ test_macos_plan_is_plan_only() {
   assert_status 0 install_sh --dry-run --prefix "$TEST_TMP/root" --level builder --path /Users/example/code/app --transport none
   assert_contains "$CAPTURED_STDOUT" "operating system: macos"
   assert_contains "$CAPTURED_STDOUT" "dscl . -create /Users/agent"
-  assert_contains "$CAPTURED_STDOUT" "/bin/chmod +a"
+  assert_contains "$CAPTURED_STDOUT" "/bin/chmod -h +a"
   assert_not_contains "$CAPTURED_STDOUT" "setfacl"
   assert_status 3 install_sh --prefix "$TEST_TMP/root" --level builder --path /Users/example/code/app --transport none
   assert_contains "$CAPTURED_STDERR" "macos virtual machine"
