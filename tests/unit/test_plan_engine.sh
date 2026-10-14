@@ -136,6 +136,38 @@ test_real_apply_on_macos_is_refused() {
   PLAN_PREFIX=""
   PLAN_OPERATING_SYSTEM=macos
   assert_contains "$(plan_real_apply_refusal)" "not verified yet"
+  assert_contains "$(plan_real_apply_refusal)" "switched off"
+}
+
+test_real_apply_on_macos_needs_the_switch_and_root() {
+  setup_fake_root
+  PLAN_PREFIX=""
+  PLAN_OPERATING_SYSTEM=macos
+  # anything but exactly 1 leaves it off
+  assert_contains "$(SIRVEN_MACOS_REAL_APPLY=true plan_real_apply_refusal)" "not verified yet"
+  assert_contains "$(SIRVEN_MACOS_REAL_APPLY=0 plan_real_apply_refusal)" "not verified yet"
+  # switched on but not root
+  # shellcheck disable=SC2329 # called by plan_real_apply_refusal, in place of the real id
+  id() { printf '501'; }
+  assert_contains "$(SIRVEN_MACOS_REAL_APPLY=1 plan_real_apply_refusal)" "needs root"
+  assert_contains "$(SIRVEN_MACOS_REAL_APPLY=1 plan_real_apply_refusal)" "sudo env SIRVEN_MACOS_REAL_APPLY=1"
+  # switched on and root: allowed
+  # shellcheck disable=SC2329 # same
+  id() { printf '0'; }
+  assert_eq "" "$(SIRVEN_MACOS_REAL_APPLY=1 plan_real_apply_refusal)" "allowed with the switch and root"
+  # a fake root is always allowed, switch or not
+  PLAN_PREFIX="$ROOT"
+  assert_eq "" "$(plan_real_apply_refusal)" "a fake root needs no switch"
+}
+
+test_the_macos_switch_does_not_change_the_linux_refusal() {
+  setup_fake_root
+  PLAN_PREFIX=""
+  PLAN_OPERATING_SYSTEM=linux
+  if in_container; then
+    return 0
+  fi
+  assert_contains "$(SIRVEN_MACOS_REAL_APPLY=1 plan_real_apply_refusal)" "throwaway container"
 }
 
 test_unknown_step_kind_is_an_error() {

@@ -14,7 +14,7 @@ FILTER="${1:-}"
 export REPO_DIR TESTS_DIR
 # the setup questions must never wait on whoever runs the tests: tests get no terminal on
 # standard input and none of the caller's answers.
-unset SIRVEN_LEVEL SIRVEN_PATH SIRVEN_YES SIRVEN_INTERACTIVE
+unset SIRVEN_LEVEL SIRVEN_PATH SIRVEN_YES SIRVEN_INTERACTIVE SIRVEN_MACOS_REAL_APPLY
 # nor the Tailscale and bb of the machine running them: the adopt tests point these at fakes.
 SIRVEN_TAILSCALE=none
 SIRVEN_BB=none

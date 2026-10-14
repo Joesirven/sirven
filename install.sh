@@ -85,6 +85,10 @@ examples:
   ./install.sh revoke --all --dry-run
 
 nothing is applied to a real machine in the alpha cut, except inside a linux container as root.
+a real macos apply is switched off: its steps are tested on a fake root, but no real install has been
+checked yet. the owner switches it on for that check only, as root, with
+  sudo env SIRVEN_MACOS_REAL_APPLY=1 bash install.sh ...
+see docs/research/qa/macos-real-apply-prep.md.
 END
 }
 
@@ -274,6 +278,9 @@ finish() {
     say "dry run: nothing was changed. run the same command without --dry-run to apply this plan."
     if [ -n "$(plan_blockers)" ]; then
       say "applying would stop before any change: the plan has plan-only steps the alpha cut does not apply yet."
+    fi
+    if [ "$OPERATING_SYSTEM" = macos ] && [ -z "$PREFIX" ] && [ -n "$(plan_real_apply_refusal)" ]; then
+      say "applying would be refused on this machine: $(plan_real_apply_refusal)"
     fi
     if [ "$COMMAND" = install ]; then
       say "to undo later: ./install.sh revoke --all --dry-run, or ./uninstall.sh --dry-run"

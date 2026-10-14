@@ -200,7 +200,7 @@ PREFLIGHT_SSH_COMMAND="${PREFLIGHT_SSH_COMMAND:-ssh}"
   preflight_commands yes mkdir chmod cp cmp touch grep sed tr head id uname dirname
   case "$os" in
     linux) preflight_commands "$strict" useradd usermod getent id install setfacl getfacl chown pkill ;;
-    macos) preflight_commands "$strict" dscl dseditgroup createhomedir find chown pkill ;;
+    macos) preflight_commands "$strict" dscl createhomedir uuidgen find chown pkill ls ;;
   esac
   case "$transport" in
     tailscale) preflight_tool "$strict" tailscale "$PREFLIGHT_MINIMUM_TAILSCALE" version ;;

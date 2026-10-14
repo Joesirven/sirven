@@ -312,6 +312,18 @@ plan_summary() {
     "$(_plan_count_status owner)" "$(_plan_count_status planonly)"
 }
 
+# why a real macos apply is refused, or nothing when it is allowed. the steps are built and tested
+# on a fake root, but no real install has been checked yet (tests/macos/real-install-check.sh), so a
+# real apply stays off until the owner turns it on for that check with SIRVEN_MACOS_REAL_APPLY=1.
+# sudo drops the variable unless it is passed through: sudo env SIRVEN_MACOS_REAL_APPLY=1 bash install.sh
+plan_macos_real_apply_refusal() {
+  if [ "${SIRVEN_MACOS_REAL_APPLY:-}" != 1 ]; then
+    printf 'applying to a real macos machine is not verified yet and is switched off; use --dry-run, or --prefix for a fake root. the owner switches it on for the real install check only, with: sudo env SIRVEN_MACOS_REAL_APPLY=1 bash install.sh (see docs/research/qa/macos-real-apply-prep.md)'
+  elif [ "$(id -u)" != 0 ]; then
+    printf 'applying needs root; run it with: sudo env SIRVEN_MACOS_REAL_APPLY=1 bash install.sh (sudo drops the variable without env)'
+  fi
+}
+
 # why a real (no --prefix) apply is refused, or nothing when it is allowed.
 # the alpha cut only changes a real system inside a linux container, as root.
 plan_real_apply_refusal() {
@@ -319,7 +331,7 @@ plan_real_apply_refusal() {
     return 0
   fi
   if [ "$PLAN_OPERATING_SYSTEM" != linux ]; then
-    printf 'applying to a real macos machine is not verified yet; use --dry-run, or --prefix for a fake root'
+    plan_macos_real_apply_refusal
   elif ! in_container; then
     printf 'the alpha cut only applies to a real system inside a throwaway container; use --dry-run, or --prefix for a fake root'
   elif [ "$(id -u)" != 0 ]; then
