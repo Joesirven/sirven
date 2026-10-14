@@ -88,23 +88,49 @@ audit_now() {
   date -u +%Y-%m-%dT%H:%M:%SZ
 }
 
-# audit_json_string VALUE: VALUE as a JSON string, quotes included. backslash, quote, newline,
-# tab, and carriage return are escaped; other control characters are dropped.
+# audit_json_string VALUE: VALUE as a JSON string, quotes included. quote, backslash, tab, newline,
+# and carriage return get their two-character escapes. the other control bytes of the basic range,
+# 0x01 to 0x1f and 0x7f (the delete character), become \u00xx, so the delete character is written as
+# \u007f. a null byte cannot be held in a bash variable, so it cannot reach this function and is
+# dropped before it arrives. every other byte, including the UTF-8 bytes of a character outside the
+# basic range, is written through unchanged. the escape characters are found by a pattern that lists
+# them byte by byte, never by a range or a [[:cntrl:]] class: a class matches the Unicode control
+# characters U+0080 to U+009F under a UTF-8 locale, and the output must not depend on the locale.
+# the value is cut into windows of 64 characters, and each window into runs of ordinary text: a run
+# is written whole, and each special character is written once as its escape. slicing one character
+# off the front of the whole value on every special is quadratic in bash, which is why the windows
+# exist. bash 5 reads backslashes in the replacement text of ${value//pattern/replacement} as
+# escapes, so the escaper never uses that form.
 audit_json_string() {
-  local value="$1" backslash="\\" quote='"' newline tab carriage
+  local value="$1" out="" win piece run c code backslash="\\" quote='"' newline tab carriage
+  local specials=$'"\\\001\002\003\004\005\006\007\010\011\012\013\014\015\016\017\020\021\022\023\024\025\026\027\030\031\032\033\034\035\036\037\177'
   newline="
 "
   tab="$(printf '\t')"
   carriage="$(printf '\r')"
-  value=${value//"$backslash"/$backslash$backslash}
-  value=${value//"$quote"/$backslash$quote}
-  value=${value//"$newline"/${backslash}n}
-  value=${value//"$tab"/${backslash}t}
-  value=${value//"$carriage"/${backslash}r}
-  case "$value" in
-    *[[:cntrl:]]*) value="$(printf '%s' "$value" | LC_ALL=C tr -d '\001-\037\177')" ;;
-  esac
-  printf '"%s"' "$value"
+  while [ -n "$value" ]; do
+    win="${value:0:64}"
+    value="${value:64}"
+    piece=""
+    while [ -n "$win" ]; do
+      run="${win%%["$specials"]*}"
+      piece="$piece$run"
+      win="${win:${#run}}"
+      [ -n "$win" ] || break
+      c="${win:0:1}"
+      win="${win:1}"
+      case "$c" in
+        "$quote") piece="$piece$backslash$quote" ;;
+        "$backslash") piece="$piece$backslash$backslash" ;;
+        "$newline") piece="$piece${backslash}n" ;;
+        "$tab") piece="$piece${backslash}t" ;;
+        "$carriage") piece="$piece${backslash}r" ;;
+        *) printf -v code '%02x' "'$c"; piece="$piece${backslash}u00$code" ;;
+      esac
+    done
+    out="$out$piece"
+  done
+  printf '"%s"' "$out"
 }
 
 # audit_json_array VALUE...: the values as a JSON array of strings.
