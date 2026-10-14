@@ -209,5 +209,25 @@ class Transport(unittest.TestCase):
             self.assertEqual(404, error.code)
 
 
+    def test_a_transfer_with_dash_leading_identifiers_gets_a_receipt(self):
+        # record_transfer passes the peer identifier and the session as values. both may begin
+        # with "-" (key identifiers are base64url), and the record must still be made.
+        receipt = peer_transport.record_transfer(self.state, "Neighborly", RIDES, "-session-dash",
+                                                 "-E-Wceyl3J9Xl5prQCYaww", 51, NOW)
+        self.assertTrue(receipt["recorded"], receipt)
+        self.assertEqual(51, receipt["bytes"])
+        with open(os.path.join(self.state, "reciprocity.jsonl")) as handle:
+            self.assertIn(receipt["transfer"], handle.read())
+
+    def test_a_transfer_the_ledger_refuses_says_so(self):
+        # a session with a line break is not an opaque reference, so the ledger refuses the record.
+        # the carrier must report that, not return nothing.
+        receipt = peer_transport.record_transfer(self.state, "Neighborly", RIDES, "bad\nsession",
+                                                 self.peer_id, 51, NOW)
+        self.assertFalse(receipt["recorded"], receipt)
+        self.assertEqual("reciprocity_record_failed", receipt["reason"])
+        self.assertEqual(51, receipt["bytes"])
+
+
 if __name__ == "__main__":
     unittest.main()

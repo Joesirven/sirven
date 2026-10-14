@@ -89,19 +89,22 @@ def constant_time_equal(one, other):
 
 
 def record_transfer(state, tier_name, domain, session, peer_id, bytes_moved, now):
-    """Append a settled transfer to the reciprocity ledger. Returns a receipt dict on success,
-    or None if the ledger refused the record. A failure here does not change what the carrier
-    returned to the requester: the bytes already moved."""
+    """Append a settled transfer to the reciprocity ledger. Returns a receipt dict: recorded true
+    on success, or recorded false with a reason when the ledger refused the record. A failure
+    here does not change what the carrier returned to the requester, because the bytes already
+    moved, but the carrier reports it so the missing record is visible."""
     ledger = peer_routing.paths(state)["ledger"]
     transfer_id = uuid.uuid4().hex
     completed = subprocess.run(
         [sys.executable, RECIPROCITY, "record", "--ledger", ledger, "--now", str(now),
          "--direction", "carried", "--bytes", str(bytes_moved),
-         "--domain", domain, "--session", session, "--transfer", transfer_id,
-         "--peer", peer_id],
+         # the = form, as in peer_routing.carry: identifiers may begin with "-".
+         "--domain=" + domain, "--session=" + session, "--transfer=" + transfer_id,
+         "--peer=" + peer_id],
         capture_output=True, timeout=30)
     if completed.returncode != 0:
-        return None
+        return {"recorded": False, "reason": "reciprocity_record_failed", "bytes": bytes_moved,
+                "direction": "carried", "at": now}
     return {"recorded": True, "transfer": transfer_id, "bytes": bytes_moved,
             "direction": "carried", "at": now}
 

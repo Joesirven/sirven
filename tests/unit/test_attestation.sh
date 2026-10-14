@@ -76,6 +76,134 @@ test_peer_accepts_then_refuses_a_replay() {
   assert_contains "$CAPTURED_STDOUT" '"reason": "replayed"'
 }
 
+test_peer_verify_removes_an_unreadable_lock_left_behind() {
+  have_node || return 0
+  setup_roles
+  attest sign --dir "$TEST_TMP/originator" --audience "$(cat "$TEST_TMP/peer/peer-identifier")" --domain shop.example.com --bytes 100 > "$TEST_TMP/envelope.json"
+  : > "$TEST_TMP/peer/verify.lock"
+  touch -t 200001010000 "$TEST_TMP/peer/verify.lock"
+  assert_status 0 attest peer verify --dir "$TEST_TMP/peer" --host shop.example.com --bytes 100 --envelope "$TEST_TMP/envelope.json"
+  assert_no_file "$TEST_TMP/peer/verify.lock"
+}
+
+# a lock owner record: the holder's process number, host name, and token, as the verify lock writes it.
+write_lock_record() {
+  printf '{"pid": %s, "host": "%s", "token": "%s"}\n' "$1" "$2" "$3" > "$TEST_TMP/peer/verify.lock"
+}
+
+this_host() {
+  node -e 'process.stdout.write(require("os").hostname())'
+}
+
+# a process number that belongs to no running process: a child that has already exited.
+gone_pid() {
+  sh -c 'exit 0' &
+  wait "$!"
+  printf '%s' "$!"
+}
+
+test_peer_verify_refuses_a_lock_held_by_a_live_process() {
+  have_node || return 0
+  setup_roles
+  attest sign --dir "$TEST_TMP/originator" --audience "$(cat "$TEST_TMP/peer/peer-identifier")" --domain shop.example.com --bytes 100 > "$TEST_TMP/envelope.json"
+  write_lock_record "$$" "$(this_host)" live-holder
+  export SIRVEN_ATTESTATION_TEST_LOCK_WAIT_MS=300
+  assert_status 3 attest peer verify --dir "$TEST_TMP/peer" --host shop.example.com --bytes 100 --envelope "$TEST_TMP/envelope.json"
+  assert_contains "$CAPTURED_STDOUT" '"reason": "lock_unavailable"'
+  assert_contains "$CAPTURED_STDOUT" "peer/verify.lock is held by process $$ on host"
+  assert_contains "$(cat "$TEST_TMP/peer/verify.lock")" live-holder
+}
+
+# sets the modification time of a file to the given number of hours ago, with node so it works on
+# both macOS and Linux.
+age_file_hours() {
+  node -e 'const fs = require("fs"); const at = (Date.now() - Number(process.argv[2]) * 3600e3) / 1000; fs.utimesSync(process.argv[1], at, at);' "$1" "$2"
+}
+
+test_a_lock_whose_owner_cannot_be_checked_is_cleared_after_a_day() {
+  have_node || return 0
+  setup_roles
+  attest sign --dir "$TEST_TMP/originator" --audience "$(cat "$TEST_TMP/peer/peer-identifier")" --domain shop.example.com --bytes 100 > "$TEST_TMP/envelope.json"
+  write_lock_record "$(gone_pid)" "elsewhere.invalid" other-host
+  export SIRVEN_ATTESTATION_TEST_LOCK_WAIT_MS=300
+  age_file_hours "$TEST_TMP/peer/verify.lock" 23
+  assert_status 3 attest peer verify --dir "$TEST_TMP/peer" --host shop.example.com --bytes 100 --envelope "$TEST_TMP/envelope.json"
+  assert_contains "$(cat "$TEST_TMP/peer/verify.lock")" other-host
+  age_file_hours "$TEST_TMP/peer/verify.lock" 25
+  assert_status 0 attest peer verify --dir "$TEST_TMP/peer" --host shop.example.com --bytes 100 --envelope "$TEST_TMP/envelope.json"
+  assert_no_file "$TEST_TMP/peer/verify.lock"
+}
+
+
+test_peer_verify_clears_the_lock_of_a_process_that_is_gone() {
+  have_node || return 0
+  setup_roles
+  attest sign --dir "$TEST_TMP/originator" --audience "$(cat "$TEST_TMP/peer/peer-identifier")" --domain shop.example.com --bytes 100 > "$TEST_TMP/envelope.json"
+  write_lock_record "$(gone_pid)" "$(this_host)" dead-holder
+  assert_status 0 attest peer verify --dir "$TEST_TMP/peer" --host shop.example.com --bytes 100 --envelope "$TEST_TMP/envelope.json"
+  assert_no_file "$TEST_TMP/peer/verify.lock"
+}
+
+test_peer_verify_clears_a_lock_written_before_the_last_boot() {
+  have_node || return 0
+  setup_roles
+  attest sign --dir "$TEST_TMP/originator" --audience "$(cat "$TEST_TMP/peer/peer-identifier")" --domain shop.example.com --bytes 100 > "$TEST_TMP/envelope.json"
+  # a live process number on this host, but a boot a day earlier: the number was reused since.
+  printf '{"pid": %s, "host": "%s", "boot": %s, "token": "old-boot"}\n' "$$" "$(this_host)" "$(( $(date +%s) - 86400 ))" > "$TEST_TMP/peer/verify.lock"
+  assert_status 0 attest peer verify --dir "$TEST_TMP/peer" --host shop.example.com --bytes 100 --envelope "$TEST_TMP/envelope.json"
+  assert_no_file "$TEST_TMP/peer/verify.lock"
+}
+
+test_a_clock_step_of_ten_seconds_does_not_make_a_live_holder_dead() {
+  have_node || return 0
+  setup_roles
+  attest sign --dir "$TEST_TMP/originator" --audience "$(cat "$TEST_TMP/peer/peer-identifier")" --domain shop.example.com --bytes 100 > "$TEST_TMP/envelope.json"
+  # the live holder's record names a boot ten seconds away from the boot this machine computes.
+  computed_boot="$(node -e 'process.stdout.write(String(Math.round(Date.now() / 1000 - require("os").uptime())))')"
+  printf '{"pid": %s, "host": "%s", "boot": %s, "token": "stepped-clock"}\n' "$$" "$(this_host)" "$(( computed_boot + 10 ))" > "$TEST_TMP/peer/verify.lock"
+  export SIRVEN_ATTESTATION_TEST_LOCK_WAIT_MS=300
+  assert_status 3 attest peer verify --dir "$TEST_TMP/peer" --host shop.example.com --bytes 100 --envelope "$TEST_TMP/envelope.json"
+  assert_contains "$CAPTURED_STDOUT" '"reason": "lock_unavailable"'
+  assert_contains "$(cat "$TEST_TMP/peer/verify.lock")" stepped-clock
+}
+
+test_peer_verify_refuses_a_lock_held_on_another_host() {
+  have_node || return 0
+  setup_roles
+  attest sign --dir "$TEST_TMP/originator" --audience "$(cat "$TEST_TMP/peer/peer-identifier")" --domain shop.example.com --bytes 100 > "$TEST_TMP/envelope.json"
+  write_lock_record "$(gone_pid)" "elsewhere.invalid" other-host
+  export SIRVEN_ATTESTATION_TEST_LOCK_WAIT_MS=300
+  assert_status 3 attest peer verify --dir "$TEST_TMP/peer" --host shop.example.com --bytes 100 --envelope "$TEST_TMP/envelope.json"
+  assert_contains "$CAPTURED_STDOUT" '"reason": "lock_unavailable"'
+  assert_contains "$(cat "$TEST_TMP/peer/verify.lock")" other-host
+}
+
+test_a_write_failing_after_the_nonce_is_remembered_refuses_the_replay() {
+  have_node || return 0
+  setup_roles
+  attest sign --dir "$TEST_TMP/originator" --audience "$(cat "$TEST_TMP/peer/peer-identifier")" --domain shop.example.com --bytes 100 > "$TEST_TMP/envelope.json"
+  # the carried folder cannot be made, so the verify fails after it has written the nonce memory.
+  rm -rf "$TEST_TMP/peer/carried"
+  printf 'not a folder\n' > "$TEST_TMP/peer/carried"
+  assert_status 1 attest peer verify --dir "$TEST_TMP/peer" --host shop.example.com --bytes 100 --envelope "$TEST_TMP/envelope.json"
+  rm -f "$TEST_TMP/peer/carried"
+  assert_status 3 attest peer verify --dir "$TEST_TMP/peer" --host shop.example.com --bytes 100 --envelope "$TEST_TMP/envelope.json"
+  assert_contains "$CAPTURED_STDOUT" '"reason": "replayed"'
+}
+
+test_a_verify_that_cannot_take_the_lock_gives_up_after_ten_seconds_and_is_audited() {
+  have_node || return 0
+  setup_roles
+  attest sign --dir "$TEST_TMP/originator" --audience "$(cat "$TEST_TMP/peer/peer-identifier")" --domain shop.example.com --bytes 100 > "$TEST_TMP/envelope.json"
+  write_lock_record "$$" "$(this_host)" live-holder
+  start="$(date +%s)"
+  assert_status 3 attest peer verify --dir "$TEST_TMP/peer" --host shop.example.com --bytes 100 --envelope "$TEST_TMP/envelope.json"
+  elapsed=$(( $(date +%s) - start ))
+  [ "$elapsed" -ge 10 ] || fail "the verify gave up after ${elapsed} seconds, before the ten second wait"
+  assert_contains "$CAPTURED_STDOUT" '"reason": "lock_unavailable"'
+  assert_contains "$(cat "$TEST_TMP/peer/audit.jsonl")" '"outcome":"refused","reason":"lock_unavailable"'
+}
+
 test_peer_refuses_unsigned_wrong_domain_expired_and_tampered() {
   have_node || return 0
   setup_roles
