@@ -250,6 +250,7 @@ run stops before any change and says what to do.
 options:
   --dry-run                  print the plan and change nothing
   --yes, --defaults          ask nothing; use the defaults for anything not given
+                             on a real machine it is also your consent to apply the plan; without it you type yes
   --prefix PATH              fake the filesystem root: every path the plan touches goes under
                              PATH, and commands that need root are recorded, not run
   --level LEVEL              observer (default), builder, or operator. see levels/
@@ -276,9 +277,9 @@ examples:
   ./install.sh --dry-run --prefix /tmp/fake-root --level observer --path /srv/app --transport none
   $(layout_root_command revoke) --dry-run
 
-nothing is applied to a real machine in the alpha cut, except inside a linux container as root, and
-revoke --all, which only takes access away and also runs on a real linux machine as root. a real revoke asks
-you to type "revoke" first; --yes skips the question.
+a real linux machine is changed only when run as root; it prints the plan and asks you to type yes first, and
+--yes skips the question. macos is not applied yet.
+revoke --all on a real linux machine also asks you to type "revoke" first; --yes skips both questions.
 END
 }
 
@@ -518,6 +519,9 @@ finish() {
     fi
   fi
   apply_for_real || status=$?
+  if [ "$COMMAND" = revoke ] && [ "$status" -eq 3 ] && [ -n "$(plan_blockers)" ]; then
+    say "revoke is plan only for now. nothing was changed. to undo this install today, use ./uninstall.sh --dry-run to read the removal plan, then ./uninstall.sh to apply it." >&2
+  fi
   return "$status"
 }
 
@@ -535,8 +539,6 @@ main() {
   if [ "$DRY_RUN" != yes ]; then
     PLAN_PREFIX="$PREFIX"
     PLAN_OPERATING_SYSTEM="$OPERATING_SYSTEM"
-    # the kill switch only takes access away, so it runs on a real linux machine too, not only in a container
-    if [ "$COMMAND" = revoke ]; then PLAN_ALLOW_REAL_LINUX=yes; fi
     refusal="$(plan_real_apply_refusal)"
     [ -z "$refusal" ] || DIE_STATUS=3 die "not applied: $refusal"
   fi

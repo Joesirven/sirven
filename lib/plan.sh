@@ -49,8 +49,6 @@ PLAN_OPERATING_SYSTEM="${PLAN_OPERATING_SYSTEM:-linux}"
 PLAN_RECORD_FILE="${PLAN_RECORD_FILE:-}"
 PLAN_STEP_HOOK="${PLAN_STEP_HOOK:-}"
 PLAN_RECHECK="${PLAN_RECHECK:-no}"
-# the kill switch only removes access, so it may run on a real linux machine, not only in a container (set by install.sh)
-PLAN_ALLOW_REAL_LINUX="${PLAN_ALLOW_REAL_LINUX:-no}"
 
 plan_reset() {
   PLAN_KIND=()
@@ -344,17 +342,15 @@ plan_summary() {
 }
 
 # why a real (no --prefix) apply is refused, or nothing when it is allowed.
-# the alpha cut only changes a real system inside a linux container, as root.
+# a real linux machine, container or not, is changed only by root. macos stays refused.
 plan_real_apply_refusal() {
   if [ -n "$PLAN_PREFIX" ]; then
     return 0
   fi
   if [ "$PLAN_OPERATING_SYSTEM" != linux ]; then
     printf 'applying to a real macos machine is not verified yet; use --dry-run, or --prefix for a fake root'
-  elif ! in_container && [ "$PLAN_ALLOW_REAL_LINUX" != yes ]; then
-    printf 'the alpha cut only applies to a real system inside a throwaway container; use --dry-run, or --prefix for a fake root'
   elif [ "$(id -u)" != 0 ]; then
-    printf 'applying needs root; run it with sudo inside the container'
+    printf 'applying needs root; run it with sudo'
   fi
 }
 
@@ -415,6 +411,31 @@ _plan_recheck() {
   if _plan_check_passes "${PLAN_CHECK[index]}"; then PLAN_STATUS[index]="done"; else PLAN_STATUS[index]="todo"; fi
 }
 
+# plan_confirm_real_apply: the first change to a real machine is never silent. a real machine is
+# one with no --prefix that is not a container, on any operating system. --yes (ASSUME_YES, or
+# SIRVEN_YES) is the owner's explicit consent; otherwise the plan just printed must be answered
+# with the word yes on a terminal. with no terminal and no --yes, nothing is applied (returns 3).
+# a container is a throwaway machine, so it is not asked. plan_apply calls this after the checks
+# that cannot be fixed by typing yes, so nobody confirms a plan that is then refused.
+plan_confirm_real_apply() {
+  local terminal answer=""
+  [ -z "$PLAN_PREFIX" ] || return 0
+  [ "${ASSUME_YES:-no}" != yes ] || return 0
+  case "$(lowercase "${SIRVEN_YES:-}")" in 1 | yes | true) return 0 ;; esac
+  ! in_container || return 0
+  terminal="$(_setup_terminal)"
+  if [ -z "$terminal" ]; then
+    printf '\nnot applied: this is a real machine and there is no terminal to confirm the plan on; read the plan above, then run again with --yes\n' >&2
+    return 3
+  fi
+  printf '\nthis changes the real machine %s. type yes to apply the plan above: ' "$(hostname 2>/dev/null || echo this)" >&2
+  if [ "$terminal" = tty ]; then read -r answer < /dev/tty || true; else read -r answer || true; fi
+  if [ "$(lowercase "$answer")" != yes ]; then
+    printf '\nnot applied: the plan was not confirmed; nothing was changed\n' >&2
+    return 3
+  fi
+}
+
 # apply the evaluated plan. refuses up front, before any change, if any step cannot run.
 plan_apply() {
   local refusal blockers index=0 kind applied=0 skipped=0
@@ -429,6 +450,7 @@ plan_apply() {
     printf 'run with --dry-run to read the full plan, or leave out the flags that add plan-only steps.\n' >&2
     return 3
   fi
+  plan_confirm_real_apply || return 3
   printf '\napplying\n'
   while [ "$index" -lt "$PLAN_COUNT" ]; do
     kind="${PLAN_KIND[index]}"
