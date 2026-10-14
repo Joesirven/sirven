@@ -75,6 +75,48 @@ real issuer, a real user device, a real reviewed registry, the real carrier, and
 requester, with the bytes compared end to end. The suite also covers a refused site, a missing
 bearer token, and a wrong path.
 
+## The peer verify lock, and clearing a stuck verify lock
+
+Every peer verify takes one lock in the peer folder, `verify.lock`, before it reads or writes the
+nonce memory and the ledger. The lock is what stops one envelope from being accepted twice when
+two requests arrive at once. The lock file records its owner: the process number of the verify
+that holds it, the host name, the time the boot began, and a random token.
+
+A lock is cleared automatically in four cases:
+
+- Its owner process is gone on this host.
+- Its owner recorded a boot more than ten minutes away from this machine's boot. The process
+  number has been reused since, so the owner cannot still be running.
+- It has no readable owner record and is more than 10 seconds old. Its creator died between
+  creating the file and writing the record.
+- Its owner is on another host, or was recorded under a host name this machine no longer has,
+  and the file is more than 24 hours old.
+
+A verify that cannot take the lock waits 10 seconds, then refuses the request. The refusal reason
+is `lock_unavailable`. Its detail names the lock file and the owner it records, for example
+`the lock at .../peer/verify.lock is held by process 41917 on host "name"`. The refusal is written
+to `audit.jsonl` in the peer folder. Nothing is ever accepted without the lock.
+
+Clear a lock by hand only when no verify on this node is running and the lock is still there.
+Check first:
+
+1. **A reused process number.** Run `ps -p <pid>` with the process number from the refusal. If no
+   process exists, or the process is a different program (not `node` running the attestation
+   command line), the owner is gone. Delete `verify.lock`. This is the usual case after a reboot.
+2. **A changed host name.** The owner's host name is not this machine's current name. Confirm no
+   verify is running on this node, then delete `verify.lock`. The lock is also cleared on its own
+   after 24 hours.
+3. **Another machine.** The peer folder belongs to one node. A lock naming another machine means
+   two machines share the folder, which is a setup error. Stop the other machine's verify and
+   confirm it is idle before you delete the lock, and fix the shared folder.
+
+To clear it, delete the lock file and any `verify.lock.break.*` file beside it:
+
+    rm "<peer folder>/verify.lock" "<peer folder>"/verify.lock.break.* 2>/dev/null
+
+Deleting a lock whose owner is still running lets two verifies of one envelope run at once. Do
+not delete a live owner's lock to clear a refusal.
+
 ## What still stands between this and shipping peer routing
 
 - **The runtime's user-side peer egress.** `lib/sirven_runtime/seam.py` refuses `peer` with
