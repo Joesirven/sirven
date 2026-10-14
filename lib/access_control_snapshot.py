@@ -107,8 +107,9 @@ def open_folder(path):
 
 
 def walk(folder_fd, path, visit, errors):
-    """call visit(fd, info, path, is_folder) for the folder and everything below it. links, pipes,
-    devices and sockets are skipped; a path that cannot be opened is reported, not fatal."""
+    """call visit(handle, info, path, is_folder) for the folder and everything below it. the handle is an
+    open descriptor, or for a pipe, device, or socket a /proc/self/fd path naming one. symbolic links are
+    skipped; a path that cannot be opened is reported, not fatal."""
     info = os.fstat(folder_fd)
     visit(folder_fd, info, path, True)
     try:
@@ -124,6 +125,11 @@ def walk(folder_fd, path, visit, errors):
                 descriptor = os.open(name, FOLDER_FLAGS, dir_fd=folder_fd)
             elif stat.S_ISREG(before.st_mode):
                 descriptor = os.open(name, FILE_FLAGS, dir_fd=folder_fd)
+            elif stat.S_ISFIFO(before.st_mode) or stat.S_ISSOCK(before.st_mode) or stat.S_ISCHR(before.st_mode) \
+                    or stat.S_ISBLK(before.st_mode):
+                # the grant gave these entries too, but opening a pipe or a device could block or act. an
+                # O_PATH descriptor only names the object, and /proc/self/fd/N reaches its attributes.
+                descriptor = os.open(name, os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=folder_fd)
             else:
                 continue
         except FileNotFoundError:
@@ -139,8 +145,10 @@ def walk(folder_fd, path, visit, errors):
                 errors.append((child, "changed while it was being read"))
             elif stat.S_ISDIR(opened.st_mode):
                 walk(descriptor, child, visit, errors)
-            else:
+            elif stat.S_ISREG(opened.st_mode):
                 visit(descriptor, opened, child, False)
+            else:
+                visit("/proc/self/fd/%d" % descriptor, opened, child, False)
         except OSError as error:
             errors.append((child, error.strerror))
         finally:
@@ -373,7 +381,7 @@ def undo_default(fd, agent, recorded, changes):
     changes.append(1)
 
 
-def command_restore(arguments):
+def restore_folder(arguments):
     recursive = arguments.recursive == "yes"
     warnings = Warnings(arguments.audit, arguments.user)
     snapshot = None
@@ -441,16 +449,20 @@ def command_restore(arguments):
             warned.append(path)
     for path, reason in errors[:LISTED]:
         say("error: %s: %s" % (printable(path), reason))
-    if errors:
-        return EXIT_FAILED
-    if arguments.snapshot:
-        # a snapshot that was used is spent; one that could not be used was already warned about.
+    return EXIT_FAILED if errors else 0
+
+
+def command_restore(arguments):
+    status = restore_folder(arguments)
+    if status == 0 and arguments.snapshot:
+        # a snapshot that was used is spent, and one that could not be used or applied was already warned
+        # about, so none is kept: a rerun would only warn again.
         try:
             os.unlink(arguments.snapshot)
             os.rmdir(os.path.dirname(arguments.snapshot))
         except OSError:
             pass
-    return 0
+    return status
 
 
 def command_status(arguments):

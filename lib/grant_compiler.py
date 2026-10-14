@@ -299,20 +299,20 @@ def linux_stop_agent_removal(user):
 def macos_traverse_removal(rights, user, target, parent):
     return ("stop %s passing through %s" % (user, parent),
             "! /bin/ls -lde %s 2>/dev/null | grep -q 'user:%s allow search'" % (target, user),
-            "/bin/chmod -a %s %s" % (shlex.quote("%s allow %s" % (user, rights["traverse"])), target))
+            "/bin/chmod -h -a %s %s" % (shlex.quote("%s allow %s" % (user, rights["traverse"])), target))
 
 
 def macos_files_removal(rights, user, target, path):
     return ("remove %s file rights in %s" % (user, path),
             "! /bin/ls -lde %s 2>/dev/null | grep -q 'user:%s allow'" % (target, user),
-            "/usr/bin/find %s -type f -exec /bin/chmod -a %s {} +"
+            "/usr/bin/find -P %s -type f -exec /bin/chmod -h -a %s {} +"
             % (target, shlex.quote("%s allow %s" % (user, rights["files"]))))
 
 
 def macos_folders_removal(rights, user, target, path):
     return ("remove %s folder rights on %s" % (user, path),
             "! /bin/ls -lde %s 2>/dev/null | grep -q 'user:%s allow'" % (target, user),
-            "/usr/bin/find %s -type d -exec /bin/chmod -a %s {} +"
+            "/usr/bin/find -P %s -type d -exec /bin/chmod -h -a %s {} +"
             % (target, shlex.quote("%s allow %s" % (user, rights["directories"]))))
 
 
@@ -394,7 +394,7 @@ def compile_macos(level, user, prefix, paths, with_undo=False, package=None):
         lines.append(fragment_line(
             "let %s pass through %s" % (user, parent),
             "/bin/ls -lde %s 2>/dev/null | grep -q 'user:%s allow search'" % (target, user),
-            "/bin/chmod +a %s %s" % (shlex.quote("%s allow %s" % (user, rights["traverse"])), target),
+            "/bin/chmod -h +a %s %s" % (shlex.quote("%s allow %s" % (user, rights["traverse"])), target),
             with_undo and macos_traverse_removal(rights, user, target, parent)))
     for path in paths:
         target = shlex.quote(prefix + path)
@@ -402,13 +402,13 @@ def compile_macos(level, user, prefix, paths, with_undo=False, package=None):
         lines.append(fragment_line(
             "grant %s file rights on files in %s" % (user, path),
             marker,
-            "/usr/bin/find %s -type f -exec /bin/chmod +a %s {} +"
+            "/usr/bin/find -P %s -type f -exec /bin/chmod -h +a %s {} +"
             % (target, shlex.quote("%s allow %s" % (user, rights["files"]))),
             with_undo and macos_files_removal(rights, user, target, path)))
         lines.append(fragment_line(
             "grant %s folder rights on %s and folders inside, inherited by new files" % (user, path),
             marker,
-            "/usr/bin/find %s -type d -exec /bin/chmod +a %s {} +"
+            "/usr/bin/find -P %s -type d -exec /bin/chmod -h +a %s {} +"
             % (target, shlex.quote("%s allow %s" % (user, rights["directories"]))),
             with_undo and macos_folders_removal(rights, user, target, path)))
     return lines
