@@ -19,6 +19,10 @@ check "agent can read the granted folder" runuser -u agent -- cat /srv/app/file.
 check "agent cannot write the granted folder (observer)" bash -c '! runuser -u agent -- touch /srv/app/nope 2>/dev/null'
 check "agent cannot read root's home" bash -c '! runuser -u agent -- ls /root 2>/dev/null'
 check "default permission list makes new files readable by agent" bash -c 'touch /srv/app/later && runuser -u agent -- cat /srv/app/later'
+# finding of 2026-10-13: the default list copies the folder's own group and other entries, so while
+# the grant is in force a file made under umask 077 in a 755 folder is readable by everyone.
+known_defect "a new file made under umask 077 in the granted 755 folder stays private (mode 600)" SIR-70 \
+  bash -c 'umask 077; touch /srv/app/private; [ "$(stat -c %a /srv/app/private)" = 600 ]'
 check "grant record exists" test -s /etc/sirven/grants/agent.json
 check "install record exists, root only" bash -c '[ "$(stat -c "%a %U" /var/lib/sirven/install-record.tsv)" = "600 root" ]'
 check "pinned copy exists" test -f /var/lib/sirven/package/PINNED-COPY

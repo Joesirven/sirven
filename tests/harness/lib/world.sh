@@ -65,7 +65,7 @@ world_files() {
     | sort
 }
 world_accounts() {
-  { cut -d: -f1,3,4,6,7 /etc/passwd; cut -d: -f1,3 /etc/group; cut -d: -f1,2 /etc/shadow | sed 's/:[^*!].*$/:HASH/'; } | sort
+  { cut -d: -f1,3,4,6,7 /etc/passwd; cut -d: -f1,3 /etc/group; cut -d: -f1,2 /etc/shadow | sed 's/:[^*!].*$/:HASH/'; sed 's/^/subuid /' /etc/subuid; sed 's/^/subgid /' /etc/subgid; } | sort
 }
 # permission lists (base entries included, so a leftover mask or default entry shows) for the folders given.
 world_acls() {

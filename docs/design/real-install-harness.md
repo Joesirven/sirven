@@ -4,8 +4,8 @@ Date: 2026-10-13. Author: architect thread thr_tzdqw4nudv on the MacBook Pro Oma
 
 ## Summary
 
-- A real Linux install is provable today, on Omashu, with no sudo and no new tool. Docker Desktop is already installed and running. The prototype ran the first real install ever: `install.sh` exited 0, created the service user, the permission lists, the install record and the audit log, and `uninstall.sh` removed them. Three scenarios, 29 checks, 4.3 seconds for the whole run.
-- The first real run found a defect the fake-root tests cannot see: after `uninstall.sh`, the granted folder keeps a default access control list, so new files there ignore the owner's umask (section 3).
+- A real Linux install is provable today, on Omashu, with no sudo and no new tool. Docker Desktop is already installed and running. The prototype ran the first real install ever: `install.sh` exited 0, created the service user, the permission lists, the install record and the audit log, and `uninstall.sh` removed them. Three scenarios: 29 checks pass and 7 more assertions are held as known defects (36 in all), in 3.5 seconds for the whole run (exit 0).
+- The first real run found two defects the fake-root tests cannot see, both about the default access control list the grant puts on the folder: it makes new files ignore the owner's umask while the grant is in force (a world-readable file in a 755 folder), and uninstall leaves it behind (section 3). Task SIR-70 holds the second; the first needs adding to it.
 - A local macOS virtual machine is not realistic on Omashu: 23 GiB of free disk and a Mac already swapping. The cheapest real macOS apply is a GitHub-hosted macOS runner. The repository is public, so runner minutes are free, and each runner is a fresh machine with passwordless sudo. This is unmeasured and is the first thing to try (section 5).
 - Things only a real Mac can prove (lid-closed power setting, helper approval, privacy prompts, Tailscale app) stay a documented manual script on Jose's Mac.
 
@@ -13,14 +13,14 @@ Date: 2026-10-13. Author: architect thread thr_tzdqw4nudv on the MacBook Pro Oma
 
 | Fact | Command | Result |
 |---|---|---|
-| Hardware | `sysctl hw.memsize; sysctl machdep.cpu.brand_string` | 17179869184 bytes (16 GiB), Apple M1 Pro, 8 cores |
+| Hardware | `sysctl hw.memsize; sysctl machdep.cpu.brand_string` | 17179869184 bytes (16 GiB), Apple M1 Pro, 8 cores (the engine virtual machine below also gets 8) |
 | macOS | `sw_vers` | 26.6.2 (build 25G83) |
 | Hypervisor allowed | `sysctl kern.hv_support` | 1 |
 | Disk | `df -h /System/Volumes/Data` | 460 GiB total, 23 GiB free, 95% used |
 | Memory now | `vm_stat` (16384-byte pages) | free 0.08 GiB, inactive 2.74, active 2.92, wired 3.88; "free percentage 38%" |
 | Swap | `sysctl vm.swapusage` | 3072 MB total, 2100 MB used |
 | Container engine | `docker version` | Docker Desktop 4.27.2, engine 25.0.3, linux/arm64, running (symlink `/usr/local/bin/docker`) |
-| Engine virtual machine | `docker info` | 8 CPUs, 7.66 GiB memory ceiling; its host process used 913 MB resident when measured |
+| Engine virtual machine | `docker info` | 8 processor cores, 7.66 GiB memory ceiling; its host process used 913 MB resident when measured |
 | Engine data | `du -sh ~/Library/Containers/com.docker.docker/Data` | 6.3 GB. Five images of Jose's (3.0 GB) and a stopped Postgres container were here before; the harness never touches them. |
 | Not installed | `which colima podman orbstack container tart lima limactl qemu-system-aarch64 multipass vagrant` | none found |
 | Not installed (apps) | `ls /Applications` | no UTM, Parallels, VMware, VirtualBuddy |
@@ -36,13 +36,22 @@ Measured cost of one container (warm engine, because Docker Desktop was already 
 | `docker build` of `tests/harness/Dockerfile.linux` (adds bash, python3, acl, passwd, procps, util-linux) | 6.5 s | image 145 MB |
 | `docker run --rm IMAGE true`, three runs | 1.29 s, 0.70 s, 0.32 s | none kept |
 | One scenario (install, checks, uninstall) | 1 to 2 s | none kept |
-| All three scenarios, `run-linux.sh` | 4.3 s wall | none kept |
-| Memory cap per container | 256 MB (never reached) | |
+| All three scenarios, `bash -c 'time bash tests/harness/run-linux.sh; echo exit=$?'` on the committed, digest-pinned image | 3.46 s wall, `exit=0` (an earlier unpinned run took 4.3 s) | none kept |
+| Memory cap per container | 256 MB (never reached; peak not measured) | |
 | Cold start of Docker Desktop itself | not measured (already running) | the engine virtual machine holds about 0.9 GB while up |
 
 Not measured, and why: a macOS virtual machine. No tool is installed; a guest image is about 20 GB or more (a published figure I could not confirm, see Sources), which does not fit in 23 GiB of free disk, and a guest wants 4 GB of memory or more on a Mac that is already in swap. Recorded as not feasible here rather than estimated.
 
 Nothing was installed with sudo. Installed or changed on this Mac: the images `debian:12-slim` and `sirven-harness-linux` (about 240 MB together). Remove them with `docker rmi sirven-harness-linux:<tag> debian:12-slim`.
+
+Exit statuses of the harness itself (observed, run with bash; this shell is zsh, which has no `PIPESTATUS`, so earlier readings were taken again):
+
+| Situation | Command | Observed exit |
+|---|---|---|
+| All scenarios pass (known defects included) | `bash tests/harness/run-linux.sh` | 0 |
+| No container engine running or found | `SIRVEN_HARNESS_ENGINE=nonexistent bash tests/harness/run-linux.sh` | 77, with a skip message |
+| Filter matches no scenario | `bash tests/harness/run-linux.sh zzz` | 2 |
+| A known defect starts passing | first run of scenario 03 before the precondition was added: "now passes, so remove the marker" | 1 (seen once, then fixed on purpose) |
 
 ## 2. What the first real run showed
 
@@ -56,8 +65,8 @@ docker run --rm --network none -v "$PWD":/src:ro sirven-harness-linux bash -c \
 | Check | Result |
 |---|---|
 | `install.sh` real apply | exit 0; 19 steps applied; step 15 (paste the agent's public key) is the owner's, as designed |
-| Service user | uid 1000 `agent`, password field `*`, not in sudo, wheel or admin, `.ssh` mode 0700, empty `authorized_keys` mode 0600 |
-| Permission lists | `agent` can read `/srv/app`, cannot write it, cannot read `/root`; new files inherit read access through a default list |
+| Service user | user number 1000, `agent`, password field `*`, not in sudo, wheel or admin, `.ssh` mode 0700, empty `authorized_keys` mode 0600 |
+| Permission lists | `agent` can read `/srv/app`, cannot write it, cannot read `/root`; new files inherit read access through a default list (which has a side effect, section 3) |
 | Records | `/var/lib/sirven/install-record.tsv` (0600 root), pinned copy in `/var/lib/sirven/package`, audit log with a `finished` entry |
 | Re-run | exit 0; "applied 1 steps, skipped 18" (the one step tagged `always`) |
 | `install.sh revoke --all` | exit 3, "not yet", nothing changed (known: SIR-32) |
@@ -65,9 +74,15 @@ docker run --rm --network none -v "$PWD":/src:ro sirven-harness-linux bash -c \
 | Real apply as an ordinary user | exit 3, "applying needs root"; nothing changed |
 | `--transport tailscale` real apply | exit 3, refused because step 24 (`tailscale up`) is plan only |
 
-## 3. Defect found by the harness (not previously known)
+## 3. Defects found by the harness (not previously known)
 
-After a full uninstall, the granted folder is not back to how it was. The named entry for `agent` is removed, but the base entries of the default list stay on `/srv/app`, and every file and folder in the tree keeps a mask entry (`ls -l` shows a `+`). Effect, measured: a new file created in `/srv/app` by an owner with umask 077 gets mode 0644 instead of 0600, because a default list overrides the umask. Cause: the undo uses `setfacl -x u:agent`, which removes one entry, not the list. Fix direction (product task, not done here): the undo runs `setfacl -R -k` (remove default list) and, for files that had no list before, `setfacl -R -b` on the granted tree, or the install records the earlier lists and restores them. The harness holds this as a `known_defect` marked SIR-29 (scenario 02); it will fail the run, on purpose, the moment the product passes, so the marker cannot be forgotten.
+Both come from one cause: the grant sets a default access control list on the granted folder (`setfacl -d -m u:agent:rX`), and a default list overrides the umask of everyone who creates a file there. When it is created, its base entries (`group::`, `other::`) are copied from the folder's own mode, not from the umask.
+
+**A. While the grant is in force (measured).** Folder `/srv/app` mode 755, grant in force, an owner with umask 077 runs `touch /srv/app/x`: the file is mode 0644, readable by every account on the machine. The same `touch` in a plain 755 folder gives 0600. So the grant itself widens access beyond the agent, for any file anyone creates there. A 700 folder is safe: its default base entries are all `---` (the `640` that `stat` shows there is the mask, not a real group grant; `getfacl` shows `group::---` and `other::---`). Scenario 01 holds this as a known defect. This is not in SIR-70 yet and is the larger of the two. Fix options for the product owner: write explicit `default:group::` and `default:other::` entries that match the umask intent, drop the default list and refresh the grant on a schedule, or document it and refuse 755 folders without confirmation.
+
+**B. After uninstall (measured).** `uninstall.sh` exits 0 and removes the user, the group and the files, but the granted folder keeps the default list (base entries), and every file inside and the parent folder `/srv` keep a mask entry (`ls -l` shows a `+`). The new-file effect of A therefore outlasts the uninstall. Cause: the undo uses `setfacl -x u:agent`, which removes one entry, not the list. Fix direction: the undo runs `setfacl -R -k` (remove the default list) and `-b` on files that had no list before, or the install records the earlier lists and restores them. Task: **SIR-70** (found with this harness, created by the orchestrator). Scenario 02 holds two known-defect lines for it.
+
+Both are product changes and are not made here. Each known-defect line fails the run, on purpose, the moment the product passes it, so the marker cannot be forgotten.
 
 ## 4. Design
 
@@ -103,7 +118,7 @@ Four kinds, all in `tests/harness/lib/world.sh`:
 1. Exit statuses: `check_exit NAME WANTED COMMAND` (0 applied, 3 refused, 2 stopped by a rule, 4 a step failed).
 2. Effects: ownership, modes, group membership, a login attempt as the agent (`runuser -u agent -- cat ...`), a running process owned by the agent.
 3. Whole-machine diff for "revoke leaves nothing behind": snapshots of files (path, type, owner, mode), accounts (passwd, group, shadow without hashes) and permission lists before and after; the diff must be empty except named, allowed leftovers (the agent's home folder and the audit log, kept by design; the system's own backup copies of account files).
-4. Known defects: `known_defect NAME TASK COMMAND`. Reports `known` while the product fails the assertion; fails the run when it passes. This turns each open task into an acceptance test that is written before the fix. Scenario 03 already holds four lines for SIR-32 and scenario 02 two for SIR-29. A known defect line must have a matching positive precondition (scenario 03 starts a process as the agent first), or it can "fail" for the wrong reason.
+4. Known defects: `known_defect NAME TASK COMMAND`. Reports `known` while the product fails the assertion; fails the run when it passes. This turns each open task into an acceptance test that is written before the fix. Scenario 03 holds four lines for SIR-32, scenario 02 two for SIR-70, and scenario 01 one for SIR-70. A known defect line must have a matching positive precondition (scenario 03 starts a process as the agent first), or it can "fail" for the wrong reason.
 
 Output uses the same `ok` / `not ok` lines as `tests/run.sh`, plus `known`.
 
@@ -139,19 +154,19 @@ Sizes: small is a day or less, medium a few days, large a week or more.
 |---|---|---|---|---|
 | 1 | Land the Linux container harness: move the prototype into the branch to merge, make it pass `tests/unit/test_language.sh`, add the three make targets, document in the README | small | none | merge approval |
 | 2 | Pin the image base by digest and add an sshd layer plus a scenario: the agent logs in with a generated key and cannot leave its grant (the heart of SIR-9) | small | 1 | none |
-| 3 | Fix the access control list residue (SIR-29) and apply the kill switch (SIR-32), each driven by the existing `known_defect` lines, which become plain assertions | medium | 1 | none |
+| 3 | Fix the default access control list defects (SIR-70, both A and B) and apply the kill switch (SIR-32), each driven by the existing `known_defect` lines, which become plain assertions | medium | 1 | none |
 | 4 | GitHub workflow: ubuntu job running item 1, plus a macOS **discovery** job that only prints what the runner allows (`dscl` create, `chmod +a`, Remote Login, the python3 placeholder) before any scenario is written | small | 1 | approval to add a workflow file; no secret |
 | 5 | macOS scenarios (`run-macos.sh`): service user by `dscl`, lists by `chmod +a`, revoke, uninstall, the one-line bootstrap (after SIR-49 pins it) | medium | 4 shows it is allowed; SIR-49 for the bootstrap | none |
 | 6 | Fault-injection scenarios: make one command fail partway (a shim for `useradd` or `setfacl` earlier on the path), then check the documented re-run recovery; plus an upgrade scenario from an older pinned copy | medium | 1 | none |
 | 7 | Tailscale scenario (SIR-33): second image layer with Tailscale (1.104.1 installed and ran in userspace mode with no tunnel device in the probe), `tailscale up` with an ephemeral tagged key supplied by `bb secret`, assert the device appears with `tag:agent`, revoke removes it. Needs one scenario run with network allowed | medium | 1, and the product `tailscale up` step (replace plan-only) | a **test tailnet** (a separate free one, not the real one) with a policy that has `tagOwners` for `tag:agent`, and either an OAuth client limited to the auth keys scope (preferred, it can mint a one-use key per run) or an ephemeral, tagged, pre-approved key; stored with `bb secret`. Keys expire in 90 days or less. |
 | 8 | Real Mac manual script and checklist (lid, helper approval, privacy prompts, Tailscale app) | medium | 3, 5 | Jose present for each run; which Mac (his own, or a spare account) |
-| 9 | Cloudflare scenario (SIR-2, SIR-34): `cloudflared` layer, create and delete a tunnel and a service token | large | product code for it; 1 | a Cloudflare account, a test zone, a token scoped to tunnel and DNS edit on that zone only |
+| 9 | Cloudflare scenario (SIR-2, SIR-34): `cloudflared` layer, create and delete a tunnel and a service token | large | product code for it; 1 | a Cloudflare account, a test zone, a token scoped to tunnel and name-record edit on that zone only |
 | 10 | Local macOS virtual machine (Tart) | large | only if 4 and 5 prove inadequate | at least 80 GB free disk, 8 GB free memory, tapping `cirruslabs/cli`; probably an external drive |
 
 ## 6. Recommended first three work items
 
-1. **Land the Linux container harness** (item 1, then the sshd scenario of item 2). It is built, it ran, and it already holds acceptance tests for SIR-29 and SIR-32.
-2. **Fix the access control list residue and apply the kill switch** (item 3), starting from the failing `known_defect` lines. Both are product changes, and each now has a pass or fail test before the first line of code.
+1. **Land the Linux container harness** (item 1, then the sshd scenario of item 2). It is built, it ran, and it already holds acceptance tests for SIR-70 and SIR-32.
+2. **Fix the default access control list defects (SIR-70) and apply the kill switch (SIR-32)** (item 3), starting from the failing `known_defect` lines. Both are product changes, and each now has a pass or fail test before the first line of code.
 3. **Add the workflow with the macOS discovery job** (item 4). It answers, for free and without installing anything, whether level 2 is real, before anyone writes macOS scenarios or buys a disk.
 
 ## 7. What needs Jose
@@ -166,7 +181,7 @@ Sizes: small is a day or less, medium a few days, large a week or more.
 
 ## 8. Limits and challenges (the second look)
 
-- A container is not a server. No systemd, no sshd, no PAM unless added. Item 2 adds sshd; systemd-dependent steps (a Tailscale service, a firewall) are not proven by this level.
+- A container is not a server. No systemd, no sshd, no login-module stack unless added. Item 2 adds sshd; systemd-dependent steps (a Tailscale service, a firewall) are not proven by this level.
 - The container gate. The product's refusal allows a real apply when it sees a container as root. The harness satisfies that honestly. The refusal is a guard against accidents, not a security boundary: anyone can run it in a container that mounts their real folders. The harness mounts only the repository, read only.
 - Lists on shared folders. On Docker Desktop, folders shared from the Mac use a different file system that may not support lists. Scenarios use paths inside the container. Granting a Mac folder from a Linux container is untested and meaningless anyway.
 - Known-defect lines can pass or fail for the wrong reason. Mitigated by a positive precondition beside each; review each new marker for it.
@@ -176,9 +191,9 @@ Sizes: small is a day or less, medium a few days, large a week or more.
 - Omashu is under memory pressure (swap 2.1 of 3 GiB). One 256 MB container is fine; do not run macOS guests or several engines at once.
 - The GitHub macOS runner claim is unverified. It is known that runners are fresh machines with passwordless sudo; whether they allow creating accounts and changing Remote Login is exactly what item 4 checks.
 - Only the smallest level, `observer`, with `--transport none` was applied for real. `builder` and `operator` add write access; their scenarios are cheap to add after item 1, but were not run.
-- The one real run cannot show the cost of a real server's differences (for example a different `useradd` default group setup). The same scenarios are meant to run on a disposable cloud server at some point; that is not planned here.
+- The one real run cannot show the cost of a real server's differences (for example a different default group setup in `useradd`). The same scenarios are meant to run on a disposable cloud server at some point; that is not planned here.
 
 ## Sources
 
 - Tailscale auth keys and OAuth clients for automation: https://tailscale.com/kb/1085/auth-keys and https://tailscale.com/kb/1276/tailscale-github-action
-- Tart (virtual machines through Apple's Virtualization framework, images from an OCI registry): described in the Packer plugin documentation at https://developer.hashicorp.com/packer/integrations/cirruslabs/tart/latest/components/builder/tart ; the size of the vanilla macOS images was not confirmed from an official page.
+- Tart (virtual machines through Apple's Virtualization framework, images from a container registry): described in the Packer plugin documentation at https://developer.hashicorp.com/packer/integrations/cirruslabs/tart/latest/components/builder/tart ; the size of the vanilla macOS images was not confirmed from an official page.

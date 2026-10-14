@@ -41,7 +41,7 @@ for scenario in "$HARNESS_DIR"/scenarios/linux/*.sh; do
   printf '\n# %s\n' "$name"
   started=$SECONDS
   "$ENGINE" run --rm --label "sirven-harness=$RUN_ID" --network none \
-    --memory 256m --pids-limit 256 --cap-drop NET_RAW --security-opt no-new-privileges:false \
+    --memory 256m --pids-limit 256 --cap-drop NET_RAW \
     -v "$REPO_DIR":/src:ro \
     "$IMAGE:$recipe_sum" bash "/src/tests/harness/scenarios/linux/$name.sh" < /dev/null
   status=$?
