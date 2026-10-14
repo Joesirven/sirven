@@ -132,6 +132,19 @@ test_peer_verify_clears_a_lock_written_before_the_last_boot() {
   assert_no_file "$TEST_TMP/peer/verify.lock"
 }
 
+test_a_clock_step_of_ten_seconds_does_not_make_a_live_holder_dead() {
+  have_node || return 0
+  setup_roles
+  attest sign --dir "$TEST_TMP/originator" --audience "$(cat "$TEST_TMP/peer/peer-identifier")" --domain shop.example.com --bytes 100 > "$TEST_TMP/envelope.json"
+  # the live holder's record names a boot ten seconds away from the boot this machine computes.
+  computed_boot="$(node -e 'process.stdout.write(String(Math.round(Date.now() / 1000 - require("os").uptime())))')"
+  printf '{"pid": %s, "host": "%s", "boot": %s, "token": "stepped-clock"}\n' "$$" "$(this_host)" "$(( computed_boot + 10 ))" > "$TEST_TMP/peer/verify.lock"
+  export SIRVEN_ATTESTATION_TEST_LOCK_WAIT_MS=300
+  assert_status 3 attest peer verify --dir "$TEST_TMP/peer" --host shop.example.com --bytes 100 --envelope "$TEST_TMP/envelope.json"
+  assert_contains "$CAPTURED_STDOUT" '"reason": "lock_unavailable"'
+  assert_contains "$(cat "$TEST_TMP/peer/verify.lock")" stepped-clock
+}
+
 test_peer_verify_refuses_a_lock_held_on_another_host() {
   have_node || return 0
   setup_roles
