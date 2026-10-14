@@ -1,4 +1,5 @@
 import Foundation
+import MachO
 
 // names, identifiers, and the credit line, kept in one place so the menu bar app and the signed
 // app bundle can change them without hunting through the code.
@@ -47,7 +48,21 @@ public enum KeepAwakeHelperAccess {
     }
 
     /// the team identifier embedded in this executable at build time, or nil when none was built in.
+    /// it is read from the executable's own __TEXT,__info_plist section, not from Bundle.main: the helper
+    /// runs from Sirven.app/Contents/MacOS, where Bundle.main is the app, whose Info.plist has no such key.
     public static var embeddedTeamIdentifier: String? {
-        Bundle.main.object(forInfoDictionaryKey: "SirvenTeamIdentifier") as? String
+        var size: UInt = 0
+        guard let section = getsectiondata(executableHeader(), "__TEXT", "__info_plist", &size) else { return nil }
+        let data = Data(bytes: section, count: Int(size))
+        let info = (try? PropertyListSerialization.propertyList(from: data, format: nil)) as? [String: Any]
+        return info?["SirvenTeamIdentifier"] as? String
+    }
+
+    /// the Mach-O header of the running executable. dyld exports this accessor, which the MachO module does not declare.
+    @_silgen_name("_NSGetMachExecuteHeader")
+    private static func nsGetMachExecuteHeader() -> UnsafeMutableRawPointer
+
+    private static func executableHeader() -> UnsafePointer<mach_header_64> {
+        UnsafePointer(nsGetMachExecuteHeader().assumingMemoryBound(to: mach_header_64.self))
     }
 }

@@ -57,10 +57,11 @@ codesign --force --options runtime --identifier xyz.sirven.keep-awake-helper --s
 codesign --force --options runtime --sign "$IDENTITY" "$APP"
 codesign --verify --deep --strict "$APP"
 
-# the two checks that the helper will accept the app: the embedded value is there, and the
-# signature is by the same team. a mismatch means the helper would refuse the app, so stop here.
+# the two checks that the helper will accept the app: the helper, run from inside the finished bundle,
+# reports the team it embedded (--print-team exits before it touches anything), and the signature is by
+# the same team. a mismatch means the helper would refuse the app, so stop here.
 HELPER="$APP/Contents/MacOS/sirven-keep-awake-helper"
-grep -a -q "<string>$TEAM</string>" "$HELPER" || { echo "the helper does not carry team $TEAM; refusing to continue" >&2; exit 1; }
+[ "$("$HELPER" --print-team)" = "$TEAM" ] || { echo "the helper does not report team $TEAM from inside the app; refusing to continue" >&2; exit 1; }
 SIGNED_TEAM="$(codesign -dv --verbose=2 "$HELPER" 2>&1 | sed -n 's/^TeamIdentifier=//p' || true)"
 [ "$SIGNED_TEAM" = "$TEAM" ] || { echo "the helper is signed by team '${SIGNED_TEAM:-none}', not $TEAM; refusing to continue" >&2; exit 1; }
 echo "built $APP (team $TEAM, signed with: $IDENTITY)"

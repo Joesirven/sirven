@@ -5,6 +5,14 @@
 import Foundation
 import SirvenKeepAwake
 
+// `--print-team` answers from the executable's own embedded identifier and exits before anything else
+// runs: no marker is read, no setting is touched, no connection is taken. the build uses it to check
+// the identifier from inside the finished app bundle.
+if CommandLine.arguments.dropFirst() == ["--print-team"] {
+    print(KeepAwakeHelperAccess.embeddedTeamIdentifier ?? "none")
+    exit(0)
+}
+
 let core = KeepAwakeHelperCore(guardian: SleepDisableGuard(setting: PmsetSleepSetting()))
 
 // an earlier run that ended without reverting (a crash, a power loss) left the marker behind.
