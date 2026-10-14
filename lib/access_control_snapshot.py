@@ -26,7 +26,7 @@ standard library python, started by lib/access_control_snapshot.sh. linux only.
   quiesce USER MARKER / release USER MARKER
       end every process of USER and lock and expire its account, remembering what it was in MARKER;
       release puts the account back as MARKER says. install and rollback wrap a re-grant in these.
-      release refuses while the kill switch's own marker (agent-revoked.json, beside MARKER) is there.
+      release refuses while the kill switch's own marker (agent-revoked-USER.json, beside MARKER, named for the user) is there.
   revoke-lock USER SHELL
       the kill switch: in one change lock and expire the account and set its shell, then end every process of USER
       (by effective and real user) until none is left. remembers nothing: the account is not given back.
@@ -749,7 +749,7 @@ def end_processes(user):
 
 
 def command_release(arguments):
-    revoked = os.path.join(os.path.dirname(arguments.marker), "agent-revoked.json")
+    revoked = os.path.join(os.path.dirname(arguments.marker), "agent-revoked-%s.json" % arguments.user)
     if os.path.lexists(revoked):
         raise Failure("%s was cut off by the kill switch (%s is there), so it is not given back by a grant. "
                       "only install --reinstate turns it back on" % (arguments.user, revoked))

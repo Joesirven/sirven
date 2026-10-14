@@ -19,16 +19,160 @@ fi
 
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# ---- root gate: begin. the same text is at the top of install.sh, uninstall.sh and bin/sirven; tests/unit/test_gate.sh keeps it so.
+# when this runs as root, every line of code and every tool it uses must come from a place that only root (and the owner who
+# ran sudo) controls. nothing here asks the folder it is judging where the trusted copy is, or lets that folder judge itself:
+#   - the search path is reset and every tool the gate uses is named by its absolute path;
+#   - the kept copy is the fixed path below, never read from project.json or any other file of the folder under test;
+#   - the checker is the text of this block, not a file of the folder under test;
+#   - the folder is resolved to its physical path once, and every library is read through that path;
+#   - it runs for every command and every flag as root, --dry-run, --help and --prefix included: a dry run reads the same code.
+# what it does: a copy of this package other than the kept one is never run as root when the kept one exists (install is the
+# exception, to upgrade, and only from a folder that nobody but root and the owner can write). with no kept copy, the folder it
+# runs from must be one that nobody but root and the owner can write, the whole way down and up. the kept copy itself must be
+# that too. the safe way to run any root command is the launcher /usr/local/sbin/sirven, which runs the kept copy.
+if [ "$EUID" -eq 0 ]; then
+  PATH=/usr/sbin:/usr/bin:/sbin:/bin
+  export PATH
+  unset BASH_ENV ENV CDPATH LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT PYTHONPATH PYTHONHOME PYTHONSTARTUP
+fi
+SIRVEN_KEPT=/var/lib/sirven/package
 
-# before any other library: root runs the kept copy, or code only root and the owner can write (lib/trust.sh)
-# the gate itself comes from the root-owned kept copy when there is one, so editing lib/trust.sh in a folder the
-# agent can write gains nothing
-_sirven_trust="$ROOT_DIR/lib/trust.sh"
-[ ! -f /var/lib/sirven/package/lib/trust.sh ] || _sirven_trust=/var/lib/sirven/package/lib/trust.sh
-# shellcheck source=lib/trust.sh
-. "$_sirven_trust"
-if [ "${BASH_SOURCE[0]}" = "$0" ]; then trust_gate uninstall uninstall.sh "$@"; fi
+# sirven_vet FOLDER OWNER: exit 0 when nobody but root and OWNER can change anything in FOLDER or replace anything on the way to
+# it; otherwise exit 3 and print each place somebody else can write. read only. this text is the checker.
+sirven_vet() {
+  /usr/bin/python3 -I - "$1" "$2" <<'PY'
+import grp, os, pwd, stat, struct, sys
+folder, owner = sys.argv[1], sys.argv[2]
+ACCESS_LIST, USER, GROUP, MASK = "system.posix_acl_access", 0x02, 0x08, 0x10
+users = {0}
+try:
+    users.add(pwd.getpwnam(owner).pw_uid)
+except KeyError:
+    pass
+names = set()
+for number in users:
+    try:
+        names.add(pwd.getpwuid(number).pw_name)
+    except KeyError:
+        pass
+def uid_name(number):
+    try:
+        return pwd.getpwuid(number).pw_name
+    except KeyError:
+        return "user number %d" % number
+def gid_name(number):
+    try:
+        return grp.getgrgid(number).gr_name
+    except KeyError:
+        return "group number %d" % number
+def group_trusted(gid):
+    try:
+        members = set(grp.getgrgid(gid).gr_mem)
+    except KeyError:
+        return gid == 0
+    members.update(entry.pw_name for entry in pwd.getpwall() if entry.pw_gid == gid)
+    return members <= names
+def entries(path):
+    if not hasattr(os, "getxattr"):
+        return []
+    try:
+        blob = os.getxattr(path, ACCESS_LIST, follow_symlinks=False)
+    except OSError:
+        return []
+    return [struct.unpack_from("<HHI", blob, offset) for offset in range(4, len(blob) - 7, 8)]
+def writers(path, info, on_the_way):
+    if info.st_uid not in users:
+        return "owned by %s, who can change its mode" % uid_name(info.st_uid)
+    mode = stat.S_IMODE(info.st_mode)
+    if mode & 0o002 and not (on_the_way and mode & stat.S_ISVTX):
+        return "writable by everyone (mode %o)" % mode
+    if mode & 0o020 and not group_trusted(info.st_gid):
+        return "writable by the group %s (mode %o), which has other members" % (gid_name(info.st_gid), mode)
+    listed = entries(path)
+    mask = next((perm for tag, perm, _ in listed if tag == MASK), 7)
+    for tag, perm, number in listed:
+        if perm & mask & 0o2:
+            if tag == USER and number not in users:
+                return "an access list entry gives %s write" % uid_name(number)
+            if tag == GROUP and not group_trusted(number):
+                return "an access list entry gives the group %s write" % gid_name(number)
+    return None
+problems = []
+try:
+    real = os.path.realpath(folder)
+    parts = [part for part in real.split("/") if part]
+    path = "/"
+    for index in range(len(parts) + 1):
+        if index:
+            path = os.path.join(path, parts[index - 1])
+        info = os.lstat(path)
+        if stat.S_ISDIR(info.st_mode):
+            reason = writers(path, info, index < len(parts))
+            if reason:
+                problems.append((path, reason))
+    for current, folders, files in os.walk(real, followlinks=False):
+        for item in [current] + [os.path.join(current, entry) for entry in folders + files]:
+            info = os.lstat(item)
+            if stat.S_ISLNK(info.st_mode):
+                target = os.path.realpath(item)
+                if not (target + "/").startswith(real + "/"):
+                    problems.append((item, "a link to %s, outside the package" % target))
+                continue
+            reason = writers(item, info, False)
+            if reason:
+                problems.append((item, reason))
+except OSError as error:
+    problems.append((error.filename or folder, "cannot be examined (%s)" % error.strerror))
+seen, shown = set(), 0
+for path, reason in problems:
+    if path in seen:
+        continue
+    seen.add(path)
+    if shown < 12:
+        print("  %s: %s" % (path, reason))
+    shown += 1
+if shown > 12:
+    print("  and %d more" % (shown - 12))
+sys.exit(3 if problems else 0)
+PY
+}
+
+# sirven_gate ENTRY KIND ARGUMENT...: ENTRY is this script's path below the package folder (install.sh, uninstall.sh, bin/sirven);
+# KIND is install for an install, anything else for the rest. ROOT_DIR is this script's physical folder. as root on linux it
+# either returns, having vetted the folder it will read its libraries from, or runs the kept copy instead, or refuses.
+sirven_gate() {
+  local entry="$1" kind="$2" owner="${SUDO_USER:-root}" kept="" output who
+  shift 2
+  [ "$EUID" -eq 0 ] || return 0
+  [ "$(/usr/bin/uname -s)" = Linux ] || return 0
+  if [ ! -x /usr/bin/python3 ]; then
+    printf 'error: refusing to run as root: there is no /usr/bin/python3 to check the code with, and the check does not use any other. nothing was changed.\n' >&2
+    exit 2
+  fi
+  who="any account other than root"
+  [ "$owner" = root ] || who="any account other than root and $owner"
+  if [ -f "$SIRVEN_KEPT/$entry" ]; then kept="$(cd -P "$SIRVEN_KEPT" && pwd -P)"; fi
+  if [ -n "$kept" ] && [ "$ROOT_DIR" != "$kept" ]; then
+    if [ "$kind" = install ] && sirven_vet "$ROOT_DIR" "$owner" >/dev/null 2>&1; then return 0; fi
+    if ! output="$(sirven_vet "$kept" "$owner" 2>&1)"; then
+      printf 'error: refusing to run as root: the kept copy %s can be changed by %s, so it is not trusted either:\n%s\nnothing was changed.\n' "$kept" "$who" "$output" >&2
+      exit 2
+    fi
+    printf 'running the kept copy %s instead of %s: root runs the root-owned copy, not a folder an agent may have changed.\n' "$kept" "$ROOT_DIR" >&2
+    exec "$BASH" "$kept/$entry" "$@"
+  fi
+  if ! output="$(sirven_vet "$ROOT_DIR" "$owner" 2>&1)"; then
+    printf 'error: refusing to run as root from %s: %s can change the code there, and it would run as root:\n%s\n' "$ROOT_DIR" "$who" "$output" >&2
+    printf 'there is no kept copy to run instead. run it from a folder only %s can write, or, once installed, with the launcher: sudo /usr/local/sbin/sirven ...\nnothing was changed.\n' "${owner}" >&2
+    exit 2
+  fi
+}
+# ---- root gate: end
+
+# the physical folder of this script, resolved once; every library is read through it (a link swapped in later changes nothing)
+ROOT_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then sirven_gate uninstall.sh uninstall "$@"; fi
 
 # shellcheck source=lib/common.sh
 . "$ROOT_DIR/lib/common.sh"
@@ -56,7 +200,7 @@ options:
 
 only steps recorded in the install record are reversed. the service user's home folder is
 kept, with whatever the agent left in it. to cut access now without removing anything, use
-the kill switch: sudo bash /var/lib/sirven/package/install.sh revoke --all (--dry-run reads the plan first)
+the kill switch: sudo /usr/local/sbin/sirven revoke --all (--dry-run reads the plan first)
 
 examples:
   ./uninstall.sh --dry-run
@@ -97,7 +241,7 @@ parse_arguments() {
       /*) ;;
       *) usage_error "--prefix must be an absolute path" ;;
     esac
-    PREFIX="${PREFIX%/}"
+    PREFIX="$(prefix_normalize "$PREFIX")" || usage_error "--prefix names a fake root; / is the real machine. leave --prefix out to work on it"
   fi
   if [ -n "${SIRVEN_OS_OVERRIDE:-}" ] && [ "$DRY_RUN" != yes ] && [ -z "$PREFIX" ]; then
     usage_error "SIRVEN_OS_OVERRIDE only works with --dry-run or --prefix"

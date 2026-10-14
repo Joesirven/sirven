@@ -119,7 +119,7 @@ test_install_after_uninstall_records_again() {
   assert_status 0 uninstall_sh --prefix "$ROOT"
   install_on_fake_root
   # the kept audit log was already there, so this install did not create it and does not record it
-  assert_contains "$CAPTURED_STDOUT" "applied 23 steps, skipped 2 already done."
+  assert_contains "$CAPTURED_STDOUT" "applied 25 steps, skipped 2 already done."
   assert_contains "$(cat "$ROOT/var/lib/sirven/install-record.tsv")" "remove /etc/sirven if"
   assert_not_contains "$(cat "$ROOT/var/lib/sirven/install-record.tsv")" "remove the audit log"
 }

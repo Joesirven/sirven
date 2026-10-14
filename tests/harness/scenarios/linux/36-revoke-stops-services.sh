@@ -54,7 +54,7 @@ check "the account is locked and expired by then" bash -c 'passwd --status agent
 check_exit "a plain install after the stopped revoke is refused (exit 2)" 2 bash install.sh --yes --level observer --transport none --path /srv/app
 check "it says the kill switch cut the account off" grep -q 'was cut off by the kill switch' <<< "$LAST_OUTPUT"
 check "the account is still locked and expired after the refused install" bash -c 'passwd --status agent | grep -q "^agent L" && [ "$(getent shadow agent | cut -d: -f8)" = 1 ]'
-check "the revoke marker is there" test -s /var/lib/sirven/agent-revoked.json
+check "the revoke marker is there" test -s /var/lib/sirven/agent-revoked-agent.json
 printf '{"locked": false, "expire": ""}' > /var/lib/sirven/agent-quiesce.json
 check_exit "the step that gives an account back refuses while the revoke marker is there" 1 bash lib/access_control_snapshot.sh release agent /var/lib/sirven/agent-quiesce.json
 check "it says only --reinstate turns the account on" grep -q 'only install --reinstate turns it back on' <<< "$LAST_OUTPUT"

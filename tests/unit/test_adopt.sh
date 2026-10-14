@@ -145,7 +145,7 @@ test_granting_no_path_over_a_grant_in_force_is_refused() {
   seed
   SIRVEN_PATH=none assert_status 2 install_sh --dry-run --prefix "$ROOT" --level builder --transport tailscale
   assert_contains "$CAPTURED_STDERR" "a grant is in force for agent: level builder on /srv/app. this request grants no path"
-  assert_contains "$CAPTURED_STDERR" "./install.sh revoke --all --dry-run"
+  assert_contains "$CAPTURED_STDERR" "/usr/local/sbin/sirven revoke --all --dry-run"
 }
 
 test_a_changed_policy_copy_is_refused_not_overwritten() {

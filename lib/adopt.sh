@@ -296,7 +296,7 @@ adopt_refuse_conflicts() {
   fi
 
   if [ "$REINSTATE" != yes ] && kill_switch_account_cut_off "$SERVICE_USER"; then
-    _adopt_conflict "the account $SERVICE_USER was cut off by the kill switch (its revoke marker $STATE_DIR/agent-revoked.json is there, or the account is expired and no install is in the middle of changing it). install will not turn it back on by itself, also when the kill switch stopped before it finished." \
+    _adopt_conflict "the account $SERVICE_USER was cut off by the kill switch (its revoke marker $STATE_DIR/agent-revoked-$SERVICE_USER.json is there, or the account is expired and no install is in the middle of changing it). install will not turn it back on by itself, also when the kill switch stopped before it finished." \
       "to bring it back on purpose, run the same command with --reinstate: it unlocks the account, removes the expiry and the marker, gives back the /bin/bash shell, writes audit entries, then goes on with the install. to leave it cut off, do not install."
   fi
 
@@ -308,7 +308,7 @@ adopt_refuse_conflicts() {
     active)
       if [ "${#GRANT_PATHS[@]}" -eq 0 ]; then
         _adopt_conflict "a grant is in force for $SERVICE_USER: level $ADOPT_GRANT_LEVEL on $(_adopt_describe_paths). this request grants no path, and installing would leave that grant in force while saying none." \
-          "keep it: run again without --path. take it back: ./install.sh revoke --all --dry-run shows the kill switch."
+          "keep it: run again without --path. take it back: sudo /usr/local/sbin/sirven revoke --all --dry-run shows the kill switch."
       fi
       ;;
   esac

@@ -98,11 +98,11 @@ the copy must always be the release that made the record, or a later release tha
 Uninstalling needs no download and no repository:
 
 ```
-sudo bash /var/lib/sirven/package/uninstall.sh
+sudo /usr/local/sbin/sirven uninstall
 ```
 
 To cut the agent off now and keep every record, run the kill switch from the copy:
-`sudo bash /var/lib/sirven/package/install.sh revoke --all` (add `--dry-run` to read the plan first).
+`sudo /usr/local/sbin/sirven revoke --all` (add `--dry-run` to read the plan first).
 It applies on Linux, in a container and on a real machine, and asks you to type `revoke` first (`--yes` skips the question);
 on a Mac it is still plan output and exits with status 3 when applied.
 

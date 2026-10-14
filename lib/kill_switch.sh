@@ -12,7 +12,7 @@
 # already in place is skipped, and the check is read again just before the step runs (PLAN_RECHECK), so
 # running it again is safe and finishes a run that stopped.
 #
-# the revoke marker ($STATE_DIR/agent-revoked.json) is written before the first change and kept after the
+# the revoke marker ($STATE_DIR/agent-revoked-USER.json, one per account) is written before the first change and kept after the
 # run. it is separate from the install's agent-quiesce.json (which remembers the account's earlier state so a
 # finished install can give it back): install and release refuse to turn the account on while the revoke
 # marker is there, and only install --reinstate removes it. so a revoke that stopped halfway is never undone by
@@ -40,7 +40,7 @@ kill_switch_helper() {
 
 # the revoke marker, outside the prefix: a path under STATE_DIR.
 kill_switch_revoked_marker() {
-  printf '%s/agent-revoked.json' "$STATE_DIR"
+  printf '%s/agent-revoked-%s.json' "$STATE_DIR" "${1:-$SERVICE_USER}"
 }
 
 # kill_switch_write_marker USER MARKER: record that the kill switch has started. never overwrites an earlier one.
@@ -336,7 +336,7 @@ kill_switch_report_failure() {
     printf 'the kill switch did not finish, and %s is NOT confirmed locked. do it by hand now, as root: usermod --lock --expiredate 1 --shell %s %s; pkill -KILL -u %s\n' \
       "$SERVICE_USER" "$KILL_SWITCH_NOLOGIN" "$SERVICE_USER" "$SERVICE_USER" >&2
   fi
-  printf 'fix the causes printed above and run the same command again: sudo bash %s/package/install.sh revoke --all. finished steps are skipped.\n' "$STATE_DIR" >&2
+  printf 'fix the causes printed above and run the same command again: sudo /usr/local/sbin/sirven revoke --all. finished steps are skipped.\n' >&2
   printf 'the revoke marker stays, so a plain install will not turn the account back on; only install --reinstate does.\n' >&2
 }
 
@@ -346,7 +346,7 @@ kill_switch_report_failure() {
 # only on a real root, where an account is real.
 kill_switch_account_cut_off() {
   [ "$OPERATING_SYSTEM" = linux ] || return 1
-  [ ! -e "${PREFIX}$(kill_switch_revoked_marker)" ] || return 0
+  [ ! -e "${PREFIX}$(kill_switch_revoked_marker "$1")" ] || return 0
   [ -z "$PREFIX" ] || return 1
   id -u "$1" >/dev/null 2>&1 || return 1
   [ ! -e "$(kill_switch_state_file agent-quiesce.json)" ] || return 1
@@ -379,8 +379,8 @@ plan_reinstate() {
     "kill_switch_reinstate $SERVICE_USER"
   # the marker goes last, and only when the account is on again (a failed step above stops the run before this one)
   plan_step run "remove the revoke marker of $SERVICE_USER, so installs are no longer refused" \
-    "[ ! -e $(rooted "$(kill_switch_revoked_marker)") ]" \
-    "rm -f $(rooted "$(kill_switch_revoked_marker)") $(rooted "$(kill_switch_state_file_name agent-quiesce.json)")"
+    "[ ! -e $(rooted "$(kill_switch_revoked_marker "$SERVICE_USER")") ]" \
+    "rm -f $(rooted "$(kill_switch_revoked_marker "$SERVICE_USER")") $(rooted "$(kill_switch_state_file_name agent-quiesce.json)")"
   plan_note "the kill switch removed the keys, the services, the cron jobs and the grant of $SERVICE_USER, so none of the old access comes back. add the agent client's public key again."
 }
 
@@ -442,14 +442,16 @@ plan_kill_switch_linux() {
   home="$(rooted "$(service_user_home)")"
   record="$(rooted "$CONFIG_DIR/grants/$user.json")"
   marker="$(rooted "$(kill_switch_state_file_name agent-quiesce.json)")"
-  revoked="$(rooted "$(kill_switch_revoked_marker)")"
+  revoked="$(rooted "$(kill_switch_revoked_marker "$user")")"
 
   # nothing installed and no such account: nothing to cut off, and nothing is created to say so
-  if [ -n "$PREFIX" ] || id -u "$user" >/dev/null 2>&1 || [ -e "$(kill_switch_revoked_marker)" ]; then
+  if [ -n "$PREFIX" ] || id -u "$user" >/dev/null 2>&1 || [ -e "$(kill_switch_revoked_marker "$user")" ]; then
     plan_step run "record that the kill switch has started for $user, so no install turns the account back on" \
       "[ -s $revoked ]" "kill_switch_write_marker $user $revoked"
     plan_undo "remove the kill switch marker of $user" "[ ! -e $revoked ]" "rm -f $revoked"
     plan_continue
+  else
+    plan_note "there is no account $user and no marker for it, so no marker is written and nothing is cut off. a later account of that name is not refused by this run."
   fi
   plan_step system "lock and expire $user and turn its shell off in one change, then end every process of it" \
     "kill_switch_locked_down $user" \

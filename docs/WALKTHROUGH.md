@@ -70,13 +70,13 @@ sirven grant rollback --dry-run # what reversing the last change would do
 ## take it all back
 
 ```bash
-sudo bash install.sh revoke --all
+sudo /usr/local/sbin/sirven revoke --all
 ```
 
 The kill switch. Cuts the agent off in one shot: ends its processes, locks and expires its account, removes its keys, services and
 jobs, and takes back every grant. It keeps the records so you can look at what happened, and it asks you to type `revoke` first
 (`--yes` skips the question). It works on a real machine, not only in a container. Run it from the kept copy,
-`sudo bash /var/lib/sirven/package/install.sh revoke --all`, so code the agent could have edited never runs as root.
+`sudo /usr/local/sbin/sirven revoke --all`, so code the agent could have edited never runs as root.
 A plain install will not turn the account back on; `install.sh --reinstate` does, on purpose.
 
 ## known limitations, not built yet

@@ -338,11 +338,11 @@ the kill switch reads it to know what to remove.
   paths again. it writes its own `grant` entry with the reason `rollback`, so a second rollback
   undoes the first. the removal undoes the grant the same way uninstall does (see exactly what undo changes), so an
   owner's chmod made since the install survives it, and the earlier grant takes a new snapshot. what it grants goes into the install record too.
-- **kill switch.** `sudo bash /var/lib/sirven/package/install.sh revoke --all` cuts the agent off now and keeps every
+- **kill switch.** `sudo /usr/local/sbin/sirven revoke --all` cuts the agent off now and keeps every
   record. it applies on Linux, in a container and on a real machine (it only takes access away, so it is the one command
   whose real apply is not limited to a container), and asks you to type `revoke` first unless `--yes` is given. on macOS it is still
   plan output. in order, each step attempted even when an earlier one failed:
-  (0) the kill switch's own marker `agent-revoked.json` is written in the state directory, before anything else changes;
+  (0) the kill switch's own marker `agent-revoked-USER.json` (one per account) is written in the state directory, before anything else changes;
   (1) in one `usermod` call the account is locked, expired and given the `nologin` shell, and every process of the agent,
   by effective and by real user, is ended, repeatedly until none is left; (2) every service, timer, socket and path unit
   that runs as the agent or starts its work (template instances included) is stopped (triggers first) and disabled, its
@@ -381,7 +381,7 @@ the kill switch reads it to know what to remove.
   one run at a time: install, uninstall, rollback and repair hold a lock on the state directory (they refuse if another run
   keeps it for a minute); the kill switch waits ten seconds and goes on, because it must not be blocked.
 
-  **a stopped revoke is never undone by an install.** the marker `agent-revoked.json` is separate from the install's
+  **a stopped revoke is never undone by an install.** the marker `agent-revoked-USER.json` (one per account) is separate from the install's
   `agent-quiesce.json` (which remembers the account's earlier state so a finished install can give it back). while the marker is
   there, install refuses (exit 2, also in a dry run, and also when the kill switch stopped halfway), and the step that gives an
   account back (`release`) refuses too. install also refuses an account that is left expired when no install was in the middle of

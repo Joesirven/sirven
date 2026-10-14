@@ -103,8 +103,8 @@ test_detect_os_on_this_machine() {
 
 test_package_name_comes_from_project_json() {
   assert_eq sirven "$(package_name "$REPO_DIR/project.json")"
-  printf '{\n  "name": "Other Name"\n}\n' > "$TEST_TMP/project.json"
-  assert_eq "other name" "$(package_name "$TEST_TMP/project.json")"
+  printf '{\n  "name": "Other-Name"\n}\n' > "$TEST_TMP/project.json"
+  assert_eq "other-name" "$(package_name "$TEST_TMP/project.json")"
 }
 
 test_bash_floor_is_the_macos_bash() {

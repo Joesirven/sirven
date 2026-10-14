@@ -12,82 +12,87 @@ package directories
      note: owned by root. the agent can read its policy but never change it.
     1. create the state directory /var/lib/sirven, which records what this install creates (to do)
        $ mkdir -p <prefix>/var/lib/sirven && chmod 0700 <prefix>/var/lib/sirven
-    2. create the policy directory /etc/sirven (to do)
+    2. make /var/lib/sirven private to root: mode 0700, owned by root (to do)
+       $ layout_make_state_private <prefix>/var/lib/sirven
+    3. create the policy directory /etc/sirven (to do)
        $ mkdir -p <prefix>/etc/sirven && chmod 0755 <prefix>/etc/sirven
-    3. create /etc/sirven/levels for the level in force (to do)
+    4. create /etc/sirven/levels for the level in force (to do)
        $ mkdir -p <prefix>/etc/sirven/levels && chmod 0755 <prefix>/etc/sirven/levels
-    4. create /etc/sirven/grants for grant records (to do)
+    5. create /etc/sirven/grants for grant records (to do)
        $ mkdir -p <prefix>/etc/sirven/grants && chmod 0755 <prefix>/etc/sirven/grants
-    5. keep a pinned copy of this package in /var/lib/sirven/package, so revoke, rollback, and uninstall need no download (to do)
+    6. keep a pinned copy of this package in /var/lib/sirven/package, so revoke, rollback, and uninstall need no download (to do)
        # copies install.sh uninstall.sh bin lib levels project.json, and components when present, into a new folder, then moves it into place
-     note: later, without this repository: sudo bash /var/lib/sirven/package/uninstall.sh (to cut the agent off without removing anything: sudo bash /var/lib/sirven/package/install.sh revoke --all)
+    7. install the launcher /usr/local/sbin/sirven, root-owned, mode 0755: the one command that runs the kept copy (to do, recorded not run under --prefix)
+       $ layout_install_launcher <prefix>/usr/local/sbin/sirven
+     note: from now on run every root command through the launcher, not from a folder the agent may have been granted: sudo /usr/local/sbin/sirven revoke --all (cut the agent off, keep the records), sudo /usr/local/sbin/sirven uninstall, sudo /usr/local/sbin/sirven grant rollback. each runs the root-owned copy in /var/lib/sirven/package.
+     note: the folder you unpacked this package in is code the agent can change if you granted it. delete it after the install, or grant a path that does not hold it.
 
 audit log
-    6. create the audit log directory /var/log/sirven (to do)
+    8. create the audit log directory /var/log/sirven (to do)
        $ mkdir -p <prefix>/var/log/sirven && chmod 0750 <prefix>/var/log/sirven
-    7. write the audit log format (to do)
+    9. write the audit log format (to do)
        # write <prefix>/etc/sirven/audit-format.json (mode 0644): the JSON lines format every entry follows
-    8. create the empty audit log (to do)
+   10. create the empty audit log (to do)
        $ touch <prefix>/var/log/sirven/audit.jsonl && chmod 0640 <prefix>/var/log/sirven/audit.jsonl
-    9. give the audit log directory to the owner, example (to do, recorded not run under --prefix)
+   11. give the audit log directory to the owner, example (to do, recorded not run under --prefix)
        $ chown -R example <prefix>/var/log/sirven
      note: capture comes from a forced-command wrapper on the agent's SSH key: designed, built after alpha.
 
 service user
-   10. create the service user agent, not an administrator (to do, recorded not run under --prefix)
+   12. create the service user agent, not an administrator (to do, recorded not run under --prefix)
        $ useradd --create-home --home-dir <prefix>/home/agent --shell /bin/bash --user-group --comment 'sirven agent' agent
-   11. turn off password login for agent, keys only (to do, recorded not run under --prefix)
+   13. turn off password login for agent, keys only (to do, recorded not run under --prefix)
        $ usermod --password '*' agent
-   12. confirm agent is not in sudo, wheel, or admin (to do, recorded not run under --prefix)
+   14. confirm agent is not in sudo, wheel, or admin (to do, recorded not run under --prefix)
        $ id -nG agent   # must not list sudo, wheel, or admin
-   13. create the SSH folder for agent (to do, recorded not run under --prefix)
+   15. create the SSH folder for agent (to do, recorded not run under --prefix)
        $ install -d -m 0700 -o agent -g agent <prefix>/home/agent/.ssh
-   14. create an empty authorized_keys file (to do, recorded not run under --prefix)
+   16. create an empty authorized_keys file (to do, recorded not run under --prefix)
        $ install -m 0600 -o agent -g agent /dev/null <prefix>/home/agent/.ssh/authorized_keys
-   15. add the public key of your agent client (owner, by hand)
+   17. add the public key of your agent client (owner, by hand)
        append its public key, one line, to /home/agent/.ssh/authorized_keys.
        keys only: no password is ever set, stored, or typed.
 
 access to paths, level observer
      note: observer: read only inside granted paths. sees files, changes nothing.
-   16. install the observer level as policy (to do)
+   18. install the observer level as policy (to do)
        $ cp levels/observer.json <prefix>/etc/sirven/levels/observer.json && chmod 0644 <prefix>/etc/sirven/levels/observer.json
      note: undo removes only what this grant adds: the entries for agent and the folder owner, and the default list on folders. it never changes an owner or a group, never touches the owner and other bits or special bits, and never follows a link, so a chown, a chmod 600 or a setuid made while the grant is in force stays. the group bits end as what the group could really do, so a chmod that widens the group bits during the grant does not outlast it.
-   17. record the grant for agent (to do)
+   19. record the grant for agent (to do)
        # write <prefix>/etc/sirven/grants/agent.json (mode 0644): level observer on the paths below, no expiry, cannot grant further
-   18. end every process of agent and lock its account while the access changes (to do, recorded not run under --prefix)
+   20. end every process of agent and lock its account while the access changes (to do, recorded not run under --prefix)
        $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh quiesce agent <prefix>/var/lib/sirven/agent-quiesce.json
-   19. record the access control lists of /home before the grant (to do, recorded not run under --prefix)
+   21. record the access control lists of /home before the grant (to do, recorded not run under --prefix)
        $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh record <prefix>/var/lib/sirven/access-lists/2cc974af6afc822c.txt <prefix>/home no agent
-   20. record the access control lists of /home/example before the grant (to do, recorded not run under --prefix)
+   22. record the access control lists of /home/example before the grant (to do, recorded not run under --prefix)
        $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh record <prefix>/var/lib/sirven/access-lists/67a166d2c72af6bb.txt <prefix>/home/example no agent
-   21. record the access control lists of /srv before the grant (to do, recorded not run under --prefix)
+   23. record the access control lists of /srv before the grant (to do, recorded not run under --prefix)
        $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh record <prefix>/var/lib/sirven/access-lists/a3d9ac4fdee9c242.txt <prefix>/srv no agent
-   22. record the access control lists of /home/example/notes before the grant (to do, recorded not run under --prefix)
+   24. record the access control lists of /home/example/notes before the grant (to do, recorded not run under --prefix)
        $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh record <prefix>/var/lib/sirven/access-lists/e5e8e5d743b78051.txt <prefix>/home/example/notes yes agent
-   23. record the access control lists of /srv/app before the grant (to do, recorded not run under --prefix)
+   25. record the access control lists of /srv/app before the grant (to do, recorded not run under --prefix)
        $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh record <prefix>/var/lib/sirven/access-lists/dae668e4084f07b6.txt <prefix>/srv/app yes agent
-   24. let agent pass through /home (to do, recorded not run under --prefix)
+   26. let agent pass through /home (to do, recorded not run under --prefix)
        $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh grant-access <prefix>/home no agent x --snapshot <prefix>/var/lib/sirven/access-lists/2cc974af6afc822c.txt
-   25. let agent pass through /home/example (to do, recorded not run under --prefix)
+   27. let agent pass through /home/example (to do, recorded not run under --prefix)
        $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh grant-access <prefix>/home/example no agent x --snapshot <prefix>/var/lib/sirven/access-lists/67a166d2c72af6bb.txt
-   26. let agent pass through /srv (to do, recorded not run under --prefix)
+   28. let agent pass through /srv (to do, recorded not run under --prefix)
        $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh grant-access <prefix>/srv no agent x --snapshot <prefix>/var/lib/sirven/access-lists/a3d9ac4fdee9c242.txt
-   27. grant agent rX on /home/example/notes and everything inside (to do, recorded not run under --prefix)
+   29. grant agent rX on /home/example/notes and everything inside (to do, recorded not run under --prefix)
        $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh grant-access <prefix>/home/example/notes yes agent rX --snapshot <prefix>/var/lib/sirven/access-lists/e5e8e5d743b78051.txt
-   28. make new files in /home/example/notes inherit the grant, with group and other kept out (to do, recorded not run under --prefix)
+   30. make new files in /home/example/notes inherit the grant, with group and other kept out (to do, recorded not run under --prefix)
        $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh grant-default <prefix>/home/example/notes agent rX --snapshot <prefix>/var/lib/sirven/access-lists/e5e8e5d743b78051.txt
-   29. grant agent rX on /srv/app and everything inside (to do, recorded not run under --prefix)
+   31. grant agent rX on /srv/app and everything inside (to do, recorded not run under --prefix)
        $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh grant-access <prefix>/srv/app yes agent rX --snapshot <prefix>/var/lib/sirven/access-lists/dae668e4084f07b6.txt
-   30. make new files in /srv/app inherit the grant, with group and other kept out (to do, recorded not run under --prefix)
+   32. make new files in /srv/app inherit the grant, with group and other kept out (to do, recorded not run under --prefix)
        $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh grant-default <prefix>/srv/app agent rX --snapshot <prefix>/var/lib/sirven/access-lists/dae668e4084f07b6.txt
-   31. give agent its account back (to do, recorded not run under --prefix)
+   33. give agent its account back (to do, recorded not run under --prefix)
        $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh release agent <prefix>/var/lib/sirven/agent-quiesce.json
 
 transport: none
      note: no transport. the agent is reachable only from this machine or your own network.
 
-summary: 31 steps. 30 to do, 0 already done, 1 by the owner, 0 plan only.
+summary: 33 steps. 32 to do, 0 already done, 1 by the owner, 0 plan only.
 dry run: nothing was changed. run the same command without --dry-run to apply this plan.
-to undo later: ./install.sh revoke --all --dry-run, or ./uninstall.sh --dry-run
+to cut the agent off later: sudo /usr/local/sbin/sirven revoke --all --dry-run to read the plan; to remove everything: sudo /usr/local/sbin/sirven uninstall --dry-run
 exit status: 0

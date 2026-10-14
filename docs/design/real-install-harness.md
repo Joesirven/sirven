@@ -69,7 +69,7 @@ docker run --rm --network none -v "$PWD":/src:ro sirven-harness-linux bash -c \
 | Permission lists | `agent` can read `/srv/app`, cannot write it, cannot read `/root`; new files inherit read access through a default list (which has a side effect, section 3) |
 | Records | `/var/lib/sirven/install-record.tsv` (0600 root), pinned copy in `/var/lib/sirven/package`, audit log with a `finished` entry |
 | Re-run | exit 0; "applied 1 steps, skipped 18" (the one step tagged `always`) |
-| `install.sh revoke --all` | exit 3, "not yet", nothing changed at the time of this first run; applied since SIR-32, see scenarios 03 and 30 to 44 |
+| `install.sh revoke --all` (now `sudo /usr/local/sbin/sirven revoke --all`) | exit 3, "not yet", nothing changed at the time of this first run; applied since SIR-32, see scenarios 03 and 30 to 44 |
 | `uninstall.sh` from the pinned copy | exit 0; user, group, files, directories removed; home folder and audit log kept on purpose |
 | Real apply as an ordinary user | exit 3, "applying needs root"; nothing changed |
 | `--transport tailscale` real apply | exit 3, refused because step 24 (`tailscale up`) is plan only |

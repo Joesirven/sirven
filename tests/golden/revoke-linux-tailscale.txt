@@ -10,7 +10,7 @@ kill switch: revoke --all
      note: audit log: revoke_started is written before the first step and revoke_finished last, with the outcome. every step writes its own entry too.
      note: every step is attempted even when an earlier one fails; the run then ends with exit 4 and lists each failure. the account stays locked.
     1. record that the kill switch has started for agent, so no install turns the account back on (to do)
-       $ kill_switch_write_marker agent <prefix>/var/lib/sirven/agent-revoked.json
+       $ kill_switch_write_marker agent <prefix>/var/lib/sirven/agent-revoked-agent.json
     2. lock and expire agent and turn its shell off in one change, then end every process of it (to do, recorded not run under --prefix)
        $ kill_switch_lock agent
     3. stop and disable every service, timer, socket and path unit that runs as agent, and end its systemd session (to do, recorded not run under --prefix)

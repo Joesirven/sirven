@@ -150,7 +150,7 @@ test_revoke_reads_the_grant_record() {
   assert_status 0 install_sh revoke --all --dry-run --prefix "$root"
   assert_contains "$CAPTURED_STDOUT" "access_control_snapshot.sh restore"
   assert_contains "$CAPTURED_STDOUT" "$root/home/example/project yes agent"
-  assert_contains "$CAPTURED_STDOUT" "kill_switch_write_marker agent $root/var/lib/sirven/agent-revoked.json"
+  assert_contains "$CAPTURED_STDOUT" "kill_switch_write_marker agent $root/var/lib/sirven/agent-revoked-agent.json"
   assert_contains "$CAPTURED_STDOUT" "lock and expire agent and turn its shell off in one change"
   assert_contains "$CAPTURED_STDOUT" "kill_switch_lock agent"
   assert_contains "$CAPTURED_STDOUT" "kill_switch_remove_jobs agent"
@@ -171,8 +171,8 @@ test_revoke_applies_on_a_fake_root() {
   assert_contains "$log" "kill_switch_remove_jobs agent"
   assert_contains "$log" "kill_switch_verify"
   # the kill switch has its own marker, written before the first change and kept; the install's marker is separate
-  assert_file_exists "$root/var/lib/sirven/agent-revoked.json"
-  assert_contains "$(cat "$root/var/lib/sirven/install-record.tsv")" "rm -f $root/var/lib/sirven/agent-revoked.json"
+  assert_file_exists "$root/var/lib/sirven/agent-revoked-agent.json"
+  assert_contains "$(cat "$root/var/lib/sirven/install-record.tsv")" "rm -f $root/var/lib/sirven/agent-revoked-agent.json"
   assert_contains "$log" "kill_switch_remove_keys $root/home/agent"
   assert_contains "$log" "restore $root/var/lib/sirven/access-lists/"
   # the record is kept, renamed, and uninstall can still remove it
@@ -199,7 +199,7 @@ test_revoke_twice_is_idempotent_and_keeps_both_records() {
   assert_status 2 install_sh --prefix "$root" --level observer --path /home/example/project --transport none
   assert_contains "$CAPTURED_STDERR" "was cut off by the kill switch"
   assert_status 0 install_sh --reinstate --prefix "$root" --level observer --path /home/example/project --transport none
-  assert_no_file "$root/var/lib/sirven/agent-revoked.json"
+  assert_no_file "$root/var/lib/sirven/agent-revoked-agent.json"
   assert_status 0 install_sh revoke --all --prefix "$root" --transport none
   assert_contains "$(cat "$root/etc/sirven/grants/agent.json.revoked")" '"level": "observer"'
   assert_eq 1 "$(find "$root/etc/sirven/grants" -name 'agent.json.revoked.*' | grep -c .)" "the earlier revoked record is kept"
@@ -224,7 +224,7 @@ test_revoke_locks_before_it_stops_for_an_unreadable_record() {
   assert_contains "$log" "kill_switch_lock agent"
   assert_contains "$log" "kill_switch_remove_keys $root/home/agent"
   assert_contains "$CAPTURED_STDERR" "cannot be read"
-  assert_contains "$CAPTURED_STDERR" "run the same command again: sudo bash /var/lib/sirven/package/install.sh revoke --all"
+  assert_contains "$CAPTURED_STDERR" "run the same command again: sudo /usr/local/sbin/sirven revoke --all"
   assert_not_contains "$CAPTURED_STDERR" "release"
   assert_eq "not json" "$(cat "$root/etc/sirven/grants/agent.json")" "the unreadable record is left where it was"
   assert_contains "$(tail -1 "$root/var/log/sirven/audit.jsonl")" '"outcome": "failed"'

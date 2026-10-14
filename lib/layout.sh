@@ -34,6 +34,22 @@ stage_file() {
   printf '%s' "$staged"
 }
 
+# layout_state_private PATH: true when the state directory is mode 0700 and, on a real root, owned by root. read only.
+layout_state_private() {
+  # ls shows the owner and mode the same way on linux and macos, unlike stat
+  # shellcheck disable=SC2012
+  [ -d "$1" ] || return 1
+  # shellcheck disable=SC2012
+  [ "$(ls -ldn "$1" | cut -c1-10)" = drwx------ ] || return 1
+  # shellcheck disable=SC2012
+  [ -n "$PREFIX" ] || [ "$(ls -ldn "$1" | awk '{print $3}')" = 0 ]
+}
+
+layout_make_state_private() {
+  chmod 0700 "$1" || return 1
+  [ -n "$PREFIX" ] || chown 0:0 "$1"
+}
+
 # layout_remove_directory PATH: remove a directory this package created, but only when it is
 # empty. anything else inside was not created by the package, so the directory is kept.
 layout_remove_directory() {
@@ -91,6 +107,52 @@ LAYOUT_PACKAGE_FILES="install.sh uninstall.sh bin lib levels project.json"
 # components is optional: a core-only copy of this package has no components folder, and needs none.
 LAYOUT_PACKAGE_OPTIONAL_FILES="components"
 LAYOUT_PACKAGE_MARKER="PINNED-COPY"
+
+# the launcher: a small script at a fixed path, owned by root, that runs the kept copy of the package with the caller's
+# arguments. it is the one invocation the documentation gives for every root command, so no command ever starts from a
+# copy in a folder the agent can write. it sets its own search path and reads nothing but the kept copy.
+LAYOUT_LAUNCHER="/usr/local/sbin/sirven"
+
+# layout_launcher_current PATH: the launcher is there with this text, mode 0755, and (a real root) owned by root. read only.
+layout_launcher_current() {
+  layout_launcher_text | cmp -s - "$1" || return 1
+  # ls shows the owner and mode the same way on linux and macos, unlike stat
+  # shellcheck disable=SC2012
+  [ "$(ls -ln "$1" | cut -c1-10)" = -rwxr-xr-x ] || return 1
+  # shellcheck disable=SC2012
+  [ -n "$PREFIX" ] || [ "$(ls -ln "$1" | awk '{print $3}')" = 0 ]
+}
+
+# layout_install_launcher PATH: write it beside, set mode and owner, move it into place, so it is never half written.
+layout_install_launcher() {
+  mkdir -p "$(dirname "$1")" || return 1
+  layout_launcher_text > "$1.new" || return 1
+  chmod 0755 "$1.new" || { rm -f "$1.new"; return 1; }
+  if [ -z "$PREFIX" ]; then chown 0:0 "$1.new" || { rm -f "$1.new"; return 1; }; fi
+  mv -f "$1.new" "$1"
+}
+
+layout_launcher_text() {
+  cat <<'END'
+#!/bin/sh
+# sirven launcher: runs the root-owned kept copy of the package. written by install.sh, owned by root.
+#   sirven install ARGUMENTS      the installer
+#   sirven revoke --all           the kill switch
+#   sirven uninstall              the uninstaller
+#   sirven grant inspect|rollback|repair ...   and the other sirven commands
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+unset BASH_ENV ENV CDPATH LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT PYTHONPATH PYTHONHOME PYTHONSTARTUP
+kept=/var/lib/sirven/package
+[ -f "$kept/install.sh" ] || { echo "error: no kept copy of the package at $kept: nothing to run. nothing was changed." >&2; exit 2; }
+case "${1:-}" in
+  install) shift; exec bash "$kept/install.sh" "$@" ;;
+  revoke) exec bash "$kept/install.sh" "$@" ;;
+  uninstall) shift; exec bash "$kept/uninstall.sh" "$@" ;;
+  *) exec bash "$kept/bin/sirven" "$@" ;;
+esac
+END
+}
 
 layout_package_copy() {
   printf '%s/package' "$STATE_DIR"
@@ -183,7 +245,7 @@ layout_remove_package_copy() {
 }
 
 plan_layout() {
-  local state record simulation copy
+  local state record simulation copy launcher
   state="$(rooted "$STATE_DIR")"
   record="$(rooted "$(layout_record_file)")"
   simulation="$(rooted "$(layout_simulation_log)")"
@@ -195,10 +257,15 @@ plan_layout() {
   plan_undo "remove the install record and the state directory $STATE_DIR" "[ ! -d $state ]" \
     "rm -f $record $simulation && layout_remove_directory $state" \
     "rm -f $record && rmdir $state"
+  # a state directory that already exists keeps the mode it has, and a 0755 one would let the agent open it and hold the
+  # installer lock; so its mode and owner are checked and set whether this run made it or not
+  plan_step run "make $STATE_DIR private to root: mode 0700, owned by root" \
+    "layout_state_private $state" "layout_make_state_private $state"
   layout_directory "$CONFIG_DIR" 0755 "create the policy directory $CONFIG_DIR"
   layout_directory "$CONFIG_DIR/levels" 0755 "create $CONFIG_DIR/levels for the level in force"
   layout_directory "$CONFIG_DIR/grants" 0755 "create $CONFIG_DIR/grants for grant records"
   copy="$(rooted "$(layout_package_copy)")"
+  launcher="$(rooted "$LAYOUT_LAUNCHER")"
   local tag="${SIRVEN_PACKAGE_TAG:-unpinned}" checksum="${SIRVEN_PACKAGE_SHA256:-unpinned}" running_from_copy=""
   if [ -n "$(layout_real_folder "$ROOT_DIR")" ] && \
     [ "$(layout_real_folder "$ROOT_DIR")" = "$(layout_real_folder "$PREFIX$(layout_package_copy)")" ]; then
@@ -215,5 +282,9 @@ plan_layout() {
     plan_undo "remove the pinned copy of this package in $(layout_package_copy), if this package made it" \
       "[ ! -e $copy ]" "layout_remove_package_copy $copy" "rm -rf $copy   # only when it holds $LAYOUT_PACKAGE_MARKER"
   fi
-  plan_note "later, without this repository: sudo bash $(layout_package_copy)/uninstall.sh (to cut the agent off without removing anything: sudo bash $(layout_package_copy)/install.sh revoke --all)"
+  plan_step system "install the launcher $LAYOUT_LAUNCHER, root-owned, mode 0755: the one command that runs the kept copy" \
+    "layout_launcher_current $launcher" "layout_install_launcher $launcher"
+  plan_undo "remove the launcher $LAYOUT_LAUNCHER" "[ ! -e $launcher ]" "rm -f $launcher"
+  plan_note "from now on run every root command through the launcher, not from a folder the agent may have been granted: sudo $LAYOUT_LAUNCHER revoke --all (cut the agent off, keep the records), sudo $LAYOUT_LAUNCHER uninstall, sudo $LAYOUT_LAUNCHER grant rollback. each runs the root-owned copy in $(layout_package_copy)."
+  plan_note "the folder you unpacked this package in is code the agent can change if you granted it. delete it after the install, or grant a path that does not hold it."
 }

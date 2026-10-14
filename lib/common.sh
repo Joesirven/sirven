@@ -30,13 +30,29 @@ project_field() {
   sed -n "s/^[[:space:]]*\"$field\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p" "$file" | head -n 1
 }
 
-# the package name, lowercased, used for directory names like /etc/sirven.
+# the package name, lowercased, used for directory names like /etc/sirven. it becomes part of paths root works in, so only
+# lowercase letters, digits and hyphens are accepted, and not a leading hyphen: no slash, no "..", nothing else.
 package_name() {
   local file="$1" name
   [ -f "$file" ] || die "cannot find $file; the package name lives there"
   name="$(project_field "$file" name)"
   [ -n "$name" ] || die "project.json has no name field"
-  lowercase "$name"
+  name="$(lowercase "$name")"
+  case "$name" in
+    '' | -* | *[!a-z0-9-]*) die "the package name '$name' in $file is not a plain lowercase name (letters, digits, hyphens); it is part of paths root works in, so nothing was changed" ;;
+  esac
+  printf '%s' "$name"
+}
+
+# prefix_normalize VALUE: the fake root as an absolute path with no trailing slash. a prefix that is the real root, or
+# resolves to it (/, //, /., /..), is refused: --prefix / would otherwise turn into no prefix at all, a real run.
+prefix_normalize() {
+  local value="$1" stripped resolved
+  stripped="$value"
+  while [ "${stripped%/}" != "$stripped" ]; do stripped="${stripped%/}"; done
+  resolved="$(cd -P "$value" 2>/dev/null && pwd -P || true)"
+  if [ -z "$stripped" ] || [ "$resolved" = / ]; then return 1; fi
+  printf '%s' "$stripped"
 }
 
 # print linux or macos. SIRVEN_OS_OVERRIDE lets tests render the other system's plan.

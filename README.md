@@ -13,7 +13,7 @@ flowchart LR
     sirven -->|writes| audit[(Audit record<br/>install and grant changes)]
     agent([Your agent<br/>any runtime]) -->|logs in as| acct
     acct -->|observer: read<br/>builder: read and write| folder[/The one folder you granted/]
-    you -.->|sirven grant inspect<br/>sirven grant rollback<br/>install.sh revoke --all| acct
+    you -.->|sirven grant inspect<br/>sirven grant rollback<br/>sirven revoke --all| acct
 ```
 
 ## What you get
@@ -23,7 +23,7 @@ flowchart LR
 | **Its own account** | The agent works as a dedicated local user. Your personal credentials are never copied across. |
 | **Three access levels** | `observer` reads the folder you grant, `builder` reads and writes it, `operator` is `builder` today, with owner-listed service restarts and log reads designed. None of them ever gets root or `sudo`. |
 | **Nothing granted by default** | A folder is granted only when you name it. System folders, your whole home folder, and credential folders such as `.ssh` are refused. |
-| **A way back** | `sirven grant inspect` shows what is in force. `sirven grant rollback` reverses the last change. `sudo bash install.sh revoke --all` revokes everything. |
+| **A way back** | `sirven grant inspect` shows what is in force. `sirven grant rollback` reverses the last change. `sudo /usr/local/sbin/sirven revoke --all` cuts the agent off now and keeps the records. every root command after the first install goes through that launcher, which runs the root-owned copy, never a folder the agent may have been granted. |
 | **Plans before changes** | The installer prints its full plan first, and `--dry-run` changes nothing. |
 | **Works with what you run** | Already have an agent? sirven adopts what it finds (Tailscale, bb, an earlier run) and does not replace it. |
 

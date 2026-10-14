@@ -5,7 +5,7 @@
 #   bash tests/harness/run-linux.sh 02           only scenarios whose file name contains 02
 #
 # each scenario gets a brand new container from one prebuilt image: the repository mounted read
-# only at /src, no network, no privileged mode, no host folder other than the repository, a
+# only at /src (and copied to /srv/pkg, root-owned, which is what the scenario runs), no network, no privileged mode, no host folder other than the repository, a
 # memory and process cap (256 MB; a scenario can ask for more with a header line, see below). the container is removed when the scenario ends. the host's own
 # install.sh is never run. exit status: 0 all passed, 1 an assertion failed, 77 no container
 # engine is running (a skip, not a pass), 2 the harness itself broke.
@@ -43,10 +43,14 @@ for scenario in "$HARNESS_DIR"/scenarios/linux/*.sh; do
   # 256 MB unless the scenario asks for more in a header line "# harness-memory: 1g" (the kernel's own cache of
   # hundreds of thousands of folders counts against the container). the helper's own peak is asserted by the scenario.
   memory="$(sed -n 's/^# harness-memory: \([0-9]*[mg]\)$/\1/p' "$scenario" | head -1)"
+  # the repository is mounted read only at /src and copied inside the container to /srv/pkg, owned by root: the installer
+  # refuses, as root, to run code from a folder owned by someone else (the host user who owns the mount), so the scenario
+  # runs the copy (SRC=/srv/pkg). the scenario script itself is read from /src.
   "$ENGINE" run --rm --label "sirven-harness=$RUN_ID" --network none \
     --memory "${memory:-256m}" --pids-limit 256 --cap-drop NET_RAW \
     -v "$REPO_DIR":/src:ro \
-    "$IMAGE:$recipe_sum" bash "/src/tests/harness/scenarios/linux/$name.sh" < /dev/null
+    "$IMAGE:$recipe_sum" bash -c 'cp -r /src /srv/pkg && SRC=/srv/pkg exec bash "$0"' \
+    "/src/tests/harness/scenarios/linux/$name.sh" < /dev/null
   status=$?
   printf 'scenario %s: exit %s, %s seconds\n' "$name" "$status" "$((SECONDS - started))"
   ran=$((ran + 1))
