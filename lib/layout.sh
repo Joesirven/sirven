@@ -326,7 +326,7 @@ plan_layout() {
     plan_undo "remove the launcher $LAYOUT_LAUNCHER" "[ ! -e $launcher ]" "rm -f $launcher"
     plan_note "from now on run every root command through the launcher, not from a folder the agent may have been granted: sudo $LAYOUT_LAUNCHER revoke --all (cut the agent off, keep the records), sudo $LAYOUT_LAUNCHER uninstall, sudo $LAYOUT_LAUNCHER grant rollback. each runs the root-owned copy in $(layout_package_copy)."
   else
-    plan_note "the launcher $LAYOUT_LAUNCHER is NOT installed: $(dirname "$LAYOUT_LAUNCHER"), or a folder above it, can be changed by an account other than root, so a launcher there could be replaced and then run as root. nothing was written there. fix who can write it and run this again, or run every root command with the kept copy: $(layout_root_command revoke) (cut the agent off, keep the records), $(layout_root_command uninstall), $(layout_root_command rollback)."
+    plan_note "the launcher $LAYOUT_LAUNCHER is NOT installed: $(dirname "$LAYOUT_LAUNCHER"), or a folder above it, can be changed by an account other than root, so a launcher there could be replaced and then run as root. nothing was written there, and anything found at that path is not ours: do not run it. fix who can write it and run this again, or run every root command with the kept copy: $(layout_root_command revoke) (cut the agent off, keep the records), $(layout_root_command uninstall), $(layout_root_command rollback)."
   fi
   plan_note "the folder you unpacked this package in is code the agent can change if you granted it. delete it after the install, or grant a path that does not hold it."
 }

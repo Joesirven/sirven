@@ -18,6 +18,7 @@ out="$LAST_OUTPUT"
 check "no launcher was written into the folder the agent can write" bash -c '[ ! -e /usr/local/sbin/sirven ]'
 check "the plan says the launcher is not installed, and why" bash -c 'grep -q "the launcher /usr/local/sbin/sirven is NOT installed" <<< "$0" && grep -q "can be changed by an account other than root" <<< "$0"' "$out"
 check "it gives the kept-copy commands instead" bash -c 'grep -q "sudo bash /var/lib/sirven/package/install.sh revoke --all" <<< "$0" && grep -q "sudo bash /var/lib/sirven/package/uninstall.sh" <<< "$0"' "$out"
+check "it says anything found at that path is not ours" grep -q 'anything found at that path is not ours: do not run it' <<< "$out"
 check "it does not tell the owner to run the launcher" bash -c '! grep -q "sudo /usr/local/sbin/sirven" <<< "$0"' "$out"
 
 # the agent plants its own launcher, then the owner runs the command install advertised
