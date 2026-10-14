@@ -14,13 +14,13 @@ mkdir -p $FAKE_TS_DIR; printf 'Running\n' > $FAKE_TS_DIR/state; printf 'node-own
 SIRVEN_TAILSCALE_AUTHKEY="$KEY" install_ts > /tmp/b.out 2>&1; echo "install exit $?"; grep -E "refused|error|without" /tmp/b.out | head -3
 echo "calls: $(grep -c '^tailscale up --auth-key' $FAKE_TS_DIR/calls.log) up, $(grep -c '^tailscale logout' $FAKE_TS_DIR/calls.log) logout"
 check "B: the owner's login was never re-tagged or re-keyed" bash -c '! grep -q "^tailscale up --auth-key" /tmp/fake-ts/calls.log && [ "$(cat /tmp/fake-ts/id)" = node-owner ] && [ ! -s /tmp/fake-ts/tags ]'
-bash install.sh revoke --all --yes --transport tailscale >/dev/null 2>&1; bash uninstall.sh >/dev/null 2>&1
+bash install.sh revoke --all --yes --transport tailscale >/dev/null 2>&1; bash uninstall.sh --yes >/dev/null 2>&1
 check "B: revoke and uninstall never logged the owner's login out" bash -c '! grep -q "^tailscale logout" /tmp/fake-ts/calls.log && [ "$(cat /tmp/fake-ts/state)" = Running ]'
 
 echo "== C. the owner's own tag:agent login, no record of ours"
 rm -rf $FAKE_TS_DIR /var/lib/sirven /etc/sirven; mkdir -p $FAKE_TS_DIR; printf 'Running\n' > $FAKE_TS_DIR/state; printf 'node-owner\n' > $FAKE_TS_DIR/id; printf '"tag:agent"\n' > $FAKE_TS_DIR/tags; printf 'owners-agent-box\n' > $FAKE_TS_DIR/name
 install_ts > /tmp/c.out 2>&1; echo "install (no key given) exit $?"
-bash install.sh revoke --all --yes --transport tailscale >/dev/null 2>&1; bash uninstall.sh >/dev/null 2>&1
+bash install.sh revoke --all --yes --transport tailscale >/dev/null 2>&1; bash uninstall.sh --yes >/dev/null 2>&1
 check "C: an adopted tag:agent node is never logged out by us" bash -c '! grep -q "^tailscale logout" /tmp/fake-ts/calls.log && [ "$(cat /tmp/fake-ts/state)" = Running ]'
 
 echo "== D. tailscale too old to read a key file"

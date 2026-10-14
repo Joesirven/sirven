@@ -8,7 +8,7 @@ SIRVEN_TAILSCALE_WAIT=1 SIRVEN_TAILSCALE_AUTHKEY="$KEY" install_ts > /tmp/t3.out
 tail -6 /tmp/t3.out
 echo "node state: $(state); marker: $(ls /var/lib/sirven/tailscale-node.json 2>&1)"
 echo "undo line for the join in the install record: $(grep -c 'tailscale_node.sh leave' /var/lib/sirven/install-record.tsv 2>&1)"
-bash uninstall.sh > /tmp/t3u.out 2>&1; echo "uninstall exit $?"; tail -5 /tmp/t3u.out
+bash uninstall.sh --yes > /tmp/t3u.out 2>&1; echo "uninstall exit $?"; tail -5 /tmp/t3u.out
 echo "node state after uninstall: $(state); marker: $(ls /var/lib/sirven/tailscale-node.json 2>&1)"
 check "uninstall logged out the node a failed join left behind" bash -c '[ "$(cat /tmp/fake-ts/state)" = NeedsLogin ]'
 # the same half-joined node, torn down by the kill switch instead
