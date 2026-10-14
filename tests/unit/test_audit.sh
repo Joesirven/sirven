@@ -28,13 +28,40 @@ test_strings_are_escaped() {
   assert_eq "$(printf 'a "quoted" back\\slash\ttab\nnew line\001bell')" "$(json_field "$line" value)"
 }
 
-test_the_escaper_output_parses_as_json() {
-  local tricky escaped
-  # a backslash, a double quote, a newline, a tab, a control byte, and a unicode character (é)
-  tricky="$(printf 'b\\s "q" n\nt\tc\001u\303\251')"
-  escaped="$(audit_json_string "$tricky")"
-  printf '{"value": %s}' "$escaped" | python3 -c 'import json, sys; json.load(sys.stdin)' || fail "escaped output is not JSON: $escaped"
-  assert_eq "$(printf 'b\\s "q" n\nt\tc\001u\303\251')" "$(json_field "{\"value\": $escaped}" value)"
+# a UTF-8 locale this machine has, for the locale tests: the C locale and this one must agree.
+utf8_locale() {
+  locale -a 2>/dev/null | grep -iE '^(C\.utf-?8|en_US\.utf-?8)$' | head -n 1
+}
+
+# escape_in_locale LOCALE VALUE: the escaper's output under LOCALE, in a bash of its own.
+escape_in_locale() {
+  LC_ALL="$1" bash -c '. "$1/lib/audit.sh"; audit_json_string "$2"' _ "$REPO_DIR" "$2"
+}
+
+test_the_escaper_output_parses_as_json_in_c_and_utf8_locales() {
+  local tricky utf8 escaped_c escaped_utf8
+  utf8="$(utf8_locale)"
+  [ -n "$utf8" ] || fail "this machine has no UTF-8 locale to test with"
+  # a backslash, a double quote, a newline, a tab, a control byte, a unicode character (é), and
+  # U+0085, which a UTF-8 locale would call a control character
+  tricky="$(printf 'b\\s "q" n\nt\tc\001u\303\251 \302\205')"
+  escaped_c="$(escape_in_locale C "$tricky")"
+  escaped_utf8="$(escape_in_locale "$utf8" "$tricky")"
+  assert_eq "$escaped_c" "$escaped_utf8" "the output does not depend on the locale"
+  printf '{"value": %s}' "$escaped_c" | python3 -c 'import json, sys; json.load(sys.stdin)' || fail "escaped output is not JSON: $escaped_c"
+  assert_eq "$(printf 'b\\s "q" n\nt\tc\001u\303\251 \302\205')" "$(json_field "{\"value\": $escaped_c}" value)"
+}
+
+test_a_large_value_escapes_within_the_time_limit() {
+  local big out start end elapsed
+  big="$(python3 -c 'import sys; sys.stdout.write(("ab\"c\\d\te\nf" * 3500)[:20000])')"
+  start="$(python3 -c 'import time; print(time.time())')"
+  out="$(audit_json_string "$big")"
+  end="$(python3 -c 'import time; print(time.time())')"
+  elapsed="$(python3 -c "print(round($end - $start, 2))")"
+  python3 -c 'import sys; sys.exit(0 if float(sys.argv[1]) < 2 else 1)' "$elapsed" || fail "escaping 20000 characters took $elapsed seconds, the limit is 2"
+  printf '{"value": %s}' "$out" | python3 -c 'import json, sys; json.load(sys.stdin)' || fail "escaped output is not JSON"
+  assert_eq "$(python3 -c 'import sys; sys.stdout.write(("ab\"c\\d\te\nf" * 3500)[:20000])')" "$(json_field "{\"value\": $out}" value)"
 }
 
 test_entries_are_json_and_values_cannot_inject_fields() {
