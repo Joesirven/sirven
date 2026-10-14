@@ -250,10 +250,9 @@ test_the_macos_switch_does_not_change_the_linux_refusal() {
   setup_fake_root
   PLAN_PREFIX=""
   PLAN_OPERATING_SYSTEM=linux
-  if in_container; then
-    return 0
-  fi
-  assert_contains "$(SIRVEN_MACOS_REAL_APPLY=1 plan_real_apply_refusal)" "throwaway container"
+  # linux has no container rule any more (v0.2-linux-real-apply), so the switch must change nothing:
+  # the refusal with it set is the refusal without it, whether that is "needs root" or nothing.
+  assert_eq "$(plan_real_apply_refusal)" "$(SIRVEN_MACOS_REAL_APPLY=1 plan_real_apply_refusal)"
 }
 
 test_unknown_step_kind_is_an_error() {
