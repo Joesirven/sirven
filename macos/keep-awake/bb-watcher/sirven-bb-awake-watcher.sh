@@ -15,28 +15,40 @@
 # awake forever. if the user releases the hold (sirven awake release), the watcher does not take it
 # back until bb has gone idle once.
 #
-# settings, all optional, mostly for testing:
-#   SIRVEN_BB_HOST          the bb host to watch (default host_na8kye9eas, Jose's MacBook Pro)
+# a ceiling bounds one continuous hold, whatever bb reports: after SIRVEN_BB_MAX_HOLD seconds (12
+# hours by default) the hold is released and not taken again until bb has been idle for
+# SIRVEN_BB_IDLE seconds. the holder itself also releases the hold on battery below 20 percent.
+#
+# settings. the host is required; the rest are optional and mostly for testing:
+#   SIRVEN_BB_HOST          the bb host id of this Mac (install.sh writes it into the agent; required)
 #   SIRVEN_BB_COMMAND       the bb command (default: bb)
 #   SIRVEN_KEEP_AWAKE_BIN   the keep-awake program (default: the one inside ~/Applications/Sirven.app)
 #   SIRVEN_BB_INTERVAL      seconds between checks (default 30)
 #   SIRVEN_BB_IDLE          seconds with nothing active before release (default 300)
+#   SIRVEN_BB_MAX_HOLD      the longest continuous hold, in seconds (default 43200, 12 hours)
 #   SIRVEN_BB_LEASE         lease on the work, in seconds (default 300)
 #   SIRVEN_BB_RENEW         renew the lease after this many seconds (default 90)
 #   SIRVEN_BB_TIMEOUT       give up on one bb query after this many seconds (default 60)
-#   SIRVEN_BB_ONCE          1: check once, act, and exit (no hold survives the exit)
+#   SIRVEN_BB_PASSES        stop after this many checks, ending any hold (default 0: run until stopped)
+#   SIRVEN_BB_ONCE          1: the same as SIRVEN_BB_PASSES=1
 set -uo pipefail
 
-HOST="${SIRVEN_BB_HOST:-host_na8kye9eas}"
+HOST="${SIRVEN_BB_HOST:?SIRVEN_BB_HOST must name the bb host id of this machine, which install.sh writes}"
 BB="${SIRVEN_BB_COMMAND:-bb}"
 AWAKE="${SIRVEN_KEEP_AWAKE_BIN:-$HOME/Applications/Sirven.app/Contents/MacOS/sirven-keep-awake}"
 INTERVAL="${SIRVEN_BB_INTERVAL:-30}"
 IDLE="${SIRVEN_BB_IDLE:-300}"
+MAX_HOLD="${SIRVEN_BB_MAX_HOLD:-43200}"
 LEASE="${SIRVEN_BB_LEASE:-300}"
 RENEW="${SIRVEN_BB_RENEW:-90}"
 QUERY_TIMEOUT="${SIRVEN_BB_TIMEOUT:-60}"
+PASSES="${SIRVEN_BB_PASSES:-0}"
+[ "${SIRVEN_BB_ONCE:-0}" = 1 ] && PASSES=1
 TASK="bb-agents"
 EVENTS="${SIRVEN_KEEP_AWAKE_DIR:-$HOME/Library/Application Support/sirven/keep-awake}/events.jsonl"
+# the scratch files for one bb query live here, reused every pass and removed on any exit.
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/sirven-bb-watcher.XXXXXX")"
+trap 'rm -rf "$WORK"' EXIT
 
 # one line in the keep-awake events file, in the same shape the keep-awake program writes.
 log_event() {
@@ -55,20 +67,19 @@ print(json.dumps(record, sort_keys=True))' "$event" "$$" "$detail" >>"$EVENTS"
 # the thread list goes through a file, not the environment, which has a size limit; stderr is kept
 # apart so a warning from node cannot spoil the JSON. a hung bb is killed after QUERY_TIMEOUT.
 count_work() {
-  local out err pid waited=0 status
-  out="$(mktemp -t sirven-bb-threads)"; err="$(mktemp -t sirven-bb-errors)"
+  local out="$WORK/threads.json" err="$WORK/errors.txt" pid waited=0 status
   "$BB" thread list --json >"$out" 2>"$err" &
   pid=$!
   while kill -0 "$pid" 2>/dev/null; do
     if [ "$waited" -ge $((QUERY_TIMEOUT * 5)) ]; then
       kill "$pid" 2>/dev/null; sleep 1; kill -9 "$pid" 2>/dev/null
-      echo "error bb thread list did not answer within ${QUERY_TIMEOUT}s"; rm -f "$out" "$err"; return
+      echo "error bb thread list did not answer within ${QUERY_TIMEOUT}s"; return
     fi
     sleep 0.2; waited=$((waited + 1))
   done
   wait "$pid"; status=$?
   if [ "$status" != 0 ]; then
-    echo "error bb thread list failed with status $status: $(head -c 200 "$err" | tr '\n' ' ')"; rm -f "$out" "$err"; return
+    echo "error bb thread list failed with status $status: $(head -c 200 "$err" | tr '\n' ' ')"; return
   fi
   /usr/bin/python3 -c '
 import json, sys
@@ -91,7 +102,6 @@ active = [t for t in mine if state(t, "status") in busy or state(t, "runtime", "
           or count(t, "activeBackgroundAgentCount") or count(t, "activeBackgroundCommandCount")
           or count(t, "activeWorkflowCount")]
 print(len(active), sum(count(t, "activeWorkflowCount") for t in mine))' "$HOST" "$out" || echo "error the thread list could not be read"
-  rm -f "$out" "$err"
 }
 
 # true when the user released the bb-agents hold (sirven awake release) and it is still listed.
@@ -104,6 +114,8 @@ sys.exit(0 if any(w.get("task") == sys.argv[1] and w.get("releasedAt") for w in 
 }
 
 holding=0          # 1 while this watcher has begun the task and not ended it
+hold_started=0     # when the current continuous hold began
+capped=0           # 1 after the ceiling released the hold, until bb has gone idle for the idle window
 user_released=0    # 1 after the user released the hold, until bb goes idle
 idle_since=""      # when bb was last seen busy-free (or unreachable), empty while busy
 last_renew=0
@@ -113,6 +125,7 @@ begin_work() {
   local reason="$1" output
   if output="$("$AWAKE" begin "$TASK" --reason "$reason" --owner $$ --lease "$LEASE" 2>&1)"; then
     [ "$holding" = 1 ] && [ "$reason" = "$last_reason" ] || log_event bb-watcher-hold "$reason"
+    [ "$holding" = 0 ] && hold_started=$now
     # renewals are timed from the start of the pass, so a slow bb query cannot stretch the gap.
     holding=1; last_renew=$now; last_reason="$reason"
   else
@@ -129,7 +142,8 @@ end_work() {
 
 trap 'log_event bb-watcher-stopped "the watcher was asked to stop"; [ "$holding" = 1 ] && "$AWAKE" end "$TASK" >/dev/null 2>&1; exit 0' TERM INT HUP
 
-log_event bb-watcher-started "watching $HOST every ${INTERVAL}s, release after ${IDLE}s idle"
+log_event bb-watcher-started "watching $HOST every ${INTERVAL}s, release after ${IDLE}s idle, ceiling ${MAX_HOLD}s"
+passes=0
 while true; do
   now=$(date +%s)
   result="$(count_work)"
@@ -141,11 +155,20 @@ while true; do
     read -r threads workflows <<<"$result"; problem=""
   fi
 
+  # the ceiling applies whatever bb reports, busy or idle: one continuous hold never runs past it.
+  if [ "$holding" = 1 ] && [ $((now - hold_started)) -ge "$MAX_HOLD" ]; then
+    end_work "the continuous hold reached ${MAX_HOLD} seconds"
+    log_event bb-watcher-max-hold "released after ${MAX_HOLD} seconds; not held again until bb has been idle for ${IDLE} seconds"
+    capped=1
+  fi
+
   if [ -z "$problem" ] && [ $((threads + workflows)) -gt 0 ]; then
     idle_since=""
     reason="$threads bb threads active"
     [ "$workflows" -gt 0 ] && reason="$reason, $workflows bb workflows running"
-    if [ "$holding" = 1 ] && released_by_user; then
+    if [ "$capped" = 1 ]; then
+      :  # released by the ceiling: nothing until bb has been idle for the idle window
+    elif [ "$holding" = 1 ] && released_by_user; then
       [ "$user_released" = 1 ] || log_event bb-watcher-respecting-release "the hold was released by the user; not renewing until bb goes idle"
       user_released=1
     elif [ "$user_released" = 0 ] && { [ "$holding" = 0 ] || [ "$reason" != "$last_reason" ] || [ $((now - last_renew)) -ge "$RENEW" ]; }; then
@@ -161,6 +184,7 @@ while true; do
     if [ $((now - idle_since)) -ge "$IDLE" ]; then
       [ "$holding" = 1 ] && end_work "nothing active for ${IDLE}s"
       user_released=0
+      capped=0
     elif [ "$holding" = 1 ] && [ "$user_released" = 0 ] && [ $((now - last_renew)) -ge "$RENEW" ]; then
       # keep the hold through the idle window (the reason is unchanged, so this logs nothing),
       # unless the user released it meanwhile: begin would take the release back.
@@ -173,7 +197,8 @@ while true; do
     fi
   fi
 
-  if [ "${SIRVEN_BB_ONCE:-0}" = 1 ]; then
+  passes=$((passes + 1))
+  if [ "$PASSES" -gt 0 ] && [ "$passes" -ge "$PASSES" ]; then
     [ "$holding" = 1 ] && "$AWAKE" end "$TASK" >/dev/null 2>&1
     exit 0
   fi
