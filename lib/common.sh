@@ -51,7 +51,10 @@ prefix_normalize() {
   stripped="$value"
   while [ "${stripped%/}" != "$stripped" ]; do stripped="${stripped%/}"; done
   resolved="$(cd -P "$value" 2>/dev/null && pwd -P || true)"
-  if [ -z "$stripped" ] || [ "$resolved" = / ]; then return 1; fi
+  # "//" is a spelling of the root too, so slashes are stripped from the resolved path before it is compared
+  while [ "${resolved%/}" != "$resolved" ]; do resolved="${resolved%/}"; done
+  if [ -z "$stripped" ]; then return 1; fi
+  if [ -z "$resolved" ] && [ -d "$value" ]; then return 1; fi
   printf '%s' "$stripped"
 }
 
