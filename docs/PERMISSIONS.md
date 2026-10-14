@@ -328,8 +328,7 @@ the kill switch reads it to know what to remove.
   **installs made before this change.** the install record stores the undo command text, so an install
   made by an earlier version keeps its old undo (`setfacl -R -P -x u:agent` and `-d -x`, or the
   first version of the snapshot helper), which leaves the default list, the mask and the folder
-  owner's entry behind. the alpha cut applies only inside throwaway containers, so none exist outside
-  them. to repair one, from a checkout of this package, as root:
+  owner's entry behind. real Linux machines are applied only from the version that added real apply, and macOS apply is switched off by default, so no such install is expected outside throwaway containers. to repair one, from a checkout of this package, as root:
   `bash lib/access_control_snapshot.sh repair FOLDER yes AGENT` for each granted folder, and
   `... repair PARENT no AGENT` for each pass-through parent, before running uninstall. repair is
   the no-snapshot removal above and changes no mode.
@@ -339,8 +338,7 @@ the kill switch reads it to know what to remove.
   undoes the first. the removal undoes the grant the same way uninstall does (see exactly what undo changes), so an
   owner's chmod made since the install survives it, and the earlier grant takes a new snapshot. what it grants goes into the install record too.
 - **kill switch.** `sudo /usr/local/sbin/sirven revoke --all` cuts the agent off now and keeps every
-  record. it applies on Linux, in a container and on a real machine (it only takes access away, so it is the one command
-  whose real apply is not limited to a container), and asks you to type `revoke` first unless `--yes` is given. on macOS it is still
+  record. it applies on Linux, in a container and on a real machine (a real Linux apply needs root), and asks you to type `revoke` first unless `--yes` is given. on macOS it is still
   plan output. in order, each step attempted even when an earlier one failed:
   (0) the kill switch's own marker `agent-revoked-USER.json` (one per account) is written in the state directory, before anything else changes;
   (1) in one `usermod` call the account is locked, expired and given the `nologin` shell, and every process of the agent,

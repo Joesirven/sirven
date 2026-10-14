@@ -52,7 +52,7 @@ Full walkthrough: [docs/WALKTHROUGH.md](docs/WALKTHROUGH.md).
 
 ## What it does not do yet
 
-Stated plainly so you can trust the rest. Applying the plan to a macOS machine is not verified yet, so there the installer stops before any change: use `--dry-run`, or `--prefix` to apply into a fake root. The kill switch (`install.sh revoke`) is plan output only; until it is built, `uninstall.sh` is the working way to undo an install. The audit log covers the install and every grant change. Per-session and per-command logging goes through a forced-command wrapper that is designed and not built yet. Kernel-level auditing is designed and not built. The `operator` level's service restarts and log reads are designed and not built.
+Stated plainly so you can trust the rest. Applying the plan to a macOS machine is not verified yet, so there the installer stops before any change: use `--dry-run`, or `--prefix` to apply into a fake root. The kill switch (`revoke --all`) applies on Linux as root and is plan output on macOS; there, `uninstall.sh` (behind the same switch) is the way to undo an install. The audit log covers the install and every grant change. Per-session and per-command logging goes through a forced-command wrapper that is designed and not built yet. Kernel-level auditing is designed and not built. The `operator` level's service restarts and log reads are designed and not built.
 
 ## Read more
 
@@ -70,7 +70,7 @@ Stated plainly so you can trust the rest. Applying the plan to a macOS machine i
 
 Your personal agent often works while you are away from the keyboard. If the Mac goes to sleep
 halfway through, the work stops. `sirven awake` keeps the Mac awake while your agent has work in
-flight, and only then. Inspired by Sleepless by itskoosh (MIT).
+flight, and only then. Inspired by Sleepless by itskoosh.
 
 What it does, and what it never does:
 
@@ -158,8 +158,8 @@ off by default and only active while there is work to point to.
 
 ### Credit for keep-awake
 
-Inspired by Sleepless by itskoosh (MIT): https://github.com/itskoosh/Sleepless. sirven's
-keep-awake is its own implementation.
+Inspired by Sleepless by itskoosh. sirven's keep-awake is its own implementation. No live
+repository for Sleepless could be confirmed, so none is linked.
 
 ## Credits
 

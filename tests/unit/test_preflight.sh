@@ -117,9 +117,17 @@ test_bash_floor_is_the_macos_bash() {
 }
 
 test_install_started_by_sh_says_to_use_bash() {
-  assert_status 1 sh "$REPO_DIR/install.sh" --help
+  # the check needs a shell that is not bash. macOS ships /bin/sh as bash, so use /bin/dash
+  # where it exists; a system whose only sh is bash has nothing to check here.
+  local posix=/bin/dash
+  [ -x "$posix" ] || posix=/bin/sh
+  # shellcheck disable=SC2016 # the variable is expanded by the shell under test, not here
+  if "$posix" -c '[ -n "${BASH_VERSION:-}" ]'; then
+    return 0
+  fi
+  assert_status 1 "$posix" "$REPO_DIR/install.sh" --help
   assert_contains "$CAPTURED_STDERR" "run this with bash"
-  assert_status 1 sh "$REPO_DIR/uninstall.sh" --help
+  assert_status 1 "$posix" "$REPO_DIR/uninstall.sh" --help
   assert_contains "$CAPTURED_STDERR" "run this with bash"
 }
 
