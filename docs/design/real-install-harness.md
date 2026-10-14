@@ -80,6 +80,11 @@ Both come from one cause: the grant sets a default access control list on the gr
 
 **A. While the grant is in force (measured).** Folder `/srv/app` mode 755, grant in force, an owner with umask 077 runs `touch /srv/app/x`: the file is mode 0644, readable by every account on the machine. The same `touch` in a plain 755 folder gives 0600. So the grant itself widens access beyond the agent, for any file anyone creates there. A 700 folder is safe: its default base entries are all `---` (the `640` that `stat` shows there is the mask, not a real group grant; `getfacl` shows `group::---` and `other::---`). Scenario 01 holds this as a known defect. This is not in SIR-70 yet and is the larger of the two. Fix options for the product owner: write explicit `default:group::` and `default:other::` entries that match the umask intent, drop the default list and refresh the grant on a schedule, or document it and refuse 755 folders without confirmation.
 
+**Status (2026-10-14, SIR-70 branch).** Both A and B are fixed on this branch and the known-defect
+lines are now assertions. A is asserted as effective access (group and other entries empty, another
+account cannot read the file), because a named entry makes stat show the mask, so a literal 0600 is
+not reachable while the agent has inherited read. The design is in `docs/PERMISSIONS.md`.
+
 **B. After uninstall (measured).** `uninstall.sh` exits 0 and removes the user, the group and the files, but the granted folder keeps the default list (base entries), and every file inside and the parent folder `/srv` keep a mask entry (`ls -l` shows a `+`). The new-file effect of A therefore outlasts the uninstall. Cause: the undo uses `setfacl -x u:agent`, which removes one entry, not the list. Fix direction: the undo runs `setfacl -R -k` (remove the default list) and `-b` on files that had no list before, or the install records the earlier lists and restores them. Task: **SIR-70** (found with this harness, created by the orchestrator). Scenario 02 holds two known-defect lines for it.
 
 Both are product changes and are not made here. Each known-defect line fails the run, on purpose, the moment the product passes it, so the marker cannot be forgotten.
