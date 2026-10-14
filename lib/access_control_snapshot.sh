@@ -8,7 +8,7 @@
 #
 # record writes what getfacl shows for FOLDER to SNAPSHOT, and for everything inside it when the
 # third argument is yes. a traverse folder (a parent the agent only passes through) is recorded
-# without its contents, which is what no. the snapshot is root only.
+# alone, so it is no. the snapshot is root only.
 #
 # restore removes every extended entry under FOLDER (setfacl -b), then puts back the recorded
 # entries of the folders and files that had extended entries before the grant and still exist.
