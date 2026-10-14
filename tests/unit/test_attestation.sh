@@ -146,6 +146,19 @@ test_a_write_failing_after_the_nonce_is_remembered_refuses_the_replay() {
   assert_contains "$CAPTURED_STDOUT" '"reason": "replayed"'
 }
 
+test_a_verify_that_cannot_take_the_lock_gives_up_after_ten_seconds_and_is_audited() {
+  have_node || return 0
+  setup_roles
+  attest sign --dir "$TEST_TMP/originator" --audience "$(cat "$TEST_TMP/peer/peer-identifier")" --domain shop.example.com --bytes 100 > "$TEST_TMP/envelope.json"
+  write_lock_record "$$" "$(this_host)" live-holder
+  start="$(date +%s)"
+  assert_status 3 attest peer verify --dir "$TEST_TMP/peer" --host shop.example.com --bytes 100 --envelope "$TEST_TMP/envelope.json"
+  elapsed=$(( $(date +%s) - start ))
+  [ "$elapsed" -ge 10 ] || fail "the verify gave up after ${elapsed} seconds, before the ten second wait"
+  assert_contains "$CAPTURED_STDOUT" '"reason": "lock_unavailable"'
+  assert_contains "$(cat "$TEST_TMP/peer/audit.jsonl")" '"outcome":"refused","reason":"lock_unavailable"'
+}
+
 test_peer_refuses_unsigned_wrong_domain_expired_and_tampered() {
   have_node || return 0
   setup_roles

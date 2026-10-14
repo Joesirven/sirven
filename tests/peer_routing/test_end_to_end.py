@@ -326,6 +326,17 @@ class EndToEnd(unittest.TestCase):
         self.assertEqual(["replayed"], [verdict["reason"] for verdict in refused])
         self.assertFalse(os.path.exists(os.path.join(peer, "verify.lock")))
 
+    def test_a_carry_that_cannot_take_the_peer_lock_is_refused(self):
+        peer, command, data, first, clock = self.held_verify(2000)
+        state = os.path.dirname(peer)
+        shutil.copy(os.path.join(self.state, "registry-state.json"), state)
+        with unittest.mock.patch.dict(os.environ, {"SIRVEN_ATTESTATION_TEST_LOCK_WAIT_MS": "300"}):
+            decision = self.carry(self.envelope(), state=state)
+        first_error = self.finish(first)
+        self.assertEqual(0, first.returncode, first_error)
+        self.assertEqual(engine.REFUSE, decision["action"], decision)
+        self.assertEqual("attestation_verifier_unavailable", decision["code"], decision)
+
     def test_a_key_identifier_that_begins_with_a_dash_is_carried(self):
         # key identifiers are base64url, so about one in 64 begins with "-". the ledger check
         # must take it as a value, not as an option, or a valid carry is refused. the verifier is

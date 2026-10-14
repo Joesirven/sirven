@@ -125,6 +125,8 @@ ATTESTATION_ERROR_STATES = {
     "over-cap": "over_cap",
     "replayed": "replayed",
     "wrong-request": "wrong_request",
+    # another verify held the peer lock for the whole wait, so this one was not run.
+    "lock_unavailable": "verifier_unavailable",
 }
 
 # plain-language reasons, written for the person who sees them. codes are stable; the log,
