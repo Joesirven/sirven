@@ -180,3 +180,27 @@ ordinary = [(h.USER_OBJ, 7, h.NO_ID), (h.GROUP_OBJ, 5, h.NO_ID), (h.OTHER, 5, h.
 assert not h.default_is_leftover(ordinary, 1001)
 print("ok")')"
 }
+
+test_the_recorded_mask_comes_back_when_the_grants_entries_come_off() {
+  # bob r-- with mask r--; the grant raised the mask to rw- for the agent. after undo bob must be read only and the
+  # mask must be r-- again, not the rw- the grant left.
+  assert_eq "ok" "$(snapshot_python '
+import base64
+agent, owner = 1002, 1001
+before = [(h.USER_OBJ, 6, h.NO_ID), (h.USER, 4, 1500), (h.GROUP_OBJ, 4, h.NO_ID), (h.MASK, 4, h.NO_ID), (h.OTHER, 4, h.NO_ID)]
+blob = base64.b64encode(h.build(before)).decode()
+now = [(h.USER_OBJ, 6, h.NO_ID), (h.USER, 6, agent), (h.USER, 4, 1500), (h.GROUP_OBJ, 4, h.NO_ID), (h.MASK, 6, h.NO_ID), (h.OTHER, 4, h.NO_ID)]
+assert h.access_without_grant(now, agent, owner, blob) == before
+print("ok")')"
+}
+
+test_a_default_list_with_a_mask_and_no_live_entry_is_an_old_leftover() {
+  assert_eq "ok" "$(snapshot_python '
+owner = 1001
+older = [(h.USER_OBJ, 7, h.NO_ID), (h.GROUP_OBJ, 5, h.NO_ID), (h.MASK, 5, h.NO_ID), (h.OTHER, 5, h.NO_ID)]
+assert h.default_is_leftover(older, owner)
+ordinary = [(h.USER_OBJ, 7, h.NO_ID), (h.GROUP_OBJ, 5, h.NO_ID), (h.OTHER, 5, h.NO_ID)]
+assert not h.default_is_leftover(ordinary, owner)
+assert not h.default_is_leftover(None, owner)
+print("ok")')"
+}
