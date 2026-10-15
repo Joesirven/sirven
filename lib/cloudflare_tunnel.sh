@@ -59,6 +59,7 @@ API_SCRIPT="$SELF_DIR/cloudflare_api.py"
 
 TOKEN=""
 TOKEN_ORIGIN=""
+TOKEN_PROBLEM=""
 FAILED=0
 
 refuse() {
@@ -66,12 +67,20 @@ refuse() {
   exit 2
 }
 
-# require_secret_checks FILE: a copy of this script run without lib/secret_file.sh (or with a file that does not define the checks) must
-# not read a saved file as if it had passed them: the answer is a refusal. guarded where the checks are used, not at load, so that
-# taking the tunnel away (down) does not depend on them.
+# secret_checks_available: lib/secret_file.sh loaded and defines the checks. a copy of this script run without it (or with a file that does
+# not define them) must not read a saved file as if it had passed them: the answer is a refusal. guarded where the checks are used, not
+# at load, so that taking the tunnel away (down) does not depend on them.
+secret_checks_available() {
+  declare -F key_file_problem >/dev/null 2>&1 && declare -F has_extended_access_list >/dev/null 2>&1
+}
+
+secret_checks_message() {
+  printf 'the saved file %s cannot be checked, because the file of checks that goes with this script (lib/secret_file.sh) is missing or damaged, so it is not used.' "$1"
+}
+
+# require_secret_checks FILE: refuse (exit 2) when the checks are missing
 require_secret_checks() {
-  { declare -F key_file_problem >/dev/null 2>&1 && declare -F has_extended_access_list >/dev/null 2>&1; } ||
-    refuse "the saved file $1 cannot be checked, because the file of checks that goes with this script (lib/secret_file.sh) is missing or damaged, so it is not used."
+  secret_checks_available || refuse "$(secret_checks_message "$1")"
 }
 
 fail() {
@@ -191,25 +200,38 @@ parse_options() {
   [ -n "$MARKER" ] || refuse "a record path (--marker) is needed."
 }
 
-# find_token FILE: sets TOKEN and TOKEN_ORIGIN from the environment, else the token file. refuses on an unsafe file; leaves TOKEN
-# empty when there is none.
+# find_token FILE: sets TOKEN and TOKEN_ORIGIN from the environment, else the token file. when the file is unsafe, or the token has
+# characters a token never has, TOKEN stays empty and TOKEN_PROBLEM says why (a caller that has not changed anything yet refuses with
+# it, see require_usable_token; the teardown has already cut access by then and says it and goes on). leaves TOKEN empty when there is none.
 find_token() {
   local file="${1:-}" problem
-  TOKEN="" TOKEN_ORIGIN=""
+  TOKEN="" TOKEN_ORIGIN="" TOKEN_PROBLEM=""
   if [ -n "$CF_ENV_TOKEN" ]; then
     TOKEN="$CF_ENV_TOKEN"; TOKEN_ORIGIN="SIRVEN_CLOUDFLARE_API_TOKEN"
   elif [ -n "$file" ]; then
-    require_secret_checks "$file"
-    problem="$(key_file_problem "$file")"
-    [ -z "$problem" ] || refuse "the API token file $file is not used: $problem."
-    if [ -f "$file" ]; then
+    if ! secret_checks_available; then
+      TOKEN_PROBLEM="$(secret_checks_message "$file")"
+      problem=""
+    else
+      problem="$(key_file_problem "$file")"
+    fi
+    if [ -n "$TOKEN_PROBLEM" ]; then
+      :
+    elif [ -n "$problem" ]; then
+      TOKEN_PROBLEM="the API token file $file is not used: $problem."
+    elif [ -f "$file" ]; then
       TOKEN="$(head -n 1 "$file")"; TOKEN_ORIGIN="$file"
     fi
   fi
   CF_ENV_TOKEN=""
   case "$TOKEN" in
-    *[!A-Za-z0-9_-]*) refuse "the API token in $TOKEN_ORIGIN has characters a Cloudflare token never has (a carriage return from Windows line ends, for one); it is not used." ;;
+    *[!A-Za-z0-9_-]*) TOKEN="" TOKEN_PROBLEM="the API token in $TOKEN_ORIGIN has characters a Cloudflare token never has (a carriage return from Windows line ends, for one); it is not used." ;;
   esac
+}
+
+# require_usable_token: refuse (nothing has been changed yet) when find_token found a token it will not use
+require_usable_token() {
+  [ -z "$TOKEN_PROBLEM" ] || refuse "$TOKEN_PROBLEM"
 }
 
 token_hint() {
@@ -424,6 +446,7 @@ cmd_token_file_check() {
 cmd_check() {
   parse_options "$@"
   find_token "$OPT_TOKEN_FILE"
+  require_usable_token
   same_target "$OPT_HOSTNAME" "$OPT_ACCOUNT"
   if complete; then return 0; fi
   first_look "$OPT_HOSTNAME" "$OPT_ACCOUNT" "$OPT_ZONE"
@@ -437,6 +460,7 @@ cmd_up() {
   done
   [ -d "$(dirname "$MARKER")" ] || refuse "the folder for the record, $(dirname "$MARKER"), is not there."
   find_token "$OPT_TOKEN_FILE"
+  require_usable_token
   same_target "$OPT_HOSTNAME" "$OPT_ACCOUNT"
   if complete; then
     printf 'the tunnel %s is already made and its service %s runs: kept as it is.\n' "$(record_get tunnel_name)" "$OPT_SERVICE"
@@ -514,60 +538,85 @@ systemctl_command_run() {
   "$command" "$@"
 }
 
+# local_teardown: stop and remove, by the names this script was given and only those, what sirven puts on this machine: the service, its
+# unit, the config and the credentials. it needs neither the token nor the record (it runs before either is looked at), so the agent is
+# cut off from this machine whatever state the record is in. sets LOCAL_FOUND=yes when any of it was there, FAILED=1 for what could not
+# be taken away.
+local_teardown() {
+  local path
+  LOCAL_FOUND=no
+  for path in "$OPT_UNIT" "$OPT_CONFIG" "$OPT_CREDENTIALS"; do
+    if [ -e "$path" ] || [ -L "$path" ]; then LOCAL_FOUND=yes; fi
+  done
+  if [ -e "$MARKER" ] || [ -L "$MARKER" ] || service_active "$OPT_SERVICE"; then LOCAL_FOUND=yes; fi
+  [ "$LOCAL_FOUND" = yes ] || return 0
+  if [ -n "$(systemctl_command)" ]; then
+    systemctl_command_run stop "$OPT_SERVICE" >/dev/null 2>&1 || true
+    systemctl_command_run disable "$OPT_SERVICE" >/dev/null 2>&1 || true
+  fi
+  for path in "$OPT_UNIT" "$OPT_CONFIG" "$OPT_CREDENTIALS"; do
+    rm -f "$path" "$path".new.* 2>/dev/null
+    [ ! -e "$path" ] || { printf 'error: could not remove %s\n' "$path" >&2; FAILED=1; }
+  done
+  if [ -n "$(systemctl_command)" ]; then
+    systemctl_command_run daemon-reload >/dev/null 2>&1 || true
+    if service_active "$OPT_SERVICE"; then
+      printf 'error: %s is still running after stop\n' "$OPT_SERVICE" >&2
+      FAILED=1
+    fi
+  fi
+  [ "$FAILED" -eq 0 ] && printf 'stopped and removed the tunnel service, its config and its credentials.\n'
+  return 0
+}
+
 cmd_down() {
-  local service unit config credentials path field recorded fixed
+  local field recorded fixed
   parse_options "$@"
   require_names down
-  find_token "$OPT_TOKEN_FILE"
   rm -f "$MARKER".new.* 2>/dev/null || true
+
+  # 1. this machine first, by the names given, whatever the record is or says: it is the part that cuts the agent off
+  local_teardown
+
+  # 2. the record, for the part in the Cloudflare account
   if [ ! -e "$MARKER" ] && [ ! -L "$MARKER" ]; then
-    printf 'no Cloudflare tunnel of ours is recorded: nothing to take away.\n'
+    if [ "$LOCAL_FOUND" = yes ]; then
+      printf 'there is no record of a tunnel made here, so nothing in your Cloudflare account was looked for or deleted. if an earlier run of sirven made a tunnel or an alias record there (a tunnel named sirven-...), delete them in the Cloudflare dashboard.\n'
+      [ "$FAILED" -eq 0 ] || fail "not everything on this machine was taken away (above). run the same command again."
+    else
+      printf 'no Cloudflare tunnel of ours is recorded: nothing to take away.\n'
+    fi
     return 0
   fi
   if [ -L "$MARKER" ] || [ ! -f "$MARKER" ]; then
-    fail "$MARKER is not a plain file, so it is not trusted. remove it by hand once you have checked it, and look for a tunnel named sirven-... in the Cloudflare dashboard."
+    fail "$MARKER is not a plain file, so it is not trusted for the part in your Cloudflare account (this machine was taken care of above). remove it by hand once you have checked it, and look for a tunnel named sirven-... in the Cloudflare dashboard."
   fi
   python3 -I "$API_SCRIPT" marker-get "$MARKER" account_id >/dev/null 2>&1 </dev/null
-  [ "$?" -ne 1 ] || fail "$MARKER cannot be read. nothing was removed. look for a tunnel named sirven-... in the Cloudflare dashboard."
+  [ "$?" -ne 1 ] || fail "$MARKER cannot be read, so nothing in your Cloudflare account was touched (this machine was taken care of above). look for a tunnel named sirven-... in the Cloudflare dashboard."
   # what is acted on: the names given on the command line, never the record's. a record that names something else (it is root-only, so
   # only an edit by hand does) is said so and left out; what it names is not touched
-  service="$OPT_SERVICE"; unit="$OPT_UNIT"; config="$OPT_CONFIG"; credentials="$OPT_CREDENTIALS"
   for field in service unit config credentials; do
-    case "$field" in service) fixed="$service" ;; unit) fixed="$unit" ;; config) fixed="$config" ;; *) fixed="$credentials" ;; esac
+    case "$field" in service) fixed="$OPT_SERVICE" ;; unit) fixed="$OPT_UNIT" ;; config) fixed="$OPT_CONFIG" ;; *) fixed="$OPT_CREDENTIALS" ;; esac
     recorded="$(record_get "$field")"
     if [ -n "$recorded" ] && [ "$recorded" != "$fixed" ]; then
       printf 'warning: the record %s names the %s as %s, but sirven puts it at %s and acts only there: %s is left alone.\n' "$MARKER" "$field" "$recorded" "$fixed" "$recorded" >&2
     fi
   done
 
-  # the local part: never needs the token
-  if [ -n "$(systemctl_command)" ]; then
-    systemctl_command_run stop "$service" >/dev/null 2>&1 || true
-    systemctl_command_run disable "$service" >/dev/null 2>&1 || true
-  fi
-  for path in "$unit" "$config" "$credentials"; do
-    rm -f "$path" "$path".new.* 2>/dev/null
-    [ ! -e "$path" ] || { printf 'error: could not remove %s\n' "$path" >&2; FAILED=1; }
-  done
-  if [ -n "$(systemctl_command)" ]; then
-    systemctl_command_run daemon-reload >/dev/null 2>&1 || true
-    if service_active "$service"; then
-      printf 'error: %s is still running after stop\n' "$service" >&2
-      FAILED=1
-    fi
-  fi
-  [ "$FAILED" -eq 0 ] && printf 'stopped and removed the tunnel service, its config and its credentials.\n'
-
-  # the part in the Cloudflare account: needs the token
+  # 3. the part in the Cloudflare account: needs the token
   if [ -z "$(record_get tunnel_id)$(record_get tunnel_name)$(record_get record_id)" ]; then
     :
-  elif [ -z "$TOKEN" ]; then
-    printf 'access is already cut: the service is stopped and removed and the tunnel credentials and config are deleted, so no connector can attach to the tunnel any more. what is left is only the inert tunnel object and the alias record in your Cloudflare account: tunnel %s (%s), alias record %s (%s).\n' \
-      "$(record_get tunnel_name)" "$(record_get tunnel_id)" "$(record_get hostname)" "$(record_get record_id)" >&2
-    printf 'error: there is no Cloudflare API token, so those two could not be deleted. to finish, run the same command again with the token (saved as the token file, or in SIRVEN_CLOUDFLARE_API_TOKEN) and it deletes them, or delete them in the dashboard and then remove %s. the record stays until then.\n' "$MARKER" >&2
-    exit 1
-  elif ! remote_cleanup; then
-    FAILED=1
+  else
+    find_token "$OPT_TOKEN_FILE"
+    if [ -z "$TOKEN" ]; then
+      [ -z "$TOKEN_PROBLEM" ] || printf 'error: %s\n' "$TOKEN_PROBLEM" >&2
+      printf 'access is already cut: the service is stopped and removed and the tunnel credentials and config are deleted, so no connector can attach to the tunnel any more. what is left is only the inert tunnel object and the alias record in your Cloudflare account: tunnel %s (%s), alias record %s (%s).\n' \
+        "$(record_get tunnel_name)" "$(record_get tunnel_id)" "$(record_get hostname)" "$(record_get record_id)" >&2
+      printf 'error: there is no Cloudflare API token, so those two could not be deleted. to finish, run the same command again with the token (saved as the token file, or in SIRVEN_CLOUDFLARE_API_TOKEN) and it deletes them, or delete them in the dashboard and then remove %s. the record stays until then.\n' "$MARKER" >&2
+      exit 1
+    elif ! remote_cleanup; then
+      FAILED=1
+    fi
   fi
   [ "$FAILED" -eq 0 ] || fail "not everything was taken away (above). the record $MARKER stays; run the same command again."
   rm -f "$MARKER"

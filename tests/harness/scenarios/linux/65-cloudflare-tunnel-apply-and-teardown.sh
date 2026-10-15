@@ -347,5 +347,41 @@ check "the token is not in the trace of the uninstall, and the account is empty"
 # (xtrace in an exported SHELLOPTS is covered by the unit tests: it also traces the installer's own SSH probe, which a real apply here
 # cannot get past, and that is not what is under test)
 
+# 12. the record is lost or edited: the machine is still cut off, by sirven's own fixed names, and nothing else is touched
+api_clear() { python3 -I -c '
+import json
+p = "/tmp/fake-api/state.json"
+s = json.load(open(p)); s["records"] = {}
+for t in s["tunnels"].values(): t["deleted_at"] = "2026-01-01T00:00:00Z"
+json.dump(s, open(p, "w"))'; }
+local_pieces_gone() { [ ! -e /etc/systemd/system/sirven-cloudflared.service ] && [ ! -e /etc/sirven/cloudflared.yml ] && [ ! -e /etc/sirven/cloudflared-credentials.json ] && [ ! -e /tmp/fake-systemd/sirven-cloudflared.service.active ] && [ ! -e /tmp/fake-systemd/sirven-cloudflared.service.enabled ]; }
+export -f api_clear local_pieces_gone
+reset_machine
+SIRVEN_CLOUDFLARE_API_TOKEN="$TOKEN" install_cf --reinstate >/dev/null 2>&1
+check "setup: the tunnel is made and its service runs" bash -c '[ "$(api_value tunnels)" = 1 ] && [ -e /tmp/fake-systemd/sirven-cloudflared.service.active ]'
+rm -f /var/lib/sirven/cloudflare-tunnel.json
+check_exit "revoke --all with the record lost, and no token, exits 0" 0 revoke_cf
+check "the service is stopped and the unit, config and credentials are gone, though there is no record" local_pieces_gone
+check "it says there is no record, and the account was not touched" bash -c 'grep -q "there is no record of a tunnel made here" <<< "$0" && [ "$(api_value tunnels)" = 1 ] && [ "$(api_value records)" = 1 ]' "$LAST_OUTPUT"
+api_clear
+reset_machine
+SIRVEN_CLOUDFLARE_API_TOKEN="$TOKEN" install_cf --reinstate >/dev/null 2>&1
+rm -f /var/lib/sirven/cloudflare-tunnel.json
+check_exit "uninstall with the record lost exits 0" 0 uninstall_cf
+check "and this machine has no piece of the tunnel left" bash -c 'local_pieces_gone && [ -z "$(cloudflare_files)" ]'
+api_clear
+# a record edited by hand to name a file and a service that are not sirven's
+reset_machine
+SIRVEN_CLOUDFLARE_API_TOKEN="$TOKEN" install_cf --reinstate >/dev/null 2>&1
+printf 'precious\n' > /root/victim-unit; printf 'precious\n' > /root/victim-config; printf 'precious\n' > /root/victim-credentials
+: > /tmp/fake-systemd/cloudflared.service.active; : > /tmp/fake-systemd/cloudflared.service.enabled
+python3 -I /srv/pkg/lib/cloudflare_api.py marker-set /var/lib/sirven/cloudflare-tunnel.json unit=/root/victim-unit config=/root/victim-config credentials=/root/victim-credentials service=cloudflared.service >/dev/null
+SIRVEN_CLOUDFLARE_API_TOKEN="$TOKEN" check_exit "revoke --all with an edited record exits 0" 0 revoke_cf
+check "sirven's own pieces are gone" local_pieces_gone
+check "the files the record named are untouched, and so is the other service" bash -c '[ "$(cat /root/victim-unit)" = precious ] && [ "$(cat /root/victim-config)" = precious ] && [ "$(cat /root/victim-credentials)" = precious ] && [ -e /tmp/fake-systemd/cloudflared.service.active ] && [ -e /tmp/fake-systemd/cloudflared.service.enabled ] && ! grep -q "stop cloudflared.service\|disable cloudflared.service" /tmp/fake-systemd/calls.log'
+check "it said what it left alone" bash -c 'grep -q "is left alone" <<< "$0"' "$LAST_OUTPUT"
+check "the tunnel and the alias record of the account, which the record names by number, are taken away" api_state_empty
+rm -f /root/victim-unit /root/victim-config /root/victim-credentials /tmp/fake-systemd/cloudflared.service.active /tmp/fake-systemd/cloudflared.service.enabled
+
 # nothing of the stand-ins or the scenario's own state is left in a place the next scenario would see: the container is thrown away
 finish

@@ -142,6 +142,33 @@ test_revoke_takes_the_tunnel_away_whatever_transport_it_names_but_only_when_this
   assert_not_contains "$CAPTURED_STDOUT" "stop the tunnel service"
 }
 
+# a record that is lost does not leave the service running: the pieces under sirven's own fixed names are enough for the teardown step
+test_revoke_and_uninstall_take_the_pieces_away_even_when_the_record_is_missing() {
+  TEST_ROOT="$TEST_TMP/root"
+  assert_status 0 cloudflare_install
+  assert_status 0 install_sh revoke --all --dry-run --prefix "$TEST_ROOT"
+  assert_not_contains "$CAPTURED_STDOUT" "take this machine's Cloudflare tunnel away" "nothing of the tunnel is on this machine yet"
+  mkdir -p "$TEST_ROOT/etc/sirven" "$TEST_ROOT/etc/systemd/system"
+  : > "$TEST_ROOT/etc/sirven/cloudflared-credentials.json"
+  assert_no_file "$TEST_ROOT/var/lib/sirven/cloudflare-tunnel.json"
+  assert_status 0 install_sh revoke --all --dry-run --prefix "$TEST_ROOT"
+  assert_contains "$CAPTURED_STDOUT" "take this machine's Cloudflare tunnel away" "the credentials alone are enough"
+  assert_status 0 install_sh revoke --all --dry-run --prefix "$TEST_ROOT" --transport none
+  assert_contains "$CAPTURED_STDOUT" "take this machine's Cloudflare tunnel away"
+  rm -f "$TEST_ROOT/etc/sirven/cloudflared-credentials.json"
+  : > "$TEST_ROOT/etc/systemd/system/sirven-cloudflared.service"
+  assert_status 0 install_sh revoke --all --dry-run --prefix "$TEST_ROOT"
+  assert_contains "$CAPTURED_STDOUT" "take this machine's Cloudflare tunnel away" "the unit alone is enough"
+  # the install record's undo line, made by the apply, is run by the uninstall; its check no longer says "already done" while a piece is there
+  assert_contains "$(cat "$TEST_ROOT/var/lib/sirven/install-record.tsv")" "etc/systemd/system/sirven-cloudflared.service"
+  rm -f "$TEST_ROOT/etc/systemd/system/sirven-cloudflared.service"
+  : > "$TEST_ROOT/etc/sirven/cloudflared.yml"
+  grep -v 'cloudflare_tunnel.sh down' "$TEST_ROOT/var/lib/sirven/install-record.tsv" > "$TEST_TMP/record.without" || true
+  cp "$TEST_TMP/record.without" "$TEST_ROOT/var/lib/sirven/install-record.tsv"
+  assert_status 0 uninstall_sh --dry-run --prefix "$TEST_ROOT"
+  assert_contains "$CAPTURED_STDOUT" "take this machine's Cloudflare tunnel away: the one a run left behind" "the config alone is enough, and the install record says nothing of it"
+}
+
 test_the_revoke_step_continues_on_failure_and_is_checked_at_the_end() {
   TEST_ROOT="$TEST_TMP/root"
   local index=0 found=no

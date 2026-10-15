@@ -382,7 +382,7 @@ plan_uninstall_tailscale_leftovers() {
 plan_uninstall_cloudflare_leftovers() {
   local marker index script token_file
   marker="$(rooted "$(cloudflare_marker_file)")"
-  if [ ! -e "$marker" ] && [ ! -L "$marker" ]; then return 0; fi
+  if ! cloudflare_made_by_us; then return 0; fi
   # the install record already undoes it: that line takes it away, and once is enough
   index=0
   while [ "$index" -lt "$RECORD_COUNT" ]; do
@@ -393,7 +393,7 @@ plan_uninstall_cloudflare_leftovers() {
   token_file="$(rooted "$(cloudflare_token_file)")"
   plan_section "undo: cloudflare tunnel left behind"
   plan_step system "take this machine's Cloudflare tunnel away: the one a run left behind, and in your account only what its record names" \
-    "[ ! -e $marker ]" \
+    "$(cloudflare_taken_away_check)" \
     "{ set +x; } 2>/dev/null; SIRVEN_CLOUDFLARE_API_TOKEN=\"\${HELD_SIRVEN_CLOUDFLARE_API_TOKEN:-}\" bash $script down $(cloudflare_paths_arguments) --token-file $token_file" \
     "bash lib/cloudflare_tunnel.sh down $(cloudflare_paths_arguments) --token-file $(cloudflare_token_file)   # needs the token again for the part in your account (the token file, or SIRVEN_CLOUDFLARE_API_TOKEN); without it the service and credentials still go and the step says what is left"
   plan_forget_secrets HELD_SIRVEN_CLOUDFLARE_API_TOKEN SIRVEN_CLOUDFLARE_API_TOKEN

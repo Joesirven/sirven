@@ -99,9 +99,31 @@ cloudflare_applied() {
   bash "$ROOT_DIR/lib/cloudflare_tunnel.sh" applied "${PREFIX}$(cloudflare_marker_file)" >/dev/null 2>&1
 }
 
-# cloudflare_made_by_us: an earlier run of this package made a tunnel here (the record is there, complete or not).
-cloudflare_made_by_us() {
+# cloudflare_record_there: the record of what the tunnel step made is there (a file, or anything under that name)
+cloudflare_record_there() {
   [ -e "${PREFIX}$(cloudflare_marker_file)" ] || [ -L "${PREFIX}$(cloudflare_marker_file)" ]
+}
+
+# cloudflare_local_pieces: the unit, the config or the credentials, by sirven's own fixed names, are on this machine (whatever the record
+# is, or whether there is one)
+cloudflare_local_pieces() {
+  local path
+  for path in "$(cloudflare_unit_file)" "$(cloudflare_config_file)" "$(cloudflare_credentials_file)"; do
+    if [ -e "${PREFIX}$path" ] || [ -L "${PREFIX}$path" ]; then return 0; fi
+  done
+  return 1
+}
+
+# cloudflare_made_by_us: an earlier run of this package made a tunnel here: its record is there (complete or not), or pieces of it are
+# on this machine under sirven's own fixed names. a record lost or damaged does not leave the service running.
+cloudflare_made_by_us() {
+  cloudflare_record_there || cloudflare_local_pieces
+}
+
+# cloudflare_taken_away_check: the text of a plan check that holds once the record and every piece on this machine are gone
+cloudflare_taken_away_check() {
+  printf '[ ! -e %s ] && [ ! -e %s ] && [ ! -e %s ] && [ ! -e %s ]' "$(rooted "$(cloudflare_marker_file)")" "$(rooted "$(cloudflare_unit_file)")" \
+    "$(rooted "$(cloudflare_config_file)")" "$(rooted "$(cloudflare_credentials_file)")"
 }
 
 # true when a token is there to work with: held from the environment, or in the token file. the token file counts only when it passes
@@ -174,8 +196,7 @@ cloudflare_refuse_before_apply() {
 }
 
 plan_cloudflare() {
-  local marker script hostname account token_file
-  marker="$(rooted "$(cloudflare_marker_file)")"
+  local script hostname account token_file
   script="$(rooted "$(cloudflare_tunnel_script)")"
   token_file="$(rooted "$(cloudflare_token_file)")"
   hostname="${CLOUDFLARE_HOSTNAME:-$CLOUDFLARE_PLACEHOLDER_HOSTNAME}"
@@ -210,7 +231,7 @@ do not add email code login or any other login method.
       "bash $(cloudflare_tunnel_script) up $(cloudflare_paths_arguments) $(cloudflare_target_arguments)" \
       "$CLOUDFLARE_MACOS_REASON" \
       "cloudflare_applied"
-    plan_undo "take this machine's Cloudflare tunnel away, if this installer made it" "[ ! -e $marker ]" \
+    plan_undo "take this machine's Cloudflare tunnel away, if this installer made it" "$(cloudflare_taken_away_check)" \
       "bash $script down $(cloudflare_paths_arguments) --token-file $token_file"
   else
     plan_step system "make the tunnel, point the hostname at it, and run it as a service" \
@@ -226,7 +247,7 @@ bash $script up $(cloudflare_paths_arguments) $(cloudflare_target_arguments)"
     # cloudflare_hold_token): no step before or after starts a child process that inherits it. once it has run (done, failed or
     # skipped) the held copy is dropped from the shell too, and the exported name is unset again as defense in depth.
     plan_forget_secrets HELD_SIRVEN_CLOUDFLARE_API_TOKEN SIRVEN_CLOUDFLARE_API_TOKEN
-    plan_undo "take this machine's Cloudflare tunnel away, if this installer made it" "[ ! -e $marker ]" \
+    plan_undo "take this machine's Cloudflare tunnel away, if this installer made it" "$(cloudflare_taken_away_check)" \
       "{ set +x; } 2>/dev/null; SIRVEN_CLOUDFLARE_API_TOKEN=\"\${HELD_SIRVEN_CLOUDFLARE_API_TOKEN:-}\" bash $script down $(cloudflare_paths_arguments) --token-file $token_file" \
       "cloudflared tunnel delete, and the alias record, via lib/cloudflare_tunnel.sh down: the service, the credentials and the config go from this machine; the tunnel and the alias record go from your account, each only while it is still the one this installer made. needs the token again (the token file, or SIRVEN_CLOUDFLARE_API_TOKEN)"
     plan_step run "remove the used API token file, if one was saved" \

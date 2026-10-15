@@ -514,14 +514,15 @@ plan_kill_switch_tailscale_logout() {
     plan_continue
   else
     plan_planonly "log this machine out of the tailnet: the node this installer joined, and only it" \
-      "bash $script leave $marker" "$KILL_SWITCH_REASON" "[ ! -e $marker ]"
+      "bash $script leave $marker" "$KILL_SWITCH_REASON" "$(cloudflare_taken_away_check)"
   fi
 }
 
 # plan_kill_switch_cloudflare_teardown: undo exactly what the installer's tunnel step made. only when this installer made a tunnel
 # (its record is there, complete or half made), whatever transport this revoke names: the record says what to take away, and the script
-# acts only on that, so a tunnel, a record or a cloudflared of the owner's own is never touched. the part on this machine (service,
-# credentials, config) needs no token and is done first; the part in the Cloudflare account needs the token, and without it the step
+# acts only on that, so a tunnel, a record or a cloudflared of the owner's own is never touched. a record that is missing or damaged does
+# not leave the service running: the unit, config and credentials are taken away by sirven's own fixed names whenever they are there. the
+# part on this machine (service, credentials, config) needs no token and is done first; the part in the Cloudflare account needs the token, and without it the step
 # fails loudly, keeps the record and says what is left, so running the command again with the token finishes it.
 plan_kill_switch_cloudflare_teardown() {
   local marker
@@ -532,7 +533,7 @@ plan_kill_switch_cloudflare_teardown() {
   marker="$(rooted "$(cloudflare_marker_file)")"
   if [ "$OPERATING_SYSTEM" = linux ]; then
     plan_step system "take this machine's Cloudflare tunnel away: its service and credentials, and in your account the tunnel and the alias record this installer made, and only those" \
-      "[ ! -e $marker ]" \
+      "$(cloudflare_taken_away_check)" \
       "cloudflare_down" \
       "bash $(cloudflare_tunnel_script) down $(cloudflare_paths_arguments) --token-file $(cloudflare_token_file)   # via lib/cloudflare_tunnel.sh down; the token comes from the token file or from SIRVEN_CLOUDFLARE_API_TOKEN, and without it the service and credentials still go and the step says what is left in the account"
     plan_tag verify

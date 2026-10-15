@@ -334,6 +334,78 @@ test_down_acts_only_on_the_names_it_is_given_not_on_those_in_the_record() {
   assert_eq 0 "$(api_value tunnels)" "the tunnel in the account is taken away, by the record's tunnel number"
 }
 
+# the record is missing or damaged: the machine is still cut off, by sirven's own fixed names. only the part in the account, which the
+# record drives, cannot be done, and the command says so
+test_down_with_no_record_still_takes_this_machine_s_pieces_away() {
+  setup_tunnel
+  assert_status 0 up
+  rm -f "$MARKER"
+  assert_file_exists "$UNIT"
+  assert_status 0 down
+  assert_contains "$CAPTURED_STDOUT" "stopped and removed the tunnel service, its config and its credentials"
+  assert_contains "$CAPTURED_STDOUT" "there is no record of a tunnel made here"
+  assert_not_contains "$CAPTURED_STDOUT" "nothing to take away"
+  assert_no_file "$UNIT"
+  assert_no_file "$CONFIG"
+  assert_no_file "$CREDENTIALS"
+  assert_no_file "$FAKE_SYSTEMD_DIR/sirven-cloudflared.service.active"
+  assert_no_file "$FAKE_SYSTEMD_DIR/sirven-cloudflared.service.enabled"
+  assert_eq 1 "$(api_value tunnels)" "nothing in the account is touched without a record to say what is ours"
+  assert_eq 1 "$(api_value records)"
+  # and again: nothing is left, so nothing is done, and it does not fail
+  assert_status 0 down
+  assert_contains "$CAPTURED_STDOUT" "nothing to take away"
+}
+
+test_down_with_a_damaged_record_takes_this_machine_s_pieces_away_first_and_then_fails_loudly() {
+  setup_tunnel
+  assert_status 0 up
+  printf 'this is not json\n' > "$MARKER"
+  assert_status 1 down
+  assert_contains "$CAPTURED_STDERR" "cannot be read"
+  assert_contains "$CAPTURED_STDERR" "this machine was taken care of"
+  assert_no_file "$UNIT"
+  assert_no_file "$CONFIG"
+  assert_no_file "$CREDENTIALS"
+  assert_no_file "$FAKE_SYSTEMD_DIR/sirven-cloudflared.service.active"
+  assert_file_exists "$MARKER" "the damaged record stays for the owner to look at"
+  assert_eq 1 "$(api_value tunnels)"
+}
+
+test_down_with_a_record_that_is_a_link_takes_this_machine_s_pieces_away_first_and_then_fails_loudly() {
+  setup_tunnel
+  assert_status 0 up
+  rm -f "$MARKER"
+  ln -s /etc/hosts "$MARKER"
+  assert_status 1 down
+  assert_contains "$CAPTURED_STDERR" "is not a plain file"
+  assert_no_file "$UNIT"
+  assert_no_file "$CONFIG"
+  assert_no_file "$CREDENTIALS"
+  assert_no_file "$FAKE_SYSTEMD_DIR/sirven-cloudflared.service.active"
+}
+
+# an unsafe token file does not stand between the agent and the cut: this machine is taken care of before the token is looked at
+test_down_cuts_this_machine_off_before_it_looks_at_the_token_file() {
+  setup_tunnel
+  assert_status 0 up
+  printf '%s\n' "$SENTINEL_TOKEN" > "$TEST_TMP/token-file"
+  chmod 644 "$TEST_TMP/token-file"
+  TOKEN_FOR_RUN="" assert_status 1 bash "$HELPER" down --marker "$MARKER" "${NAMES[@]}" --token-file "$TEST_TMP/token-file"
+  assert_contains "$CAPTURED_STDERR" "is not used: its mode is"
+  assert_contains "$CAPTURED_STDERR" "access is already cut"
+  assert_not_contains "$CAPTURED_STDERR" "$SENTINEL_TOKEN"
+  assert_no_file "$UNIT"
+  assert_no_file "$CONFIG"
+  assert_no_file "$CREDENTIALS"
+  assert_no_file "$FAKE_SYSTEMD_DIR/sirven-cloudflared.service.active"
+  assert_file_exists "$MARKER"
+  assert_eq 1 "$(api_value tunnels)"
+  chmod 600 "$TEST_TMP/token-file"
+  TOKEN_FOR_RUN="" assert_status 0 bash "$HELPER" down --marker "$MARKER" "${NAMES[@]}" --token-file "$TEST_TMP/token-file"
+  assert_eq 0 "$(api_value tunnels)"
+}
+
 test_down_needs_the_names_and_plain_ones() {
   setup_tunnel
   assert_status 2 bash "$HELPER" down --marker "$MARKER"
