@@ -55,7 +55,7 @@ check "with the mask at --- the group bits show nothing: the case the mode bits 
 check_exit "the same file is refused with the mask hiding the entry" 2 install_ts
 check "and it names the access control list" bash -c 'grep -q "extended access control list" <<< "$0"' "$LAST_OUTPUT"
 check "tailscale was never asked to join" bash -c '! grep -q "^tailscale up --auth-key" /tmp/fake-ts/calls.log 2>/dev/null'
-# 1c. a key file with a second name (a hard link) is refused too: the other name may sit where others can read it
+# 1c. a key file with a second name (a hard link) is refused too: the removal after the join deletes only one name, and the key would stay on disk under the other
 setfacl -b "$KEY_FILE"
 mkdir -p /var/other-name && ln "$KEY_FILE" /var/other-name/copy
 check_exit "apply with a root-owned 0600 key file that has a second name is refused" 2 install_ts

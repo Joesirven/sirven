@@ -16,10 +16,14 @@
 # environment of that one command (the join step, and the first look that checks the join would be accepted); the join then
 # unsets it at once and gives tailscale a private file. what unset cannot do is scrub the block of the environment a process
 # was started with: root can read it in /proc/<process number>/environ for as long as the process runs, for the installer and
-# for those two short-lived processes (the first look and the join). the root gate's own helpers (its python3 check) and, with the
-# one-line bootstrap, the download, checksum and unpack tools start before the installer's first line, so they also start with the
-# variables the caller exported.
+# for those two short-lived processes (the first look and the join). some processes start before main() runs, so before
+# tailscale_hold_key, and they start with the variables the caller exported: the dirname of install.sh (and of uninstall.sh),
+# which finds its own folder on every run; as root, the root gate's uname check (on any system) and, on linux, its python3 check;
+# and, with the one-line bootstrap, its download, checksum and unpack tools. the key file avoids all of this: the key is never in
+# any environment.
 # the key file is the only route that never puts the key in an environment, which is why the plan names it first.
+# opt-in debugging: the shell trace (bash -x, or set -x) prints the key in plain text on the lines that hold it. do not trace the
+# installer while a key is in the environment.
 # reads: PREFIX, PACKAGE, CONFIG_DIR, STATE_DIR, SERVICE_USER, ADOPT_TAILSCALE, OPERATING_SYSTEM
 
 # the two places the environment route can hold the key, not exported (see tailscale_hold_key). the held names are their own

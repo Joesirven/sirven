@@ -545,7 +545,7 @@ shim_commands_that_record_their_environment() {
   SHIM_BIN="$bin"
   SHIM_LOG="$TEST_TMP/child-environment-names"
   : > "$SHIM_LOG"
-  for name in mkdir chmod chown install ln touch cp mv rm id; do
+  for name in mkdir chmod chown install ln touch cp mv rm id grep cut awk mktemp rmdir; do
     real="$(command -v "$name")" || continue
     cat > "$bin/$name" <<SHIM
 #!/bin/sh
@@ -594,12 +594,28 @@ test_when_the_machine_is_already_the_agent_node_no_later_child_sees_the_key() {
   assert_key_nowhere "$root" "$SHIM_LOG"
 }
 
-# the key still gets to the join: the environment route works, and the saved key file is used when there is no variable
+# uninstall never needs the key, so no child it starts is given one. an install with no transport leaves a record for uninstall to
+# read; the removal then runs its children through the stand-ins, with the key exported on the way in.
+test_an_uninstall_child_does_not_see_an_exported_key() {
+  local root="$TEST_TMP/root"
+  assert_status 0 install_sh --prefix "$root" --level observer --transport none
+  shim_commands_that_record_their_environment
+  PATH="$SHIM_BIN:$PATH" SIRVEN_TAILSCALE_AUTHKEY="$SENTINEL_KEY" TAILSCALE_AUTHKEY="$SENTINEL_KEY" \
+    assert_status 0 env SIRVEN_OS_OVERRIDE=linux "$REPO_DIR/uninstall.sh" --dry-run --prefix "$root"
+  assert_contains "$(cat "$SHIM_LOG")" "mktemp:" "children were started (else this test proves nothing)"
+  assert_not_contains "$(cat "$SHIM_LOG")" "AUTHKEY" "the environment of every child the removal started"
+  assert_key_nowhere "$root" "$SHIM_LOG"
+}
+
+# the key still gets to the join, and no other step of the install plan is given it. the plan is the one an install builds (the
+# fake root is only a prefix). the join's action is run exactly as the plan wrote it; only the script path it names is a stand-in
+# that records which variables it was handed (names only, never values). every other step's action, check and undo text is searched
+# for the names of the key's variables.
 test_the_held_key_reaches_the_join_and_only_the_join() {
-  local joiner="$TEST_TMP/joiner"
+  local root="$TEST_TMP/root" joiner="$TEST_TMP/joiner" script index join_index=-1 text
   cat > "$joiner" <<SHIM
 #!/bin/sh
-# stands in for tailscale_node.sh: records whether the two variables were handed to it, never their values
+# stands in for lib/tailscale_node.sh: records whether the two variables were handed to it, never their values
 printf '%s|%s\\n' "\${SIRVEN_TAILSCALE_AUTHKEY:+sirven-named}" "\${TAILSCALE_AUTHKEY:+plain-named}" > "$TEST_TMP/handed"
 SHIM
   chmod 755 "$joiner"
@@ -609,9 +625,44 @@ SHIM
   assert_eq "" "$(env | grep AUTHKEY || true)" "nothing left in the environment after tailscale_hold_key"
   assert_eq "$SENTINEL_KEY" "$HELD_SIRVEN_TAILSCALE_AUTHKEY"
   assert_eq "$SENTINEL_KEY" "$HELD_TAILSCALE_AUTHKEY"
-  # the action the join step runs, with the script swapped for the stand-in
-  eval "SIRVEN_TAILSCALE_AUTHKEY=\"\${HELD_SIRVEN_TAILSCALE_AUTHKEY:-}\" TAILSCALE_AUTHKEY=\"\${HELD_TAILSCALE_AUTHKEY:-}\" sh $joiner"
-  assert_eq "sirven-named|plain-named" "$(cat "$TEST_TMP/handed")"
+
+  # the plan an install builds with the tailscale transport, on linux, under a fake root
+  parse_arguments --prefix "$root" --level observer --transport tailscale --owner example
+  setup_from_environment
+  OPERATING_SYSTEM=linux
+  PACKAGE="$(package_name "$ROOT_DIR/project.json")"
+  layout_set_directories
+  STAGE_DIR="$TEST_TMP/stage"
+  mkdir -p "$STAGE_DIR"
+  PLAN_PREFIX="$PREFIX"
+  PLAN_OPERATING_SYSTEM="$OPERATING_SYSTEM"
+  PLAN_SIMULATION_LOG=""
+  build_plan
+  index=0
+  while [ "$index" -lt "$PLAN_COUNT" ]; do
+    [ "${PLAN_TITLE[index]}" != "join the tailnet as a tagged device with that key" ] || join_index="$index"
+    index=$((index + 1))
+  done
+  [ "$join_index" -ge 0 ] || fail "the install plan has no join step"
+
+  # the join's action runs as written, with the script it names pointed at the stand-in
+  script="$(rooted "$(tailscale_node_script)")"
+  mkdir -p "$(dirname "$script")"
+  cp "$joiner" "$script"
+  ( eval "${PLAN_ACTION[join_index]}" )
+  assert_eq "sirven-named|plain-named" "$(cat "$TEST_TMP/handed")" "the join is handed both held names"
+
+  # and no other step, before or after the join, names the key's variables anywhere in what it runs or checks
+  index=0
+  while [ "$index" -lt "$PLAN_COUNT" ]; do
+    if [ "$index" -ne "$join_index" ]; then
+      for text in "${PLAN_ACTION[index]}" "${PLAN_CHECK[index]}" "${PLAN_UNDO_ACTION[index]}" "${PLAN_UNDO_CHECK[index]}"; do
+        assert_not_contains "$text" "AUTHKEY" "step '${PLAN_TITLE[index]}' names the key's variables"
+        assert_not_contains "$text" "HELD_" "step '${PLAN_TITLE[index]}' names the held key"
+      done
+    fi
+    index=$((index + 1))
+  done
   # and the exported names are not set in this shell afterwards
   assert_eq "" "$(env | grep AUTHKEY || true)"
 }
@@ -626,6 +677,7 @@ test_a_hard_linked_key_file_is_refused() {
   ln "$TEST_TMP/key-file" "$TEST_TMP/other-name"
   assert_status 2 bash "$NODE" key-file-check "$TEST_TMP/key-file"
   assert_contains "$CAPTURED_STDERR" "more than one name (2 hard links)"
+  assert_contains "$CAPTURED_STDERR" "the key would stay on disk under the other"
   assert_status 2 bash "$NODE" join "$MARKER" agent "$TEST_TMP/key-file"
   assert_contains "$CAPTURED_STDERR" "more than one name"
   assert_contains "$CAPTURED_STDERR" "nothing was changed"

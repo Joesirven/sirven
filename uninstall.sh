@@ -453,6 +453,10 @@ finish() {
 }
 
 main() {
+  # first, before anything starts a process: removal never needs the Tailscale auth key, so it leaves the exported environment
+  # and is dropped (see lib/tailscale.sh). the dirname above still starts with the caller's variables, as install.sh's does.
+  tailscale_hold_key
+  tailscale_forget_held_key
   parse_arguments "$@"
   OPERATING_SYSTEM="$(detect_os)"
   PACKAGE="$(package_name "$ROOT_DIR/project.json")"

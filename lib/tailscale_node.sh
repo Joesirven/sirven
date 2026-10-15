@@ -16,8 +16,9 @@
 # make is never logged out, and no other node of the tailnet is touched: logout acts on this machine only.
 #
 # the auth key comes from KEY_FILE (the safer way), which must be a plain file owned by root (whoever runs this, when not root)
-# that no other account can read or write: mode 0600, one name only (a hard link is refused, because the other name may sit where
-# others can read it) and no extended access control list (an access entry for another account, which the mode bits can hide).
+# that no other account can read or write: mode 0600, one name only (a hard link is refused: the removal after the join deletes only
+# the name it was given, so the key would stay on disk under the other name, which may sit where others can read it) and no
+# extended access control list (an access entry for another account, which the mode bits can hide).
 # or else from the environment, SIRVEN_TAILSCALE_AUTHKEY or TAILSCALE_AUTHKEY, which this script takes into variables of its own
 # and unsets before it starts any other process, so no process it starts inherits them. unsetting cannot scrub the block of the
 # environment that this process (and whoever started it) was given, which root can read in /proc/<process number>/environ for as
@@ -94,11 +95,12 @@ key_file_problem() {
     printf 'it is owned by account number %s, not by root' "$owner"
     return 0
   fi
-  # a second name for the same file (a hard link) passes the owner and mode checks above, and the other name may sit in a folder
-  # others can read
+  # a second name for the same file (a hard link) passes the owner and mode checks above, but the removal after the join deletes only
+  # the name it was given, so the key would stay on disk under the other name. a bind mount or a link made after this check has run
+  # is not caught here at all (both need root), and the same removal leaves the key on disk under it.
   case "$links" in
     1) ;;
-    *) printf 'it has more than one name (%s hard links): another name for the same file may be readable by others; copy the key into a new file (umask 077; cat KEY_FILE > NEW_FILE), mode 0600, and remove the old names' "$links"; return 0 ;;
+    *) printf 'it has more than one name (%s hard links): the removal after the join deletes only one of them, so the key would stay on disk under the other; copy the key into a new file (umask 077; cat KEY_FILE > NEW_FILE), mode 0600, and remove the old names' "$links"; return 0 ;;
   esac
   if has_extended_access_list "$file"; then
     printf 'it has an extended access control list, an access entry beyond the owner, group and other bits (the mode bits do not show who it lets in); remove it (setfacl -b on Linux, chmod -N on macOS) and keep the mode 0600'
