@@ -21,8 +21,8 @@ set -euo pipefail
 SIRVEN_REPOSITORY="Joesirven/sirven"
 
 # release pin, written by bootstrap/release.sh: the git tag, and the checksum of its archive.
-SIRVEN_PINNED_TAG="v0.1.0"
-SIRVEN_PINNED_SHA256="556ce5fb658c6d6f1e0fa74de39c4d6c4508c61f65ac51dd52c3feda914a2718"
+SIRVEN_PINNED_TAG="v0.2.0"
+SIRVEN_PINNED_SHA256="7750941c45a627f353362dda0a7f54e5b589cdf4e5b0f6bef78ba5e00beeb6ad"
 
 # the arguments as they were given. main checks them again before it runs anything, so a download
 # cut off in its last line can never run the installer with different arguments.
