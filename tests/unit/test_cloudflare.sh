@@ -305,6 +305,22 @@ test_no_step_starts_a_child_that_inherits_the_token() {
   assert_token_nowhere "$TEST_ROOT" "$SHIM_LOG"
 }
 
+# a shell trace of the installer (bash -x, or xtrace in an exported SHELLOPTS) prints every expansion: the lines that hold the token
+# switch it off, so the trace shows the work and never the token
+test_a_shell_trace_of_the_installer_does_not_carry_the_token() {
+  TEST_ROOT="$TEST_TMP/root"
+  SIRVEN_OS_OVERRIDE=linux SIRVEN_TAILSCALE=none SIRVEN_BB=none SIRVEN_CLOUDFLARE_API_TOKEN="$SENTINEL_TOKEN" \
+    assert_status 0 bash -x "$REPO_DIR/install.sh" --prefix "$TEST_ROOT" --level observer --transport cloudflare --cloudflare-hostname "$HOST_NAME" --cloudflare-account "$ACCOUNT" --owner example
+  assert_contains "$CAPTURED_STDERR" "cloudflare_hold_token" "the trace is on (else this test proves nothing)"
+  assert_token_nowhere "$TEST_ROOT"
+  SHELLOPTS=xtrace SIRVEN_OS_OVERRIDE=linux SIRVEN_TAILSCALE=none SIRVEN_BB=none SIRVEN_CLOUDFLARE_API_TOKEN="$SENTINEL_TOKEN" \
+    assert_status 0 bash "$REPO_DIR/install.sh" --prefix "$TEST_ROOT/two" --level observer --transport cloudflare --cloudflare-hostname "$HOST_NAME" --cloudflare-account "$ACCOUNT" --owner example
+  assert_token_nowhere "$TEST_ROOT"
+  # and the uninstall, and the revoke, which hold the token for the step that takes the tunnel away
+  SIRVEN_OS_OVERRIDE=linux SIRVEN_CLOUDFLARE_API_TOKEN="$SENTINEL_TOKEN" assert_status 0 bash -x "$REPO_DIR/uninstall.sh" --dry-run --prefix "$TEST_ROOT"
+  assert_token_nowhere "$TEST_ROOT"
+}
+
 test_with_another_transport_a_token_in_the_environment_reaches_no_child() {
   TEST_ROOT="$TEST_TMP/root"
   shim_commands_that_record_their_environment

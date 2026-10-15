@@ -20,8 +20,9 @@
 # the token would be accepted, the step that makes the tunnel, and the step that takes it away; each unsets it at once and gives the
 # interpreter that talks to the API the token through standard input only. what unset cannot do is scrub the block of the
 # environment a process was started with: root can read it in /proc/<process number>/environ while the process runs. give the token
-# through the root-owned token file to avoid this. the shell trace (bash -x) prints the token in plain text: do not trace the
-# installer while a token is in the environment.
+# through the root-owned token file to avoid this. the shell trace (bash -x) prints every expansion, so the
+# lines that expand the token switch the trace off (and back on), and the helper switches it off from its first line; a trace of the
+# installer shows the rest of its work and never the token (scenario 65 traces a refusal and an apply and looks for it).
 # reads: PREFIX, PACKAGE, CONFIG_DIR, STATE_DIR, SERVICE_USER, ROOT_DIR, OPERATING_SYSTEM, COMMAND, TRANSPORT, DRY_RUN, CLOUDFLARE_*
 
 CLOUDFLARE_SERVICE="sirven-cloudflared.service"
@@ -39,10 +40,16 @@ HELD_SIRVEN_CLOUDFLARE_API_TOKEN=""
 
 # cloudflare_hold_token: take the token out of the exported environment, once, before anything else runs. an exported variable of the
 # held name that came from outside is dropped first, so the held variable is a plain shell variable and not exported.
+# the shell trace (bash -x) prints every expansion, token included, so it is switched off for the lines that expand the token and
+# switched on again after; the same in the two functions below that expand it. (the plan actions below switch it off themselves.)
 cloudflare_hold_token() {
-  local named="${SIRVEN_CLOUDFLARE_API_TOKEN:-}"
+  local was_tracing=no named
+  case "$-" in *x*) was_tracing=yes; set +x ;; esac
+  named="${SIRVEN_CLOUDFLARE_API_TOKEN:-}"
   unset SIRVEN_CLOUDFLARE_API_TOKEN HELD_SIRVEN_CLOUDFLARE_API_TOKEN
   HELD_SIRVEN_CLOUDFLARE_API_TOKEN="$named"
+  [ "$was_tracing" = no ] || set -x
+  return 0
 }
 
 # cloudflare_forget_held_token: drop the held token from this shell too, once nothing will read it.
@@ -53,7 +60,11 @@ cloudflare_forget_held_token() {
 # cloudflare_tunnel_with_token ARGUMENT...: run lib/cloudflare_tunnel.sh with the held token in the environment of that one command,
 # and nowhere else. it unsets the variable before it starts any process of its own.
 cloudflare_tunnel_with_token() {
-  SIRVEN_CLOUDFLARE_API_TOKEN="${HELD_SIRVEN_CLOUDFLARE_API_TOKEN:-}" bash "$ROOT_DIR/lib/cloudflare_tunnel.sh" "$@"
+  local was_tracing=no status=0
+  case "$-" in *x*) was_tracing=yes; set +x ;; esac
+  SIRVEN_CLOUDFLARE_API_TOKEN="${HELD_SIRVEN_CLOUDFLARE_API_TOKEN:-}" bash "$ROOT_DIR/lib/cloudflare_tunnel.sh" "$@" || status=$?
+  [ "$was_tracing" = no ] || set -x
+  return "$status"
 }
 
 cloudflare_token_file() {
@@ -97,9 +108,11 @@ cloudflare_made_by_us() {
 # the same check the tunnel step makes (a plain file, owned by root, no extended access control list, no permission for anyone else), so the
 # refusal comes before a change.
 cloudflare_token_available() {
-  [ -n "${HELD_SIRVEN_CLOUDFLARE_API_TOKEN:-}" ] ||
-    bash "$ROOT_DIR/lib/cloudflare_tunnel.sh" token-file-check "${PREFIX}$(cloudflare_token_file)" >/dev/null 2>&1 ||
-    return 1
+  local was_tracing=no held=no
+  case "$-" in *x*) was_tracing=yes; set +x ;; esac
+  [ -z "${HELD_SIRVEN_CLOUDFLARE_API_TOKEN:-}" ] || held=yes
+  [ "$was_tracing" = no ] || set -x
+  [ "$held" = yes ] || bash "$ROOT_DIR/lib/cloudflare_tunnel.sh" token-file-check "${PREFIX}$(cloudflare_token_file)" >/dev/null 2>&1
 }
 
 # the arguments of the helper that name where everything goes, as one shell-quoted line
@@ -200,7 +213,7 @@ do not add email code login or any other login method.
   else
     plan_step system "make the tunnel, point the hostname at it, and run it as a service" \
       "cloudflare_applied" \
-      "SIRVEN_CLOUDFLARE_API_TOKEN=\"\${HELD_SIRVEN_CLOUDFLARE_API_TOKEN:-}\" bash $script up $(cloudflare_paths_arguments) $(cloudflare_target_arguments)" \
+      "{ set +x; } 2>/dev/null; SIRVEN_CLOUDFLARE_API_TOKEN=\"\${HELD_SIRVEN_CLOUDFLARE_API_TOKEN:-}\" bash $script up $(cloudflare_paths_arguments) $(cloudflare_target_arguments)" \
       "# runs lib/cloudflare_tunnel.sh up; the token comes from $(cloudflare_token_file) or from the environment of this one command, and is never put on a command line.
 # it makes a tunnel named sirven-$SERVICE_USER-<this machine's name>-<random> in account $account, managed from this machine (the dashboard cannot widen it),
 # keeps its credentials in $(cloudflare_credentials_file) and its config in $(cloudflare_config_file) (both root-only), points $hostname at it with an alias record,
@@ -212,7 +225,7 @@ bash $script up $(cloudflare_paths_arguments) $(cloudflare_target_arguments)"
     # skipped) the held copy is dropped from the shell too, and the exported name is unset again as defense in depth.
     plan_forget_secrets HELD_SIRVEN_CLOUDFLARE_API_TOKEN SIRVEN_CLOUDFLARE_API_TOKEN
     plan_undo "take this machine's Cloudflare tunnel away, if this installer made it" "[ ! -e $marker ]" \
-      "SIRVEN_CLOUDFLARE_API_TOKEN=\"\${HELD_SIRVEN_CLOUDFLARE_API_TOKEN:-}\" bash $script down --marker $marker --token-file $token_file" \
+      "{ set +x; } 2>/dev/null; SIRVEN_CLOUDFLARE_API_TOKEN=\"\${HELD_SIRVEN_CLOUDFLARE_API_TOKEN:-}\" bash $script down --marker $marker --token-file $token_file" \
       "cloudflared tunnel delete, and the alias record, via lib/cloudflare_tunnel.sh down: the service, the credentials and the config go from this machine; the tunnel and the alias record go from your account, each only while it is still the one this installer made. needs the token again (the token file, or SIRVEN_CLOUDFLARE_API_TOKEN)"
     plan_step run "remove the used API token file, if one was saved" \
       "[ ! -e $token_file ]" \

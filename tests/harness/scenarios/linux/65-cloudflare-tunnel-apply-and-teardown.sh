@@ -33,10 +33,10 @@ export SIRVEN_CLOUDFLARE_API="http://127.0.0.1:$(cat "$API_DIR/port")"
 # would carry the sentinel for a reason that is the scenario's, so each run drops both. CALLER_EXPORTED_TOKEN puts back a variable named TOKEN
 # with a value that is NOT a secret: a caller that had exported that name (a shell that did export TOKEN=..., sudo -E). the helper must not
 # let its own variable of that name be exported too, or the real token would reach its children as TOKEN.
-as_a_caller() { env -u TOKEN -u KEY ${CALLER_EXPORTED_TOKEN:+"TOKEN=$CALLER_EXPORTED_TOKEN"} "$@"; }
-install_cf() { as_a_caller bash install.sh --yes --level "${LEVEL:-observer}" --transport cloudflare --cloudflare-hostname "$HOST" --cloudflare-account "$ACCOUNT" "$@"; }
-revoke_cf() { as_a_caller bash install.sh revoke --all --yes "$@"; }
-uninstall_cf() { as_a_caller bash uninstall.sh --yes "$@"; }
+as_a_caller() { env -u TOKEN -u KEY ${CALLER_EXPORTED_TOKEN:+"TOKEN=$CALLER_EXPORTED_TOKEN"} ${CALLER_SHELLOPTS:+"SHELLOPTS=$CALLER_SHELLOPTS"} "$@"; }
+install_cf() { as_a_caller bash ${BASH_TRACE:+-x} install.sh --yes --level "${LEVEL:-observer}" --transport cloudflare --cloudflare-hostname "$HOST" --cloudflare-account "$ACCOUNT" "$@"; }
+revoke_cf() { as_a_caller bash ${BASH_TRACE:+-x} install.sh revoke --all --yes "$@"; }
+uninstall_cf() { as_a_caller bash ${BASH_TRACE:+-x} uninstall.sh --yes "$@"; }
 api_value() { python3 -I -c '
 import json, sys
 state = json.load(open(sys.argv[1]))
@@ -304,6 +304,24 @@ spec = importlib.util.spec_from_file_location("api", "/srv/pkg/lib/cloudflare_ap
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 assert module.api_base() == "https://api.cloudflare.com/client/v4", module.api_base()'
+
+save_trace() { printf '%s\n' "$LAST_OUTPUT" > /tmp/trace-output; printf '/tmp/trace-output'; }
+# 11. a shell trace (bash -x) prints every expansion, and a refusal captures standard error into its message: the token must be in none of
+# it, on a refusal, on a full apply, on the revoke and on the uninstall, all traced (the trace is on: the output is long and has the steps)
+reset_machine
+BASH_TRACE=1 SIRVEN_CLOUDFLARE_API_TOKEN="$WRONG" check_exit "a traced apply with a wrong token is refused" 2 install_cf
+check "the traced refusal says why, and the trace is there" bash -c 'grep -q "cannot list tunnels" < "$0" && grep -q "cloudflare_hold_token" < "$0" && ! grep -qF -- wrongtoken0123456789 < "$0"' "$(save_trace)"
+BASH_TRACE=1 SIRVEN_CLOUDFLARE_API_TOKEN="$TOKEN" check_exit "a traced apply with the token makes the tunnel" 0 install_cf
+check "the trace of the apply is long (it traced the steps), and the token is not in it" bash -c '[ "$(wc -l < "$0")" -gt 200 ] && grep -q "make the tunnel, point the hostname" < "$0" && ! grep -qF -- "$TOKEN" < "$0"' "$(save_trace)"
+check "and the tunnel was made" bash -c '[ "$(api_value tunnels)" = 1 ]'
+BASH_TRACE=1 SIRVEN_CLOUDFLARE_API_TOKEN="$TOKEN" check_exit "a traced revoke takes the tunnel away" 0 revoke_cf
+check "the token is not in the trace of the revoke, and the account is empty" bash -c '! grep -qF -- "$TOKEN" < "$0" && api_state_empty' "$(save_trace)"
+reset_machine
+SIRVEN_CLOUDFLARE_API_TOKEN="$TOKEN" install_cf --reinstate >/dev/null 2>&1
+BASH_TRACE=1 SIRVEN_CLOUDFLARE_API_TOKEN="$TOKEN" check_exit "a traced uninstall takes the tunnel away" 0 uninstall_cf
+check "the token is not in the trace of the uninstall, and the account is empty" bash -c '! grep -qF -- "$TOKEN" < "$0" && api_state_empty' "$(save_trace)"
+# (xtrace in an exported SHELLOPTS is covered by the unit tests: it also traces the installer's own SSH probe, which a real apply here
+# cannot get past, and that is not what is under test)
 
 # nothing of the stand-ins or the scenario's own state is left in a place the next scenario would see: the container is thrown away
 finish

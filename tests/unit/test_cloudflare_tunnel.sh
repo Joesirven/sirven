@@ -526,6 +526,25 @@ test_an_exported_variable_named_token_does_not_carry_the_token_to_a_child() {
   unset TOKEN TOKEN_ORIGIN
 }
 
+# a shell trace (bash -x, or xtrace in an exported SHELLOPTS) prints every expansion, and a refusal captures standard error into its
+# message: the token must not get into what is printed by either route, on a refusal, on the apply and on the teardown
+test_a_shell_trace_of_the_helper_does_not_carry_the_token() {
+  setup_tunnel
+  local wrong="wrongtoken""0123456789abcdefghij" arguments
+  arguments=(--marker "$MARKER" --config "$CONFIG" --credentials "$CREDENTIALS" --unit "$UNIT" --service sirven-cloudflared.service --user agent --hostname "$HOST_NAME" --account "$ACCOUNT")
+  SIRVEN_CLOUDFLARE_API_TOKEN="$wrong" assert_status 2 bash -x "$HELPER" up "${arguments[@]}"
+  assert_contains "$CAPTURED_STDERR" "cannot list tunnels"
+  assert_not_contains "$CAPTURED_STDERR" "$wrong" "a refusal made under bash -x"
+  SHELLOPTS=xtrace SIRVEN_CLOUDFLARE_API_TOKEN="$wrong" assert_status 2 bash "$HELPER" up "${arguments[@]}"
+  assert_contains "$CAPTURED_STDERR" "cannot list tunnels"
+  assert_not_contains "$CAPTURED_STDERR" "$wrong" "a refusal made with xtrace in SHELLOPTS"
+  SIRVEN_CLOUDFLARE_API_TOKEN="$SENTINEL_TOKEN" assert_status 0 bash -x "$HELPER" up "${arguments[@]}"
+  assert_token_nowhere
+  SHELLOPTS=xtrace SIRVEN_CLOUDFLARE_API_TOKEN="$SENTINEL_TOKEN" assert_status 0 bash "$HELPER" down --marker "$MARKER"
+  assert_token_nowhere
+  assert_eq 0 "$(api_value tunnels)" "the teardown did its work"
+}
+
 test_the_token_variable_is_used_only_as_a_check_or_as_standard_input_to_the_interpreter() {
   local uses
   # every line of the helper that expands the variable must be a test that it is set, the case that checks its characters, or the

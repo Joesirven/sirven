@@ -32,6 +32,10 @@
 # cloudflared and systemctl are found on the search path. SIRVEN_CLOUDFLARED and SIRVEN_SYSTEMCTL name others for the tests (not
 # honored as root). exit status: 0 done (or nothing to do), 1 failed, 2 refused before any change.
 
+# no shell trace (bash -x, or xtrace in an exported SHELLOPTS) from the first line on: a trace prints every expansion, the token
+# included, and the refusals capture standard error into their messages, so a trace would carry the token into what is printed.
+{ set +x; } 2>/dev/null
+
 set -uo pipefail
 
 # the first thing this script does, before it starts any process: take the token out of the environment into a variable that is not
