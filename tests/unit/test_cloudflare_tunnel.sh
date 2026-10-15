@@ -26,8 +26,6 @@ setup_tunnel() {
   CREDENTIALS="$TEST_TMP/etc/cloudflared-credentials.json"
   UNIT="$TEST_TMP/units/sirven-cloudflared.service"
   mkdir -p "$STATE" "$TEST_TMP/etc" "$TEST_TMP/units"
-  # the names down is given: the same ones up was given, built by the installer from its own layout
-  NAMES=(--config "$CONFIG" --credentials "$CREDENTIALS" --unit "$UNIT" --service sirven-cloudflared.service --service-account sirven-cloudflared)
   API_DIR="$TEST_TMP/api"
   mkdir -p "$API_DIR"
   printf '%s\n' "$SENTINEL_TOKEN" > "$TEST_TMP/api-token"
@@ -51,6 +49,22 @@ setup_tunnel() {
   mkdir -p "$FAKE_CF_DIR" "$FAKE_SYSTEMD_DIR"
 }
 
+# run_with_down_names COMMAND...: COMMAND with the names down is given (the same ones up was given, built by the installer from its own layout).
+# a function with "$@", not an array: the bash macos ships has no safe expansion of a whole array
+run_with_down_names() {
+  "$@" --marker "$MARKER" --config "$CONFIG" --credentials "$CREDENTIALS" --unit "$UNIT" --service sirven-cloudflared.service --service-account sirven-cloudflared
+}
+
+# run_with_check_options COMMAND...: COMMAND with the options of check and check-account
+run_with_check_options() {
+  "$@" --marker "$MARKER" --hostname "$HOST_NAME" --account "$ACCOUNT"
+}
+
+# run_with_up_options COMMAND...: COMMAND with the options of up
+run_with_up_options() {
+  "$@" --marker "$MARKER" --config "$CONFIG" --credentials "$CREDENTIALS" --unit "$UNIT" --service sirven-cloudflared.service --service-account sirven-cloudflared --user agent --hostname "$HOST_NAME" --account "$ACCOUNT"
+}
+
 # up and down with the token in the environment of that one command, as the installer hands it over
 up() {
   SIRVEN_CLOUDFLARE_API_TOKEN="${TOKEN_FOR_RUN-$SENTINEL_TOKEN}" bash "$HELPER" up --marker "$MARKER" --config "$CONFIG" \
@@ -58,7 +72,7 @@ up() {
 }
 
 down() {
-  SIRVEN_CLOUDFLARE_API_TOKEN="${TOKEN_FOR_RUN-$SENTINEL_TOKEN}" bash "$HELPER" down --marker "$MARKER" "${NAMES[@]}"
+  SIRVEN_CLOUDFLARE_API_TOKEN="${TOKEN_FOR_RUN-$SENTINEL_TOKEN}" run_with_down_names bash "$HELPER" down
 }
 
 # what the fake API holds
@@ -397,18 +411,17 @@ test_the_refusals_come_before_the_first_change() {
 # (what it asks after the owner's yes) is the one that reaches the API
 test_check_sends_nothing_and_check_account_makes_only_reads() {
   setup_tunnel
-  local wrong="wrongtoken""0123456789abcdefghij" arguments
-  arguments=(--marker "$MARKER" --hostname "$HOST_NAME" --account "$ACCOUNT")
-  SIRVEN_CLOUDFLARE_API_TOKEN="$SENTINEL_TOKEN" assert_status 0 bash "$HELPER" check "${arguments[@]}"
-  SIRVEN_CLOUDFLARE_API_TOKEN="$wrong" assert_status 0 bash "$HELPER" check "${arguments[@]}"
+  local wrong="wrongtoken""0123456789abcdefghij"
+  SIRVEN_CLOUDFLARE_API_TOKEN="$SENTINEL_TOKEN" assert_status 0 run_with_check_options bash "$HELPER" check
+  SIRVEN_CLOUDFLARE_API_TOKEN="$wrong" assert_status 0 run_with_check_options bash "$HELPER" check
   assert_eq "" "$(api_calls)" "check reached the API (even with a token the API turns away)"
-  SIRVEN_CLOUDFLARE_API_TOKEN="$wrong" assert_status 2 bash "$HELPER" check-account "${arguments[@]}"
+  SIRVEN_CLOUDFLARE_API_TOKEN="$wrong" assert_status 2 run_with_check_options bash "$HELPER" check-account
   assert_contains "$CAPTURED_STDERR" "cannot list tunnels"
   assert_contains "$CAPTURED_STDERR" "nothing was changed"
   assert_not_contains "$CAPTURED_STDERR" "$wrong"
   assert_eq 1 "$(api_calls | wc -l | tr -d ' ')" "one request, which the API turned away"
   : > "$API_DIR/calls.log"
-  SIRVEN_CLOUDFLARE_API_TOKEN="$SENTINEL_TOKEN" assert_status 0 bash "$HELPER" check-account "${arguments[@]}"
+  SIRVEN_CLOUDFLARE_API_TOKEN="$SENTINEL_TOKEN" assert_status 0 run_with_check_options bash "$HELPER" check-account
   [ "$(api_calls | wc -l | tr -d ' ')" -ge 3 ] || fail "check-account made fewer than the three reads (the token, the zone, the records)"
   assert_eq 0 "$(api_calls | grep -c -v '^GET ' || true)" "and nothing but reads"
   assert_eq 0 "$(api_value tunnels)" "nothing was made"
@@ -419,8 +432,8 @@ state = json.load(open(sys.argv[1]))
 state["records"]["a" * 32] = {"id": "a" * 32, "type": "A", "name": sys.argv[2], "content": "192.0.2.1", "proxied": False}
 json.dump(state, open(sys.argv[1], "w"))
 PY
-  SIRVEN_CLOUDFLARE_API_TOKEN="$SENTINEL_TOKEN" assert_status 0 bash "$HELPER" check "${arguments[@]}"
-  SIRVEN_CLOUDFLARE_API_TOKEN="$SENTINEL_TOKEN" assert_status 2 bash "$HELPER" check-account "${arguments[@]}"
+  SIRVEN_CLOUDFLARE_API_TOKEN="$SENTINEL_TOKEN" assert_status 0 run_with_check_options bash "$HELPER" check
+  SIRVEN_CLOUDFLARE_API_TOKEN="$SENTINEL_TOKEN" assert_status 2 run_with_check_options bash "$HELPER" check-account
   assert_contains "$CAPTURED_STDERR" "did not make"
 }
 
@@ -622,7 +635,7 @@ test_down_cuts_this_machine_off_before_it_looks_at_the_token_file() {
   assert_status 0 up
   printf '%s\n' "$SENTINEL_TOKEN" > "$TEST_TMP/token-file"
   chmod 644 "$TEST_TMP/token-file"
-  TOKEN_FOR_RUN="" assert_status 1 bash "$HELPER" down --marker "$MARKER" "${NAMES[@]}" --token-file "$TEST_TMP/token-file"
+  TOKEN_FOR_RUN="" assert_status 1 run_with_down_names bash "$HELPER" down --token-file "$TEST_TMP/token-file"
   assert_contains "$CAPTURED_STDERR" "is not used: its mode is"
   assert_contains "$CAPTURED_STDERR" "access is already cut"
   assert_not_contains "$CAPTURED_STDERR" "$SENTINEL_TOKEN"
@@ -633,7 +646,7 @@ test_down_cuts_this_machine_off_before_it_looks_at_the_token_file() {
   assert_file_exists "$MARKER"
   assert_eq 1 "$(api_value tunnels)"
   chmod 600 "$TEST_TMP/token-file"
-  TOKEN_FOR_RUN="" assert_status 0 bash "$HELPER" down --marker "$MARKER" "${NAMES[@]}" --token-file "$TEST_TMP/token-file"
+  TOKEN_FOR_RUN="" assert_status 0 run_with_down_names bash "$HELPER" down --token-file "$TEST_TMP/token-file"
   assert_eq 0 "$(api_value tunnels)"
 }
 
@@ -866,7 +879,7 @@ test_an_exported_variable_named_token_does_not_carry_the_token_to_a_child() {
   chmod 600 "$file"
   : > "$TEST_TMP/shim-log"
   TOKEN_FOR_RUN="" PATH="$SHIM_BIN:$PATH" assert_status 0 bash "$HELPER" up --token-file "$file" --marker "$MARKER" --config "$CONFIG" --credentials "$CREDENTIALS" --unit "$UNIT" --service sirven-cloudflared.service --service-account sirven-cloudflared --user agent --hostname "$HOST_NAME" --account "$ACCOUNT"
-  TOKEN_FOR_RUN="" PATH="$SHIM_BIN:$PATH" assert_status 0 bash "$HELPER" down --marker "$MARKER" "${NAMES[@]}" --token-file "$file"
+  TOKEN_FOR_RUN="" PATH="$SHIM_BIN:$PATH" assert_status 0 run_with_down_names bash "$HELPER" down --token-file "$file"
   assert_no_child_had_the_token
   unset TOKEN TOKEN_ORIGIN
 }
@@ -875,17 +888,16 @@ test_an_exported_variable_named_token_does_not_carry_the_token_to_a_child() {
 # message: the token must not get into what is printed by either route, on a refusal, on the apply and on the teardown
 test_a_shell_trace_of_the_helper_does_not_carry_the_token() {
   setup_tunnel
-  local wrong="wrongtoken""0123456789abcdefghij" arguments
-  arguments=(--marker "$MARKER" --config "$CONFIG" --credentials "$CREDENTIALS" --unit "$UNIT" --service sirven-cloudflared.service --service-account sirven-cloudflared --user agent --hostname "$HOST_NAME" --account "$ACCOUNT")
-  SIRVEN_CLOUDFLARE_API_TOKEN="$wrong" assert_status 2 bash -x "$HELPER" up "${arguments[@]}"
+  local wrong="wrongtoken""0123456789abcdefghij"
+  SIRVEN_CLOUDFLARE_API_TOKEN="$wrong" assert_status 2 run_with_up_options bash -x "$HELPER" up
   assert_contains "$CAPTURED_STDERR" "cannot list tunnels"
   assert_not_contains "$CAPTURED_STDERR" "$wrong" "a refusal made under bash -x"
-  SHELLOPTS=xtrace SIRVEN_CLOUDFLARE_API_TOKEN="$wrong" assert_status 2 bash "$HELPER" up "${arguments[@]}"
+  SHELLOPTS=xtrace SIRVEN_CLOUDFLARE_API_TOKEN="$wrong" assert_status 2 run_with_up_options bash "$HELPER" up
   assert_contains "$CAPTURED_STDERR" "cannot list tunnels"
   assert_not_contains "$CAPTURED_STDERR" "$wrong" "a refusal made with xtrace in SHELLOPTS"
-  SIRVEN_CLOUDFLARE_API_TOKEN="$SENTINEL_TOKEN" assert_status 0 bash -x "$HELPER" up "${arguments[@]}"
+  SIRVEN_CLOUDFLARE_API_TOKEN="$SENTINEL_TOKEN" assert_status 0 run_with_up_options bash -x "$HELPER" up
   assert_token_nowhere
-  SHELLOPTS=xtrace SIRVEN_CLOUDFLARE_API_TOKEN="$SENTINEL_TOKEN" assert_status 0 bash "$HELPER" down --marker "$MARKER" "${NAMES[@]}"
+  SHELLOPTS=xtrace SIRVEN_CLOUDFLARE_API_TOKEN="$SENTINEL_TOKEN" assert_status 0 run_with_down_names bash "$HELPER" down
   assert_token_nowhere
   assert_eq 0 "$(api_value tunnels)" "the teardown did its work"
 }
