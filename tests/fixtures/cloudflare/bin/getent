@@ -1,0 +1,8 @@
+#!/bin/sh
+# a fake getent for the accounts the fake useradd keeps; only 'getent passwd NAME' is answered. a real account the machine has is not
+# looked for: the tests name accounts that only these fakes make.
+dir="${FAKE_ACCOUNTS_DIR:?FAKE_ACCOUNTS_DIR is not set}"
+[ "${1:-}" = passwd ] && [ -n "${2:-}" ] || exit 1
+line="$(grep "^$2:" "$dir/passwd" 2>/dev/null | head -n 1)"
+[ -n "$line" ] || exit 2
+printf '%s\n' "$line"

@@ -1,0 +1,11 @@
+#!/bin/sh
+# a fake userdel (see the fake useradd)
+dir="${FAKE_ACCOUNTS_DIR:?FAKE_ACCOUNTS_DIR is not set}"
+mkdir -p "$dir"
+printf 'userdel %s\n' "$*" >> "$dir/calls.log"
+name=""
+for argument in "$@"; do case "$argument" in --*|-*) ;; *) name="$argument" ;; esac; done
+[ -n "$name" ] || { echo "userdel: no name" >&2; exit 2; }
+[ "${FAKE_USERDEL_FAILS:-}" != yes ] || { echo "userdel: user $name is currently used by process 1" >&2; exit 8; }
+grep -q "^$name:" "$dir/passwd" 2>/dev/null || { echo "userdel: user '$name' does not exist" >&2; exit 6; }
+grep -v "^$name:" "$dir/passwd" > "$dir/passwd.new"; mv "$dir/passwd.new" "$dir/passwd"

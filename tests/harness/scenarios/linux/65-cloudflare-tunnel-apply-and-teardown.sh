@@ -140,6 +140,16 @@ import json
 p = "/tmp/fake-api/state.json"
 s = json.load(open(p)); s["records"] = {}; json.dump(s, open(p, "w"))'
 
+# 1f. an account named sirven-cloudflared that sirven did not make is never used, changed or removed: the apply is refused before any change
+useradd --system --no-create-home --shell /bin/bash --comment "somebody else" sirven-cloudflared
+world_accounts > /tmp/with-foreign.accounts
+SIRVEN_CLOUDFLARE_API_TOKEN="$TOKEN" check_exit "apply when an account of the service's name is somebody else's is refused" 2 install_cf
+check "it says so, and nothing was changed" bash -c 'grep -q "did not make it" <<< "$0" && grep -q "nothing was changed" <<< "$0"' "$LAST_OUTPUT"
+world_unchanged_if 'true' "and the account is as it was" accounts /tmp/with-foreign.accounts
+world_unchanged_if 'true' "and no file was made" files /tmp/empty.files
+userdel sirven-cloudflared
+world_unchanged_if 'true' "(the foreign account is gone again)" accounts /tmp/empty.accounts
+
 # 2. with a token: one tunnel, one alias record, one service, recorded. the steps before and after the tunnel step start children, and
 # none of them is given the token
 mkdir -p /etc/sirven
@@ -176,9 +186,12 @@ s = json.load(open(\"/tmp/fake-api/state.json\"))
 t = [t for t in s[\"tunnels\"].values() if not t.get(\"deleted_at\")][0]
 r = list(s[\"records\"].values())[0]
 assert r[\"content\"] == t[\"id\"] + \".cfargotunnel.com\" and r[\"name\"] == \"agent.example.test\" and t[\"config_src\"] == \"local\""'
-check "the credentials, the record and the config are root-only" bash -c '[ "$(stat -c %a:%U /etc/sirven/cloudflared-credentials.json)" = 600:root ] && [ "$(stat -c %a:%U /var/lib/sirven/cloudflare-tunnel.json)" = 600:root ] && [ "$(stat -c %a:%U /etc/sirven/cloudflared.yml)" = 600:root ]'
+check "the record is root-only; the credentials and the config belong to the account made for the service, mode 0600" bash -c '[ "$(stat -c %a:%U /var/lib/sirven/cloudflare-tunnel.json)" = 600:root ] && [ "$(stat -c %a:%U /etc/sirven/cloudflared-credentials.json)" = 600:sirven-cloudflared ] && [ "$(stat -c %a:%U /etc/sirven/cloudflared.yml)" = 600:sirven-cloudflared ]'
+check "that account is a system account: no shell, no home, its own group, marked as sirven's, and not the agent" bash -c 'line="$(getent passwd sirven-cloudflared)" && [ "$(cut -d: -f3 <<< "$line")" -lt 1000 ] && [ "$(cut -d: -f5 <<< "$line")" = "sirven Cloudflare Tunnel service" ] && [ "$(cut -d: -f6 <<< "$line")" = /nonexistent ] && case "$(cut -d: -f7 <<< "$line")" in */nologin | /bin/false) true ;; *) false ;; esac && [ "$(id -gn sirven-cloudflared)" = sirven-cloudflared ] && [ ! -e /nonexistent ] && [ "$(id -u sirven-cloudflared)" != "$(id -u agent)" ]'
+check "the account can read the credentials and the config; no other account can, and the agent cannot" bash -c 'setpriv --reuid=sirven-cloudflared --regid=sirven-cloudflared --clear-groups cat /etc/sirven/cloudflared-credentials.json /etc/sirven/cloudflared.yml >/dev/null && ! setpriv --reuid=nobody --regid=nogroup --clear-groups cat /etc/sirven/cloudflared-credentials.json 2>/dev/null && ! setpriv --reuid=agent --regid=agent --clear-groups cat /etc/sirven/cloudflared.yml 2>/dev/null'
 check "the config routes the one hostname to ssh and everything else to 404" bash -c 'tail -n 4 /etc/sirven/cloudflared.yml | tr "\n" "|" | grep -qF "ingress:|  - hostname: agent.example.test|    service: ssh://localhost:22|  - service: http_status:404|"'
-check "the service runs as root with a name of its own, and cloudflared was asked to validate the config" bash -c 'grep -q "^ExecStart=/usr/local/bin/cloudflared --no-autoupdate --config /etc/sirven/cloudflared.yml tunnel run" /etc/systemd/system/sirven-cloudflared.service && ! grep -q "^User=" /etc/systemd/system/sirven-cloudflared.service && [ -e /tmp/fake-systemd/sirven-cloudflared.service.active ] && grep -q "ingress validate" /tmp/fake-cloudflared/calls.log'
+check "the service has a name of its own, runs as that account (not root, not the agent), and cloudflared was asked to validate the config" bash -c 'grep -q "^ExecStart=/usr/local/bin/cloudflared --no-autoupdate --config /etc/sirven/cloudflared.yml tunnel run" /etc/systemd/system/sirven-cloudflared.service && grep -qx "User=sirven-cloudflared" /etc/systemd/system/sirven-cloudflared.service && grep -qx "Group=sirven-cloudflared" /etc/systemd/system/sirven-cloudflared.service && [ -e /tmp/fake-systemd/sirven-cloudflared.service.active ] && grep -q "ingress validate" /tmp/fake-cloudflared/calls.log'
+check "the unit is sandboxed (this container has no systemd, so this is the unit text; real systemd was not run)" bash -c 'for line in NoNewPrivileges=true ProtectSystem=strict ProtectHome=true PrivateTmp=true PrivateDevices=true CapabilityBoundingSet= RestrictSUIDSGID=true ProtectKernelTunables=true; do grep -qx -- "$line" /etc/systemd/system/sirven-cloudflared.service || exit 1; done'
 check "nothing of the owner's own cloudflared was written or run" bash -c '[ ! -e /etc/cloudflared ] && ! grep -q -e "service install" -e "tunnel login" -e "route dns" /tmp/fake-cloudflared/calls.log /tmp/fake-systemd/calls.log'
 check "the install record can undo it" grep -q 'cloudflare_tunnel.sh down --marker /var/lib/sirven/cloudflare-tunnel.json' /var/lib/sirven/install-record.tsv
 check "the token is nowhere on the disk" no_token_on_disk
@@ -276,6 +289,7 @@ out="$LAST_OUTPUT"
 check "the children of the uninstall (cloudflared, systemctl) had the token in no variable of any name, though the caller exported one named TOKEN" bash -c '[ -s /tmp/fake-systemd/calls.log ] && [ ! -e /tmp/fake-cloudflared/leaks.log ] && [ ! -e /tmp/fake-systemd/leaks.log ]'
 check "the account has nothing of ours" api_state_empty
 check "this machine has no file of cloudflare's or of the unit left, but the stand-in tool" bash -c '[ -z "$(cloudflare_files)" ]'
+world_unchanged_if 'true' "the machine has the accounts it had before the install: the account made for the service is gone too" accounts /tmp/empty.accounts
 check "the token is in no output of the uninstall" bash -c '! grep -qF -- "$TOKEN" <<< "$0"' "$out"
 check "and nowhere on the disk" no_token_on_disk
 
@@ -364,7 +378,7 @@ p = "/tmp/fake-api/state.json"
 s = json.load(open(p)); s["records"] = {}
 for t in s["tunnels"].values(): t["deleted_at"] = "2026-01-01T00:00:00Z"
 json.dump(s, open(p, "w"))'; }
-local_pieces_gone() { [ ! -e /etc/systemd/system/sirven-cloudflared.service ] && [ ! -e /etc/sirven/cloudflared.yml ] && [ ! -e /etc/sirven/cloudflared-credentials.json ] && [ ! -e /tmp/fake-systemd/sirven-cloudflared.service.active ] && [ ! -e /tmp/fake-systemd/sirven-cloudflared.service.enabled ]; }
+local_pieces_gone() { ! getent passwd sirven-cloudflared >/dev/null && [ ! -e /etc/systemd/system/sirven-cloudflared.service ] && [ ! -e /etc/sirven/cloudflared.yml ] && [ ! -e /etc/sirven/cloudflared-credentials.json ] && [ ! -e /tmp/fake-systemd/sirven-cloudflared.service.active ] && [ ! -e /tmp/fake-systemd/sirven-cloudflared.service.enabled ]; }
 export -f api_clear local_pieces_gone
 reset_machine
 SIRVEN_CLOUDFLARE_API_TOKEN="$TOKEN" install_cf --reinstate >/dev/null 2>&1

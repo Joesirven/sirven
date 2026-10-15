@@ -1,0 +1,20 @@
+#!/bin/sh
+# a fake useradd for the unit tests of lib/cloudflare_tunnel.sh, which run as a normal user and cannot make an account. it keeps the
+# accounts it was asked for in FAKE_ACCOUNTS_DIR/passwd (one line per account, in the form of /etc/passwd) and every call in calls.log.
+dir="${FAKE_ACCOUNTS_DIR:?FAKE_ACCOUNTS_DIR is not set}"
+mkdir -p "$dir"
+printf 'useradd %s\n' "$*" >> "$dir/calls.log"
+comment="" home="" shell="" name=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --comment) comment="$2"; shift 2 ;;
+    --home-dir) home="$2"; shift 2 ;;
+    --shell) shell="$2"; shift 2 ;;
+    --*) shift ;;
+    *) name="$1"; shift ;;
+  esac
+done
+[ -n "$name" ] || { echo "useradd: no name" >&2; exit 2; }
+if [ "${FAKE_USERADD_FAILS:-}" = yes ]; then echo "useradd: cannot lock /etc/passwd; try again later." >&2; exit 1; fi
+if grep -q "^$name:" "$dir/passwd" 2>/dev/null; then echo "useradd: user '$name' already exists" >&2; exit 9; fi
+printf '%s:x:54321:54321:%s:%s:%s\n' "$name" "$comment" "$home" "$shell" >> "$dir/passwd"

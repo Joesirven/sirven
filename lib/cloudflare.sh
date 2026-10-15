@@ -26,6 +26,11 @@
 # reads: PREFIX, PACKAGE, CONFIG_DIR, STATE_DIR, SERVICE_USER, ROOT_DIR, OPERATING_SYSTEM, COMMAND, TRANSPORT, DRY_RUN, CLOUDFLARE_*
 
 CLOUDFLARE_SERVICE="sirven-cloudflared.service"
+# the account the service runs as: made for it by the tunnel step, marked as sirven's own, removed with the tunnel
+CLOUDFLARE_SERVICE_ACCOUNT="sirven-cloudflared"
+# the mark (the comment field of the account) that says an account of that name is sirven's own; the same text as ACCOUNT_COMMENT in
+# lib/cloudflare_tunnel.sh (a test holds them equal). an account of the name without it is never changed or removed
+CLOUDFLARE_SERVICE_ACCOUNT_MARK="sirven Cloudflare Tunnel service"
 CLOUDFLARE_UNIT_DIRECTORY="/etc/systemd/system"
 CLOUDFLARE_PLACEHOLDER_HOSTNAME="agent.example.org"
 CLOUDFLARE_MACOS_REASON="applying to a macos machine is not verified yet; the tunnel service is a systemd unit, which only linux has"
@@ -97,7 +102,7 @@ cloudflare_tunnel_script() {
 # needs no token.
 cloudflare_applied() {
   bash "$ROOT_DIR/lib/cloudflare_tunnel.sh" applied --marker "${PREFIX}$(cloudflare_marker_file)" --config "${PREFIX}$(cloudflare_config_file)" \
-    --credentials "${PREFIX}$(cloudflare_credentials_file)" --unit "${PREFIX}$(cloudflare_unit_file)" --service "$CLOUDFLARE_SERVICE" >/dev/null 2>&1
+    --credentials "${PREFIX}$(cloudflare_credentials_file)" --unit "${PREFIX}$(cloudflare_unit_file)" --service "$CLOUDFLARE_SERVICE" --service-account "$CLOUDFLARE_SERVICE_ACCOUNT" >/dev/null 2>&1
 }
 
 # cloudflare_made_remote: the tunnel and the alias record are made and recorded and the credentials are here, but the config, the unit or
@@ -119,6 +124,11 @@ cloudflare_local_pieces() {
   for path in "$(cloudflare_unit_file)" "$(cloudflare_config_file)" "$(cloudflare_credentials_file)"; do
     if [ -e "${PREFIX}$path" ] || [ -L "${PREFIX}$path" ]; then return 0; fi
   done
+  # the account the service ran as, when it carries sirven's mark (on a fake root there is no account to look at)
+  if [ -z "$PREFIX" ] && command -v getent >/dev/null 2>&1 &&
+    getent passwd "$CLOUDFLARE_SERVICE_ACCOUNT" 2>/dev/null | grep -q ":$CLOUDFLARE_SERVICE_ACCOUNT_MARK:"; then
+    return 0
+  fi
   return 1
 }
 
@@ -132,6 +142,10 @@ cloudflare_made_by_us() {
 cloudflare_taken_away_check() {
   printf '[ ! -e %s ] && [ ! -e %s ] && [ ! -e %s ] && [ ! -e %s ]' "$(rooted "$(cloudflare_marker_file)")" "$(rooted "$(cloudflare_unit_file)")" \
     "$(rooted "$(cloudflare_config_file)")" "$(rooted "$(cloudflare_credentials_file)")"
+  # and the account the service ran as is gone (only one that carries sirven's mark counts; none is looked for on a fake root)
+  if [ -z "$PREFIX" ]; then
+    printf " && ! { getent passwd %s 2>/dev/null | grep -q ':%s:'; }" "$CLOUDFLARE_SERVICE_ACCOUNT" "$CLOUDFLARE_SERVICE_ACCOUNT_MARK"
+  fi
 }
 
 # true when a token is there to work with: held from the environment, or in the token file. the token file counts only when it passes
@@ -147,9 +161,9 @@ cloudflare_token_available() {
 
 # the arguments of the helper that name where everything goes, as one shell-quoted line
 cloudflare_paths_arguments() {
-  printf -- '--marker %s --config %s --credentials %s --unit %s --service %s' \
+  printf -- '--marker %s --config %s --credentials %s --unit %s --service %s --service-account %s' \
     "$(rooted "$(cloudflare_marker_file)")" "$(rooted "$(cloudflare_config_file)")" "$(rooted "$(cloudflare_credentials_file)")" \
-    "$(rooted "$(cloudflare_unit_file)")" "$(shell_quote "$CLOUDFLARE_SERVICE")"
+    "$(rooted "$(cloudflare_unit_file)")" "$(shell_quote "$CLOUDFLARE_SERVICE")" "$(shell_quote "$CLOUDFLARE_SERVICE_ACCOUNT")"
 }
 
 cloudflare_target_arguments() {
@@ -163,7 +177,7 @@ cloudflare_target_arguments() {
 cloudflare_down() {
   cloudflare_tunnel_with_token down --marker "${PREFIX}$(cloudflare_marker_file)" --config "${PREFIX}$(cloudflare_config_file)" \
     --credentials "${PREFIX}$(cloudflare_credentials_file)" --unit "${PREFIX}$(cloudflare_unit_file)" --service "$CLOUDFLARE_SERVICE" \
-    --token-file "${PREFIX}$(cloudflare_token_file)"
+    --service-account "$CLOUDFLARE_SERVICE_ACCOUNT" --token-file "${PREFIX}$(cloudflare_token_file)"
 }
 
 # cloudflare_refuse_before_apply: a real apply that cannot make the tunnel stops before its first change, with what to do. a dry run and
@@ -202,6 +216,7 @@ cloudflare_refuse_before_apply() {
   # no systemd, a hostname or number that is not in the form Cloudflare uses. the script prints why.
   # shellcheck disable=SC2046 # the helper's options are words by design
   cloudflare_tunnel_with_token check --marker "$(cloudflare_marker_file)" --hostname "$CLOUDFLARE_HOSTNAME" --account "$CLOUDFLARE_ACCOUNT" \
+    --user "$SERVICE_USER" --service-account "$CLOUDFLARE_SERVICE_ACCOUNT" \
     ${CLOUDFLARE_ZONE:+--zone "$CLOUDFLARE_ZONE"} --token-file "$(cloudflare_token_file)" || exit 2
 }
 
@@ -215,6 +230,7 @@ cloudflare_check_account_before_apply() {
   if cloudflare_applied; then return 0; fi
   # shellcheck disable=SC2046 # the helper's options are words by design
   cloudflare_tunnel_with_token check-account --marker "$(cloudflare_marker_file)" --hostname "$CLOUDFLARE_HOSTNAME" --account "$CLOUDFLARE_ACCOUNT" \
+    --user "$SERVICE_USER" --service-account "$CLOUDFLARE_SERVICE_ACCOUNT" \
     ${CLOUDFLARE_ZONE:+--zone "$CLOUDFLARE_ZONE"} --token-file "$(cloudflare_token_file)" || return 2
 }
 
@@ -265,9 +281,10 @@ do not add email code login or any other login method.
       "{ set +x; } 2>/dev/null; SIRVEN_CLOUDFLARE_API_TOKEN=\"\${HELD_SIRVEN_CLOUDFLARE_API_TOKEN:-}\" bash $script up $(cloudflare_paths_arguments) $(cloudflare_target_arguments)" \
       "# runs lib/cloudflare_tunnel.sh up; the token comes from $(cloudflare_token_file) or from the environment of this one command, and is never put on a command line.
 # it makes a tunnel named sirven-$SERVICE_USER-<this machine's name>-<random> in account $account, managed from this machine (the dashboard cannot widen it),
-# keeps its credentials in $(cloudflare_credentials_file) and its config in $(cloudflare_config_file) (both root-only), points $hostname at it with an alias record,
+# makes the account $CLOUDFLARE_SERVICE_ACCOUNT for the service (a system account: no shell, no home) unless it is already there and is sirven's own, keeps the tunnel's credentials in $(cloudflare_credentials_file)
+# and its config in $(cloudflare_config_file) (both owned by that account alone, mode 0600), points $hostname at it with an alias record,
 # writes $(cloudflare_unit_file) and starts it. it records each of these in $(cloudflare_marker_file) as soon as it exists, and refuses with nothing changed if there is no token, no cloudflared, no systemd, or a record at $hostname that is not ours.
-# the service it starts runs: cloudflared --no-autoupdate --config $(cloudflare_config_file) tunnel run   (as $CLOUDFLARE_SERVICE, run by root, which only dials out)
+# the service it starts runs: cloudflared --no-autoupdate --config $(cloudflare_config_file) tunnel run   (as $CLOUDFLARE_SERVICE, run by the account $CLOUDFLARE_SERVICE_ACCOUNT that this step makes: no shell, no home, the only account that can read the credentials and the config; under systemd's sandboxing; it only dials out)
 bash $script up $(cloudflare_paths_arguments) $(cloudflare_target_arguments)"
     # the tunnel step is the only one that reads the token, and it is handed it in its own command's environment (see
     # cloudflare_hold_token): no step before or after starts a child process that inherits it. once it has run (done, failed or
@@ -275,7 +292,7 @@ bash $script up $(cloudflare_paths_arguments) $(cloudflare_target_arguments)"
     plan_forget_secrets HELD_SIRVEN_CLOUDFLARE_API_TOKEN SIRVEN_CLOUDFLARE_API_TOKEN
     plan_undo "take this machine's Cloudflare tunnel away, if this installer made it" "$(cloudflare_taken_away_check)" \
       "{ set +x; } 2>/dev/null; SIRVEN_CLOUDFLARE_API_TOKEN=\"\${HELD_SIRVEN_CLOUDFLARE_API_TOKEN:-}\" bash $script down $(cloudflare_paths_arguments) --token-file $token_file" \
-      "cloudflared tunnel delete, and the alias record, via lib/cloudflare_tunnel.sh down: the service, the credentials and the config go from this machine; the tunnel and the alias record go from your account, each only while it is still the one this installer made. needs the token again (the token file, or SIRVEN_CLOUDFLARE_API_TOKEN)"
+      "cloudflared tunnel delete, and the alias record, via lib/cloudflare_tunnel.sh down: the service, the credentials, the config and the account it ran as go from this machine; the tunnel and the alias record go from your account, each only while it is still the one this installer made. needs the token again (the token file, or SIRVEN_CLOUDFLARE_API_TOKEN)"
     plan_step run "remove the used API token file, if one was saved" \
       "[ ! -e $token_file ]" \
       "rm -f $token_file"

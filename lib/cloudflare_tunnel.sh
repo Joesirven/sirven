@@ -4,8 +4,8 @@
 # lib/cloudflare.sh). one file for the steps, because the install record stores command text and uninstall.sh does not read
 # lib/cloudflare.sh.
 #
-#   cloudflare_tunnel.sh up    --marker F --config F --credentials F --unit F --service NAME --user NAME --hostname H --account A [--zone Z] [--token-file F]
-#   cloudflare_tunnel.sh down  --marker F --config F --credentials F --unit F --service NAME [--token-file F]
+#   cloudflare_tunnel.sh up    --marker F --config F --credentials F --unit F --service NAME --service-account NAME --user NAME --hostname H --account A [--zone Z] [--token-file F]
+#   cloudflare_tunnel.sh down  --marker F --config F --credentials F --unit F --service NAME --service-account NAME [--token-file F]
 #   cloudflare_tunnel.sh check --marker F --hostname H --account A [--zone Z] [--token-file F]          every refusal 'up' can make that needs no network
 #   cloudflare_tunnel.sh check-account --marker F --hostname H --account A [--zone Z] [--token-file F]  the ones that need the Cloudflare API (3 reads)
 #   cloudflare_tunnel.sh applied MARKER                       exit 0 when the tunnel is made and its service runs (needs no token)
@@ -15,7 +15,9 @@
 # dashboard cannot widen it), keeps its credentials root-only, writes a config that routes exactly one hostname to this machine's SSH
 # server (ssh://localhost:22) and answers every other name with 404, points that hostname at the tunnel with an alias record, writes
 # a service unit of its own (not 'cloudflared service install': that would take the name and the config of an owner's own cloudflared,
-# and puts a token on the command line), and starts it. the service runs as root, never as the agent account, and only dials out.
+# and puts a token on the command line), and starts it. the service runs as an account of its own (--service-account: a system account with no shell and no home, made for this and
+# marked as sirven's, which owns the config and the credentials and is the only account that can read them), never as root and never as the agent
+# account, under systemd's sandboxing (the file system read only, no new privileges, no capabilities), and only dials out.
 # every artifact is written to the record (MARKER, root-only, never the token) as soon as it exists, the unique tunnel name before
 # the tunnel is made, so a run that stops halfway leaves a record that names what exists, and 'down' undoes exactly that.
 #
@@ -167,6 +169,41 @@ valid_unit_name() {
   return 0
 }
 
+# valid_account_name NAME: a plain account name (letters, digits, underscore, hyphen; not root)
+valid_account_name() {
+  case "$1" in
+    root | '' | [!a-z_]* | *[!a-z0-9_-]*) return 1 ;;
+  esac
+  [ "${#1}" -le 32 ]
+}
+
+# the comment of the account sirven makes for the service: the mark that an account on this machine is sirven's own. an account of this
+# name without it is somebody else's and is never changed or removed
+ACCOUNT_COMMENT="sirven Cloudflare Tunnel service"
+
+# account_line NAME: the passwd line of the account, or nothing
+account_line() {
+  getent passwd "$1" 2>/dev/null | head -n 1
+}
+
+# account_ours NAME: the account is there and carries sirven's mark
+account_ours() {
+  local line comment
+  line="$(account_line "$1")"
+  [ -n "$line" ] || return 1
+  comment="$(printf '%s' "$line" | cut -d: -f5)"
+  [ "$comment" = "$ACCOUNT_COMMENT" ]
+}
+
+# nologin_shell: a shell that refuses a login
+nologin_shell() {
+  local candidate
+  for candidate in /usr/sbin/nologin /sbin/nologin /usr/bin/nologin /bin/false; do
+    if [ -x "$candidate" ]; then printf '%s' "$candidate"; return 0; fi
+  done
+  printf '/bin/false'
+}
+
 # require_names COMMAND: the names that COMMAND acts on were all given, and are plain. they are the only ones acted on.
 require_names() {
   local name
@@ -177,11 +214,13 @@ require_names() {
     valid_path "$name" || refuse "'$name' is not an absolute path."
   done
   valid_unit_name "$OPT_SERVICE" || refuse "'$OPT_SERVICE' is not a plain unit name."
+  [ -n "$OPT_SERVICE_ACCOUNT" ] || refuse "$1 needs --service-account."
+  valid_account_name "$OPT_SERVICE_ACCOUNT" || refuse "'$OPT_SERVICE_ACCOUNT' is not a plain account name."
 }
 
 # parse_options ARGUMENT...: the --name value pairs into OPT_* variables
 parse_options() {
-  OPT_MARKER="" OPT_CONFIG="" OPT_CREDENTIALS="" OPT_UNIT="" OPT_SERVICE="" OPT_USER="" OPT_HOSTNAME="" OPT_ACCOUNT="" OPT_ZONE="" OPT_TOKEN_FILE=""
+  OPT_MARKER="" OPT_CONFIG="" OPT_CREDENTIALS="" OPT_UNIT="" OPT_SERVICE="" OPT_SERVICE_ACCOUNT="" OPT_USER="" OPT_HOSTNAME="" OPT_ACCOUNT="" OPT_ZONE="" OPT_TOKEN_FILE=""
   while [ "$#" -gt 0 ]; do
     [ "$#" -ge 2 ] || refuse "$1 needs a value."
     case "$1" in
@@ -190,6 +229,7 @@ parse_options() {
       --credentials) OPT_CREDENTIALS="$2" ;;
       --unit) OPT_UNIT="$2" ;;
       --service) OPT_SERVICE="$2" ;;
+      --service-account) OPT_SERVICE_ACCOUNT="$2" ;;
       --user) OPT_USER="$2" ;;
       --hostname) OPT_HOSTNAME="$2" ;;
       --account) OPT_ACCOUNT="$2" ;;
@@ -277,6 +317,10 @@ ingress:
 END
 }
 
+# unit_text CLOUDFLARED CONFIG ACCOUNT: the unit. an account of its own, and systemd's sandboxing for a program that only dials out: the
+# whole file system read only (the unit, config and credentials are read, nothing is written), no new privileges, no capabilities, no
+# devices, no kernel settings, nothing to share with other programs. (not restricted: address families and writable-and-executable memory,
+# which a program that dials out over several kinds of socket and runs Go code may need; the owner can add them.)
 unit_text() {
   cat <<END
 [Unit]
@@ -286,12 +330,30 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+User=$3
+Group=$3
 ExecStart=$1 --no-autoupdate --config $2 tunnel run
 Restart=on-failure
 RestartSec=5
+UMask=0077
 NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+SystemCallArchitectures=native
 
 [Install]
 WantedBy=multi-user.target
@@ -309,9 +371,9 @@ service_active() {
 # (the config and the unit are compared with the text sirven would write now, so a hostname added to the config by hand, or a unit that
 # was changed, is not "kept as it is"). the paths given (--config and the like) must be the recorded ones. read only, no token.
 complete() {
-  local field config credentials unit service hostname tunnel_id cloudflared
+  local field config credentials unit service hostname tunnel_id cloudflared account
   [ -f "$MARKER" ] || return 1
-  for field in tunnel_id record_id account_id hostname config credentials unit service; do
+  for field in tunnel_id record_id account_id hostname config credentials unit service service_account; do
     [ -n "$(record_get "$field")" ] || return 1
   done
   config="$(record_get config)"; credentials="$(record_get credentials)"; unit="$(record_get unit)"; service="$(record_get service)"
@@ -319,12 +381,14 @@ complete() {
   [ -z "$OPT_CREDENTIALS" ] || [ "$OPT_CREDENTIALS" = "$credentials" ] || return 1
   [ -z "$OPT_UNIT" ] || [ "$OPT_UNIT" = "$unit" ] || return 1
   [ -z "$OPT_SERVICE" ] || [ "$OPT_SERVICE" = "$service" ] || return 1
+  account="$(record_get service_account)"
+  [ -z "$OPT_SERVICE_ACCOUNT" ] || [ "$OPT_SERVICE_ACCOUNT" = "$account" ] || return 1
   [ -s "$credentials" ] && [ -s "$config" ] && [ -s "$unit" ] || return 1
   hostname="$(record_get hostname)"; tunnel_id="$(record_get tunnel_id)"
   [ "$(cat "$config")" = "$(config_text "$tunnel_id" "$credentials" "$hostname")" ] || return 1
   cloudflared="$(cloudflared_command)"
   [ -n "$cloudflared" ] || return 1
-  [ "$(cat "$unit")" = "$(unit_text "$cloudflared" "$config")" ] || return 1
+  [ "$(cat "$unit")" = "$(unit_text "$cloudflared" "$config" "$account")" ] || return 1
   service_active "$service"
 }
 
@@ -352,6 +416,20 @@ first_look_local() {
   [ -n "$command" ] || refuse "cloudflared is not installed on this machine. $(install_hint)"
   systemd_running || refuse "systemd does not run on this machine, and the tunnel service is a systemd unit. sirven starts the tunnel only under systemd. run again with --transport none, or start the tunnel yourself."
   command -v python3 >/dev/null 2>&1 || refuse "python3 is not installed."
+  check_service_account
+}
+
+# check_service_account: the account the service runs as can be used: there already (and sirven's own), or can be made
+check_service_account() {
+  [ -n "$OPT_SERVICE_ACCOUNT" ] || return 0
+  valid_account_name "$OPT_SERVICE_ACCOUNT" || refuse "'$OPT_SERVICE_ACCOUNT' is not a plain account name."
+  [ "$OPT_SERVICE_ACCOUNT" != "$OPT_USER" ] || refuse "the service account and the agent account cannot be the same account ($OPT_USER)."
+  command -v getent >/dev/null 2>&1 || refuse "getent is not installed, and it is how the account of the tunnel service is looked up."
+  if [ -z "$(account_line "$OPT_SERVICE_ACCOUNT")" ]; then
+    command -v useradd >/dev/null 2>&1 || refuse "useradd is not installed, and the tunnel service runs as an account of its own that has to be made."
+  elif ! account_ours "$OPT_SERVICE_ACCOUNT"; then
+    refuse "an account named $OPT_SERVICE_ACCOUNT is already on this machine and sirven did not make it (it does not carry sirven's mark), and sirven does not run its service as, change or remove an account it did not make. remove or rename that account, or run again with --transport none."
+  fi
 }
 
 # first_look_account HOSTNAME ZONE ACCOUNT: the reasons 'up' would refuse that need the Cloudflare API (three read-only requests, the
@@ -515,6 +593,29 @@ cmd_check_account() {
   first_look_account "$OPT_HOSTNAME" "$OPT_ZONE" "$OPT_ACCOUNT"
 }
 
+# ensure_service_account: the account the service runs as is there. made here (a system account: no shell, no home, its own group) with
+# sirven's mark when it is not, and written to the record before it is made, so a run that stops in between leaves a record that
+# names it. an account of this name that is not marked is never touched (the first look refuses it).
+ensure_service_account() {
+  local account="$OPT_SERVICE_ACCOUNT" shell
+  if [ -n "$(account_line "$account")" ]; then
+    account_ours "$account" || fail "an account named $account is on this machine and sirven did not make it, so the service does not run as it."
+    return 0
+  fi
+  record_set "service_account=$account" "service_account_made=yes" || fail "could not write the record $MARKER."
+  shell="$(nologin_shell)"
+  useradd --system --user-group --no-create-home --home-dir /nonexistent --shell "$shell" --comment "$ACCOUNT_COMMENT" "$account" ||
+    fail "could not make the account $account for the tunnel service. the record names it; fix the cause above and run this again."
+  account_ours "$account" || fail "the account $account was made but does not carry sirven's mark; nothing is run as it."
+  printf 'made the account %s for the tunnel service (no shell, no home).\n' "$account"
+}
+
+# own_file PATH: the file belongs to the service account alone (mode 0600), the only account that can read it
+own_file() {
+  chown "$OPT_SERVICE_ACCOUNT:$OPT_SERVICE_ACCOUNT" "$1" || fail "could not give $1 to the account $OPT_SERVICE_ACCOUNT."
+  chmod 0600 "$1" || fail "could not set the mode of $1."
+}
+
 # write_config TUNNEL_ID: the config is exactly the text sirven writes (one hostname to this machine's SSH server, every other name 404),
 # written if the file is anything else, so a hostname added by hand does not survive an apply. cloudflared checks it. sets
 # CONFIG_REWRITTEN=yes when a config that was there was not that text.
@@ -529,7 +630,8 @@ write_config() {
     fi
     printf '%s\n' "$expected" | write_file "$OPT_CONFIG" 0600 || fail "could not write $OPT_CONFIG."
   fi
-  chmod 0600 "$OPT_CONFIG" 2>/dev/null || true
+  own_file "$OPT_CONFIG"
+  [ ! -f "$OPT_CREDENTIALS" ] || own_file "$OPT_CREDENTIALS"
   if ! found="$("$CLOUDFLARED" tunnel --config "$OPT_CONFIG" ingress validate 2>&1)"; then
     fail "cloudflared does not accept the config it was just given ($OPT_CONFIG): $found"
   fi
@@ -539,7 +641,7 @@ write_config() {
 # just written again is restarted, because 'enable --now' does not reload one that is already running.
 write_service() {
   local expected current="" was_active=no changed="$CONFIG_REWRITTEN"
-  expected="$(unit_text "$CLOUDFLARED" "$OPT_CONFIG")"
+  expected="$(unit_text "$CLOUDFLARED" "$OPT_CONFIG" "$OPT_SERVICE_ACCOUNT")"
   [ ! -f "$OPT_UNIT" ] || current="$(cat "$OPT_UNIT")"
   if ! service_active "$OPT_SERVICE"; then was_active=no; else was_active=yes; fi
   if [ "$current" != "$expected" ]; then
@@ -560,9 +662,10 @@ write_service() {
 cmd_up() {
   local name tunnel_id zone zone_found record_id target created found made_record existing
   parse_options "$@"
-  for name in "$OPT_CONFIG" "$OPT_CREDENTIALS" "$OPT_UNIT" "$OPT_SERVICE" "$OPT_USER" "$OPT_HOSTNAME" "$OPT_ACCOUNT"; do
-    [ -n "$name" ] || refuse "up needs --config, --credentials, --unit, --service, --user, --hostname and --account."
+  for name in "$OPT_CONFIG" "$OPT_CREDENTIALS" "$OPT_UNIT" "$OPT_SERVICE" "$OPT_SERVICE_ACCOUNT" "$OPT_USER" "$OPT_HOSTNAME" "$OPT_ACCOUNT"; do
+    [ -n "$name" ] || refuse "up needs --config, --credentials, --unit, --service, --service-account, --user, --hostname and --account."
   done
+  valid_account_name "$OPT_SERVICE_ACCOUNT" || refuse "'$OPT_SERVICE_ACCOUNT' is not a plain account name."
   [ -d "$(dirname "$MARKER")" ] || refuse "the folder for the record, $(dirname "$MARKER"), is not there."
   find_token "$OPT_TOKEN_FILE"
   same_target "$OPT_HOSTNAME" "$OPT_ACCOUNT"
@@ -577,7 +680,8 @@ cmd_up() {
     # running service. they are written again, with no token and no request to the API
     first_look_local "$OPT_HOSTNAME" "$OPT_ACCOUNT" "$OPT_ZONE" no
     tunnel_id="$(record_get tunnel_id)"
-    record_set "config=$OPT_CONFIG" "credentials=$OPT_CREDENTIALS" "unit=$OPT_UNIT" "service=$OPT_SERVICE" || fail "could not write the record $MARKER."
+    record_set "config=$OPT_CONFIG" "credentials=$OPT_CREDENTIALS" "unit=$OPT_UNIT" "service=$OPT_SERVICE" "service_account=$OPT_SERVICE_ACCOUNT" || fail "could not write the record $MARKER."
+    ensure_service_account
     write_config "$tunnel_id"
     write_service
     printf 'the tunnel %s is made; its config and its service are the ones sirven writes now (no token was needed). %s routes %s to ssh://localhost:22 (nothing else).\n' "$(record_get tunnel_name)" "$OPT_SERVICE" "$OPT_HOSTNAME"
@@ -595,7 +699,8 @@ cmd_up() {
   name="$(record_get tunnel_name)"
   [ -n "$name" ] || name="sirven-$OPT_USER-$(short_host)-$(random_hex)"
   record_set "tunnel_name=$name" "account_id=$OPT_ACCOUNT" "hostname=$OPT_HOSTNAME" "zone_id=$zone" "config=$OPT_CONFIG" \
-    "credentials=$OPT_CREDENTIALS" "unit=$OPT_UNIT" "service=$OPT_SERVICE" "created_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" || fail "could not write the record $MARKER."
+    "credentials=$OPT_CREDENTIALS" "unit=$OPT_UNIT" "service=$OPT_SERVICE" "service_account=$OPT_SERVICE_ACCOUNT" "created_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" || fail "could not write the record $MARKER."
+  ensure_service_account
 
   # 2. the tunnel. a tunnel without credentials on disk cannot be run (its secret is gone): a leftover of a stopped run is deleted and made again
   tunnel_id="$(record_get tunnel_id)"
@@ -654,11 +759,12 @@ systemctl_command_run() {
 # cut off from this machine whatever state the record is in. sets LOCAL_FOUND=yes when any of it was there, FAILED=1 for what could not
 # be taken away.
 local_teardown() {
-  local path
+  local path output
   LOCAL_FOUND=no
   for path in "$OPT_UNIT" "$OPT_CONFIG" "$OPT_CREDENTIALS"; do
     if [ -e "$path" ] || [ -L "$path" ]; then LOCAL_FOUND=yes; fi
   done
+  if account_ours "$OPT_SERVICE_ACCOUNT"; then LOCAL_FOUND=yes; fi
   if [ -e "$MARKER" ] || [ -L "$MARKER" ] || service_active "$OPT_SERVICE"; then LOCAL_FOUND=yes; fi
   [ "$LOCAL_FOUND" = yes ] || return 0
   if [ -n "$(systemctl_command)" ]; then
@@ -673,6 +779,16 @@ local_teardown() {
     systemctl_command_run daemon-reload >/dev/null 2>&1 || true
     if service_active "$OPT_SERVICE"; then
       printf 'error: %s is still running after stop\n' "$OPT_SERVICE" >&2
+      FAILED=1
+    fi
+  fi
+  # the account the service ran as, last, when nothing runs as it any more: only one that carries sirven's mark, by the name given (the
+  # record is not asked: an account of this name that sirven did not make is never removed)
+  if account_ours "$OPT_SERVICE_ACCOUNT"; then
+    if output="$(userdel "$OPT_SERVICE_ACCOUNT" 2>&1)"; then
+      printf 'removed the account %s that the tunnel service ran as.\n' "$OPT_SERVICE_ACCOUNT"
+    else
+      printf 'error: could not remove the account %s: %s\n' "$OPT_SERVICE_ACCOUNT" "$output" >&2
       FAILED=1
     fi
   fi

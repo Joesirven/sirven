@@ -27,7 +27,7 @@ setup_tunnel() {
   UNIT="$TEST_TMP/units/sirven-cloudflared.service"
   mkdir -p "$STATE" "$TEST_TMP/etc" "$TEST_TMP/units"
   # the names down is given: the same ones up was given, built by the installer from its own layout
-  NAMES=(--config "$CONFIG" --credentials "$CREDENTIALS" --unit "$UNIT" --service sirven-cloudflared.service)
+  NAMES=(--config "$CONFIG" --credentials "$CREDENTIALS" --unit "$UNIT" --service sirven-cloudflared.service --service-account sirven-cloudflared)
   API_DIR="$TEST_TMP/api"
   mkdir -p "$API_DIR"
   printf '%s\n' "$SENTINEL_TOKEN" > "$TEST_TMP/api-token"
@@ -40,6 +40,11 @@ setup_tunnel() {
   export SIRVEN_CLOUDFLARE_API
   export SIRVEN_CLOUDFLARED="$FIXTURES/cloudflared" SIRVEN_SYSTEMCTL="$FIXTURES/systemctl"
   export FAKE_CF_DIR="$TEST_TMP/fake-cloudflared" FAKE_SYSTEMD_DIR="$TEST_TMP/fake-systemd"
+  # a normal user cannot make an account or give a file to one: the fakes (useradd, userdel, getent, chown) keep accounts and calls in files
+  export FAKE_ACCOUNTS_DIR="$TEST_TMP/fake-accounts"
+  PATH="$FIXTURES/bin:$PATH"
+  export PATH
+  unset FAKE_USERADD_FAILS FAKE_USERDEL_FAILS FAKE_CHOWN_FAILS
   # the fakes say (never print) when any variable they were started with holds the token, under any name
   export FAKE_LEAK_CHECK_FILE="$TEST_TMP/api-token"
   unset SIRVEN_CLOUDFLARE_API_TOKEN FAKE_CF_VERSION FAKE_CF_BAD_CONFIG FAKE_SYSTEMCTL_START_FAILS FAKE_SYSTEMCTL_STOP_FAILS
@@ -49,7 +54,7 @@ setup_tunnel() {
 # up and down with the token in the environment of that one command, as the installer hands it over
 up() {
   SIRVEN_CLOUDFLARE_API_TOKEN="${TOKEN_FOR_RUN-$SENTINEL_TOKEN}" bash "$HELPER" up --marker "$MARKER" --config "$CONFIG" \
-    --credentials "$CREDENTIALS" --unit "$UNIT" --service sirven-cloudflared.service --user agent --hostname "${1:-$HOST_NAME}" --account "$ACCOUNT"
+    --credentials "$CREDENTIALS" --unit "$UNIT" --service sirven-cloudflared.service --service-account sirven-cloudflared --user agent --hostname "${1:-$HOST_NAME}" --account "$ACCOUNT"
 }
 
 down() {
@@ -117,7 +122,9 @@ test_up_makes_the_tunnel_the_record_the_files_and_the_service() {
   assert_contains "$(cat "$CREDENTIALS")" "\"TunnelID\": \"$(api_value tunnel_id)\""
   assert_file_exists "$UNIT"
   assert_contains "$(cat "$UNIT")" "ExecStart=$FIXTURES/cloudflared --no-autoupdate --config $CONFIG tunnel run"
-  assert_not_contains "$(cat "$UNIT")" "User=" "the service runs as root, never as the agent"
+  assert_contains "$(cat "$UNIT")" "User=sirven-cloudflared" "the service runs as the account made for it, not as root and not as the agent"
+  assert_contains "$(cat "$UNIT")" "Group=sirven-cloudflared"
+  assert_not_contains "$(cat "$UNIT")" "User=agent"
   assert_file_exists "$FAKE_SYSTEMD_DIR/sirven-cloudflared.service.active"
   assert_file_exists "$FAKE_SYSTEMD_DIR/sirven-cloudflared.service.enabled"
   assert_token_nowhere
@@ -194,7 +201,7 @@ test_a_re_apply_writes_a_unit_changed_by_hand_again_and_starts_a_stopped_service
   rm "$CREDENTIALS"
   TOKEN_FOR_RUN="" assert_status 2 up
   assert_contains "$CAPTURED_STDERR" "there is no Cloudflare API token"
-  assert_status 2 bash "$HELPER" check --marker "$MARKER" --hostname "$HOST_NAME" --account "$ACCOUNT" --config "$CONFIG" --credentials "$CREDENTIALS" --unit "$UNIT" --service sirven-cloudflared.service
+  assert_status 2 bash "$HELPER" check --marker "$MARKER" --hostname "$HOST_NAME" --account "$ACCOUNT" --config "$CONFIG" --credentials "$CREDENTIALS" --unit "$UNIT" --service sirven-cloudflared.service --service-account sirven-cloudflared
   assert_contains "$CAPTURED_STDERR" "there is no Cloudflare API token"
 }
 
@@ -211,6 +218,128 @@ test_check_after_a_local_difference_needs_no_token_and_no_request() {
   assert_eq "$calls" "$(api_calls | wc -l | tr -d ' ')"
   rm "$MARKER"
   assert_status 1 bash "$HELPER" made --marker "$MARKER" --credentials "$CREDENTIALS"
+}
+
+# the service runs as an account of its own, never as root and never as the agent, and the files only it needs are only its to read
+test_the_service_runs_as_an_account_made_for_it_and_owns_the_credentials_and_the_config() {
+  setup_tunnel
+  assert_status 0 up
+  assert_contains "$CAPTURED_STDOUT" "made the account sirven-cloudflared for the tunnel service"
+  local passwd calls
+  passwd="$(cat "$FAKE_ACCOUNTS_DIR/passwd")"
+  calls="$(cat "$FAKE_ACCOUNTS_DIR/calls.log")"
+  assert_contains "$passwd" "sirven-cloudflared:x:" "the account is there"
+  assert_contains "$passwd" ":sirven Cloudflare Tunnel service:" "and carries sirven's mark"
+  assert_contains "$calls" "useradd --system --user-group --no-create-home --home-dir /nonexistent --shell "
+  assert_contains "$calls" "--comment sirven Cloudflare Tunnel service sirven-cloudflared"
+  assert_contains "$calls" "chown sirven-cloudflared:sirven-cloudflared $CREDENTIALS" "the credentials are the account's alone"
+  assert_contains "$calls" "chown sirven-cloudflared:sirven-cloudflared $CONFIG" "and so is the config"
+  assert_eq "-rw-------" "$(file_mode "$CREDENTIALS")"
+  assert_eq "-rw-------" "$(file_mode "$CONFIG")"
+  assert_eq "sirven-cloudflared" "$(record_field service_account)"
+  assert_eq "yes" "$(record_field service_account_made)"
+  assert_token_nowhere
+  # the account is made once: a run that finds it, marked, uses it
+  rm -f "$FAKE_SYSTEMD_DIR/sirven-cloudflared.service.active"
+  TOKEN_FOR_RUN="" assert_status 0 up
+  assert_eq 1 "$(grep -c '^useradd ' "$FAKE_ACCOUNTS_DIR/calls.log")" "the account was made once"
+}
+
+# systemd's sandboxing: no new privileges, no capabilities, the whole file system read only, nothing of the kernel or the other programs
+test_the_unit_is_sandboxed() {
+  setup_tunnel
+  assert_status 0 up
+  local line
+  for line in User=sirven-cloudflared Group=sirven-cloudflared NoNewPrivileges=true CapabilityBoundingSet= AmbientCapabilities= ProtectSystem=strict \
+    ProtectHome=true PrivateTmp=true PrivateDevices=true ProtectKernelTunables=true ProtectKernelModules=true ProtectControlGroups=true \
+    RestrictSUIDSGID=true LockPersonality=true UMask=0077; do
+    assert_eq 1 "$(grep -c -x -- "$line" "$UNIT")" "the unit has the line $line"
+  done
+  # two that could break a program that dials out over several kinds of socket, or runs Go code, and cannot be tried here
+  assert_not_contains "$(cat "$UNIT")" "RestrictAddressFamilies"
+  assert_not_contains "$(cat "$UNIT")" "MemoryDenyWriteExecute"
+}
+
+test_an_account_of_that_name_that_sirven_did_not_make_is_never_used_changed_or_removed() {
+  setup_tunnel
+  mkdir -p "$FAKE_ACCOUNTS_DIR"
+  printf 'sirven-cloudflared:x:1234:1234:somebody else:/home/x:/bin/bash\n' > "$FAKE_ACCOUNTS_DIR/passwd"
+  assert_status 2 up
+  assert_contains "$CAPTURED_STDERR" "an account named sirven-cloudflared is already on this machine and sirven did not make it"
+  assert_contains "$CAPTURED_STDERR" "nothing was changed"
+  assert_no_file "$MARKER"
+  assert_eq 0 "$(api_value tunnels)"
+  # the first look (before the plan) says so too, with no request
+  SIRVEN_CLOUDFLARE_API_TOKEN="$SENTINEL_TOKEN" assert_status 2 bash "$HELPER" check --marker "$MARKER" --hostname "$HOST_NAME" --account "$ACCOUNT" --user agent --service-account sirven-cloudflared
+  assert_contains "$CAPTURED_STDERR" "did not make it"
+  # and a teardown leaves it alone
+  printf '{"hostname": "x"}\n' > "$MARKER"
+  assert_status 0 down
+  assert_contains "$(cat "$FAKE_ACCOUNTS_DIR/passwd")" "somebody else"
+  assert_not_contains "$(cat "$FAKE_ACCOUNTS_DIR/calls.log" 2>/dev/null || true)" "userdel"
+}
+
+test_the_service_account_is_never_root_or_the_agent_and_is_a_plain_name() {
+  setup_tunnel
+  local account
+  for account in root agent "Bad Name" "-x" "a;b"; do
+    SIRVEN_CLOUDFLARE_API_TOKEN="$SENTINEL_TOKEN" assert_status 2 bash "$HELPER" up --marker "$MARKER" --config "$CONFIG" --credentials "$CREDENTIALS" --unit "$UNIT" --service sirven-cloudflared.service --service-account "$account" --user agent --hostname "$HOST_NAME" --account "$ACCOUNT"
+  done
+  assert_eq 0 "$(api_value tunnels)"
+  assert_no_file "$FAKE_ACCOUNTS_DIR/passwd"
+}
+
+test_down_removes_the_account_it_made_after_the_service_and_the_files() {
+  setup_tunnel
+  assert_status 0 up
+  assert_contains "$(cat "$FAKE_ACCOUNTS_DIR/passwd")" "sirven-cloudflared:"
+  assert_status 0 down
+  assert_contains "$CAPTURED_STDOUT" "removed the account sirven-cloudflared that the tunnel service ran as"
+  assert_not_contains "$(cat "$FAKE_ACCOUNTS_DIR/passwd")" "sirven-cloudflared:"
+  assert_contains "$(cat "$FAKE_ACCOUNTS_DIR/calls.log")" "userdel sirven-cloudflared"
+  assert_no_file "$UNIT"
+  # a second teardown has nothing to do and does not call userdel again
+  assert_status 0 down
+  assert_eq 1 "$(grep -c '^userdel ' "$FAKE_ACCOUNTS_DIR/calls.log")"
+}
+
+test_down_removes_the_account_even_with_no_record() {
+  setup_tunnel
+  assert_status 0 up
+  rm -f "$MARKER"
+  assert_status 0 down
+  assert_not_contains "$(cat "$FAKE_ACCOUNTS_DIR/passwd")" "sirven-cloudflared:"
+  assert_no_file "$UNIT"
+}
+
+test_an_account_that_cannot_be_removed_fails_the_teardown_loudly_and_the_record_stays() {
+  setup_tunnel
+  assert_status 0 up
+  FAKE_USERDEL_FAILS=yes assert_status 1 down
+  assert_contains "$CAPTURED_STDERR" "could not remove the account sirven-cloudflared"
+  assert_file_exists "$MARKER" "the record stays, so the same command can be run again"
+  assert_no_file "$UNIT"
+  assert_status 0 down
+  assert_not_contains "$(cat "$FAKE_ACCOUNTS_DIR/passwd")" "sirven-cloudflared:"
+  assert_eq 0 "$(api_value tunnels)"
+}
+
+test_an_account_that_cannot_be_made_stops_the_apply_before_the_tunnel_exists() {
+  setup_tunnel
+  FAKE_USERADD_FAILS=yes assert_status 1 up
+  assert_contains "$CAPTURED_STDERR" "could not make the account sirven-cloudflared"
+  assert_eq 0 "$(api_value tunnels)" "no tunnel was made"
+  assert_no_file "$UNIT"
+  # the record names the account, so a teardown has it to look at, and removes nothing it did not make
+  assert_status 0 down
+}
+
+test_the_two_marks_of_the_service_account_are_the_same_text() {
+  local from_installer from_helper
+  from_installer="$(sed -n 's/^CLOUDFLARE_SERVICE_ACCOUNT_MARK="\(.*\)"$/\1/p' "$REPO_DIR/lib/cloudflare.sh")"
+  from_helper="$(sed -n 's/^ACCOUNT_COMMENT="\(.*\)"$/\1/p' "$HELPER")"
+  assert_eq "$from_helper" "$from_installer"
+  [ -n "$from_helper" ] || fail "no mark found"
 }
 
 test_a_second_up_needs_no_token_and_changes_nothing() {
@@ -257,7 +386,7 @@ test_the_refusals_come_before_the_first_change() {
   assert_status 2 up "Agent.Example.Test"
   assert_contains "$CAPTURED_STDERR" "is not a plain lowercase host name"
   assert_status 2 up "nodots"
-  assert_status 2 bash "$HELPER" up --marker "$MARKER" --config "$CONFIG" --credentials "$CREDENTIALS" --unit "$UNIT" --service sirven-cloudflared.service --user agent --hostname "$HOST_NAME" --account "not-an-account"
+  assert_status 2 bash "$HELPER" up --marker "$MARKER" --config "$CONFIG" --credentials "$CREDENTIALS" --unit "$UNIT" --service sirven-cloudflared.service --service-account sirven-cloudflared --user agent --hostname "$HOST_NAME" --account "not-an-account"
   assert_contains "$CAPTURED_STDERR" "is not 32 hexadecimal characters"
   assert_no_file "$MARKER"
   assert_eq 0 "$(api_value tunnels)"
@@ -317,16 +446,16 @@ test_the_token_can_come_from_a_safe_file_and_an_unsafe_one_is_refused() {
   local file="$TEST_TMP/token-file"
   printf '%s\n' "$SENTINEL_TOKEN" > "$file"
   chmod 640 "$file"
-  TOKEN_FOR_RUN="" assert_status 2 bash "$HELPER" up --token-file "$file" --marker "$MARKER" --config "$CONFIG" --credentials "$CREDENTIALS" --unit "$UNIT" --service sirven-cloudflared.service --user agent --hostname "$HOST_NAME" --account "$ACCOUNT"
+  TOKEN_FOR_RUN="" assert_status 2 bash "$HELPER" up --token-file "$file" --marker "$MARKER" --config "$CONFIG" --credentials "$CREDENTIALS" --unit "$UNIT" --service sirven-cloudflared.service --service-account sirven-cloudflared --user agent --hostname "$HOST_NAME" --account "$ACCOUNT"
   assert_contains "$CAPTURED_STDERR" "its mode is -rw-r-----"
   assert_not_contains "$CAPTURED_STDERR" "$SENTINEL_TOKEN"
   assert_no_file "$MARKER"
   chmod 600 "$file"
   ln "$file" "$TEST_TMP/second-name"
-  TOKEN_FOR_RUN="" assert_status 2 bash "$HELPER" up --token-file "$file" --marker "$MARKER" --config "$CONFIG" --credentials "$CREDENTIALS" --unit "$UNIT" --service sirven-cloudflared.service --user agent --hostname "$HOST_NAME" --account "$ACCOUNT"
+  TOKEN_FOR_RUN="" assert_status 2 bash "$HELPER" up --token-file "$file" --marker "$MARKER" --config "$CONFIG" --credentials "$CREDENTIALS" --unit "$UNIT" --service sirven-cloudflared.service --service-account sirven-cloudflared --user agent --hostname "$HOST_NAME" --account "$ACCOUNT"
   assert_contains "$CAPTURED_STDERR" "more than one name"
   rm -f "$TEST_TMP/second-name"
-  TOKEN_FOR_RUN="" assert_status 0 bash "$HELPER" up --token-file "$file" --marker "$MARKER" --config "$CONFIG" --credentials "$CREDENTIALS" --unit "$UNIT" --service sirven-cloudflared.service --user agent --hostname "$HOST_NAME" --account "$ACCOUNT"
+  TOKEN_FOR_RUN="" assert_status 0 bash "$HELPER" up --token-file "$file" --marker "$MARKER" --config "$CONFIG" --credentials "$CREDENTIALS" --unit "$UNIT" --service sirven-cloudflared.service --service-account sirven-cloudflared --user agent --hostname "$HOST_NAME" --account "$ACCOUNT"
   assert_eq 1 "$(api_value tunnels)"
   assert_token_nowhere
 }
@@ -364,7 +493,7 @@ test_a_token_file_is_refused_when_the_file_of_checks_is_missing_or_defines_nothi
     assert_status 2 bash "$lonely/$kind/cloudflare_tunnel.sh" token-file-check "$TEST_TMP/open-token"
     assert_contains "$CAPTURED_STDERR" "cannot be checked"
     assert_not_contains "$CAPTURED_STDERR" "$SENTINEL_TOKEN"
-    TOKEN_FOR_RUN="" assert_status 2 bash "$lonely/$kind/cloudflare_tunnel.sh" up --token-file "$TEST_TMP/open-token" --marker "$MARKER" --config "$CONFIG" --credentials "$CREDENTIALS" --unit "$UNIT" --service sirven-cloudflared.service --user agent --hostname "$HOST_NAME" --account "$ACCOUNT"
+    TOKEN_FOR_RUN="" assert_status 2 bash "$lonely/$kind/cloudflare_tunnel.sh" up --token-file "$TEST_TMP/open-token" --marker "$MARKER" --config "$CONFIG" --credentials "$CREDENTIALS" --unit "$UNIT" --service sirven-cloudflared.service --service-account sirven-cloudflared --user agent --hostname "$HOST_NAME" --account "$ACCOUNT"
     assert_contains "$CAPTURED_STDERR" "nothing was changed"
   done
   assert_no_file "$MARKER"
@@ -512,7 +641,7 @@ test_down_needs_the_names_and_plain_ones() {
   setup_tunnel
   assert_status 2 bash "$HELPER" down --marker "$MARKER"
   assert_contains "$CAPTURED_STDERR" "down needs --config, --credentials, --unit and --service"
-  assert_status 2 bash "$HELPER" down --marker "$MARKER" --config relative.yml --credentials "$CREDENTIALS" --unit "$UNIT" --service sirven-cloudflared.service
+  assert_status 2 bash "$HELPER" down --marker "$MARKER" --config relative.yml --credentials "$CREDENTIALS" --unit "$UNIT" --service sirven-cloudflared.service --service-account sirven-cloudflared
   assert_contains "$CAPTURED_STDERR" "is not an absolute path"
   assert_status 2 bash "$HELPER" down --marker "$MARKER" --config "$CONFIG" --credentials "$CREDENTIALS" --unit "$UNIT" --service '../x;y'
   assert_contains "$CAPTURED_STDERR" "is not a plain unit name"
@@ -736,7 +865,7 @@ test_an_exported_variable_named_token_does_not_carry_the_token_to_a_child() {
   printf '%s\n' "$SENTINEL_TOKEN" > "$file"
   chmod 600 "$file"
   : > "$TEST_TMP/shim-log"
-  TOKEN_FOR_RUN="" PATH="$SHIM_BIN:$PATH" assert_status 0 bash "$HELPER" up --token-file "$file" --marker "$MARKER" --config "$CONFIG" --credentials "$CREDENTIALS" --unit "$UNIT" --service sirven-cloudflared.service --user agent --hostname "$HOST_NAME" --account "$ACCOUNT"
+  TOKEN_FOR_RUN="" PATH="$SHIM_BIN:$PATH" assert_status 0 bash "$HELPER" up --token-file "$file" --marker "$MARKER" --config "$CONFIG" --credentials "$CREDENTIALS" --unit "$UNIT" --service sirven-cloudflared.service --service-account sirven-cloudflared --user agent --hostname "$HOST_NAME" --account "$ACCOUNT"
   TOKEN_FOR_RUN="" PATH="$SHIM_BIN:$PATH" assert_status 0 bash "$HELPER" down --marker "$MARKER" "${NAMES[@]}" --token-file "$file"
   assert_no_child_had_the_token
   unset TOKEN TOKEN_ORIGIN
@@ -747,7 +876,7 @@ test_an_exported_variable_named_token_does_not_carry_the_token_to_a_child() {
 test_a_shell_trace_of_the_helper_does_not_carry_the_token() {
   setup_tunnel
   local wrong="wrongtoken""0123456789abcdefghij" arguments
-  arguments=(--marker "$MARKER" --config "$CONFIG" --credentials "$CREDENTIALS" --unit "$UNIT" --service sirven-cloudflared.service --user agent --hostname "$HOST_NAME" --account "$ACCOUNT")
+  arguments=(--marker "$MARKER" --config "$CONFIG" --credentials "$CREDENTIALS" --unit "$UNIT" --service sirven-cloudflared.service --service-account sirven-cloudflared --user agent --hostname "$HOST_NAME" --account "$ACCOUNT")
   SIRVEN_CLOUDFLARE_API_TOKEN="$wrong" assert_status 2 bash -x "$HELPER" up "${arguments[@]}"
   assert_contains "$CAPTURED_STDERR" "cannot list tunnels"
   assert_not_contains "$CAPTURED_STDERR" "$wrong" "a refusal made under bash -x"
