@@ -34,6 +34,10 @@
 # PLAN_STEP_HOOK, when set, names a function apply calls after every numbered step with
 # NUMBER KIND TAG TITLE OUTCOME. install.sh points it at the audit log writer.
 #
+# plan_forget_secrets NAME...: the most recent step is the last to need these environment variables (an auth key handed over
+# in the environment). the installer unsets them as soon as that step has run, whether it was applied, failed or skipped, so no
+# later step starts a child process that inherits them.
+#
 # plan_continue: the most recent step may fail without stopping the run. the run goes on, records the failure,
 # and ends with exit 4 listing every failed step. for a plan whose steps each remove access, so one step that
 # cannot finish (a name the agent planted, a unit that will not stop) never leaves a later one undone.
@@ -68,6 +72,7 @@ plan_reset() {
   PLAN_UNDO_SHOWN=()
   PLAN_ASSUMED_UNDONE=()
   PLAN_CONTINUE=()
+  PLAN_FORGET=()
   PLAN_FAILURES=0
   PLAN_FAILED_LIST=""
   PLAN_COUNT=0
@@ -96,6 +101,7 @@ _plan_add() {
   PLAN_UNDO_SHOWN[index]=""
   PLAN_ASSUMED_UNDONE[index]="$PLAN_ASSUME_UNDONE"
   PLAN_CONTINUE[index]=no
+  PLAN_FORGET[index]=""
   PLAN_COUNT=$((PLAN_COUNT + 1))
 }
 
@@ -143,6 +149,18 @@ plan_planonly() {
 plan_continue() {
   [ "$PLAN_COUNT" -gt 0 ] || die "plan_continue: no step to mark"
   PLAN_CONTINUE[PLAN_COUNT - 1]=yes
+}
+
+# plan_forget_secrets NAME...: see the header. NAMEs are environment variable names, and nothing else.
+plan_forget_secrets() {
+  local name
+  [ "$PLAN_COUNT" -gt 0 ] || die "plan_forget_secrets: no step to mark"
+  for name in "$@"; do
+    case "$name" in
+      '' | [0-9]* | *[!A-Za-z0-9_]*) die "plan_forget_secrets: '$name' is not a variable name" ;;
+    esac
+  done
+  PLAN_FORGET[PLAN_COUNT - 1]="$*"
 }
 
 # plan_continue_since FIRST TAG: every run or system step added since step index FIRST may fail without stopping the
@@ -414,6 +432,16 @@ _plan_hook() {
   "$PLAN_STEP_HOOK" "${PLAN_NUMBER[$1]}" "${PLAN_KIND[$1]}" "${PLAN_TAG[$1]}" "${PLAN_TITLE[$1]}" "$2"
 }
 
+# _plan_forget INDEX: unset, in this shell, the variables the step marked with plan_forget_secrets. children started later
+# do not inherit what is not there.
+_plan_forget() {
+  local name
+  [ -n "${PLAN_FORGET[$1]}" ] || return 0
+  for name in ${PLAN_FORGET[$1]}; do
+    unset "$name"
+  done
+}
+
 # _plan_recheck INDEX: with PLAN_RECHECK=yes, read the step's check again now, just before the step runs.
 # a step that assumes its end state undone is never rechecked, and a system step on a fake root is judged
 # by the simulation log, as in plan_evaluate.
@@ -453,7 +481,7 @@ plan_confirm_real_apply() {
 
 # apply the evaluated plan. refuses up front, before any change, if any step cannot run.
 plan_apply() {
-  local refusal blockers index=0 kind applied=0 skipped=0
+  local refusal blockers index=0 kind applied=0 skipped=0 step_status
   refusal="$(plan_real_apply_refusal)"
   if [ -n "$refusal" ]; then
     printf '\nnot applied: %s\n' "$refusal" >&2
@@ -475,6 +503,7 @@ plan_apply() {
         if [ "${PLAN_STATUS[index]}" = "done" ]; then
           printf '  %3s. skipped, already done\n' "${PLAN_NUMBER[index]}"
           skipped=$((skipped + 1))
+          _plan_forget "$index"
           _plan_hook "$index" skipped
         elif [ "$kind" = system ] && [ -n "$PLAN_PREFIX" ]; then
           mkdir -p "$(dirname "$PLAN_SIMULATION_LOG")"
@@ -482,9 +511,13 @@ plan_apply() {
           printf '  %3s. recorded in %s\n' "${PLAN_NUMBER[index]}" "$PLAN_SIMULATION_LOG"
           applied=$((applied + 1))
           _plan_record "$index"
+          _plan_forget "$index"
           _plan_hook "$index" recorded
         else
-          if ! ( eval "${PLAN_ACTION[index]}" ); then
+          step_status=0
+          ( eval "${PLAN_ACTION[index]}" ) || step_status=$?
+          _plan_forget "$index"
+          if [ "$step_status" -ne 0 ]; then
             printf 'error: step %s failed: %s\n' "${PLAN_NUMBER[index]}" "${PLAN_TITLE[index]}" >&2
             _plan_hook "$index" failed
             if [ "${PLAN_CONTINUE[index]}" = yes ]; then

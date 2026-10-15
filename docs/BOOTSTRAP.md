@@ -23,6 +23,32 @@ deleted.
 
 The script is `bootstrap/sirven-bootstrap.sh`. Read it before you run it.
 
+## Handing the Tailscale auth key to the installer
+
+The script passes its arguments on and starts the installer in the environment it was started in, so a
+Tailscale auth key reaches the join in one of two ways. The default is a key file: save the key as
+`/etc/sirven/tailscale-auth-key`, owned by root, mode 0600, with no extended access control list (a
+file with any extra access entry for another account is refused, even when the mode bits look right).
+The key then never passes through sudo or your shell history, and the installer removes the file after
+the join. To make the file without the key appearing on a command line:
+
+```
+sudo install -d -m 0755 -o root -g root /etc/sirven
+sudo sh -c 'umask 077; cat > /etc/sirven/tailscale-auth-key'
+```
+
+Paste the key, press Return, then Ctrl-D.
+
+The other way is the environment: `SIRVEN_TAILSCALE_AUTHKEY` (or `TAILSCALE_AUTHKEY`) set in your shell
+and kept through sudo with `sudo --preserve-env=SIRVEN_TAILSCALE_AUTHKEY`. Sudo allows that only when
+its policy does (the sudoers file, which says what sudo may do): a rule for all commands implies the
+`SETENV` tag, a narrower rule needs that tag, or an `env_keep` line naming the variable. When the policy
+does not allow it, sudo may refuse the whole command with an error. Plain `sudo` without the option
+drops the variable, and the installer then refuses with "there is no Tailscale auth key", changing
+nothing. Read the key into the variable with `read -rs SIRVEN_TAILSCALE_AUTHKEY; export SIRVEN_TAILSCALE_AUTHKEY`, not
+`SIRVEN_TAILSCALE_AUTHKEY=<the key> command`, since a command line is kept in shell history and shows
+in the process list. When the plan joins, the installer unsets both variables as soon as the join step has run. A machine that is already the agent node has no join step, and the key stays in the environment there; use the file.
+
 ## Where the pin lives
 
 The release pin is two lines near the top of `bootstrap/sirven-bootstrap.sh`:

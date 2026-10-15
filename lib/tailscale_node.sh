@@ -17,7 +17,7 @@
 #
 # the auth key comes from the environment, SIRVEN_TAILSCALE_AUTHKEY or TAILSCALE_AUTHKEY, or else from
 # KEY_FILE, which must be a plain file owned by root (whoever runs this, when not root) that no other account can read or
-# write. it is never put on a command line: tailscale reads it from a private temporary file. whatever
+# write: mode 0600 and no extended access control list (an access entry for another account, which the mode bits can hide). it is never put on a command line: tailscale reads it from a private temporary file. whatever
 # tailscale prints is shown with the key blanked out.
 #
 # the tailscale command is found on the search path. SIRVEN_TAILSCALE names another one for the tests (not honored as root).
@@ -39,10 +39,34 @@ fail() {
   exit 1
 }
 
+# has_extended_access_list FILE: true when FILE carries an access control list beyond the plain owner, group and other bits, which
+# is a way to give another account access that the mode bits do not show. looked for on purpose, in every way the machine offers,
+# and never worked out from the mode: on Linux the group bits of such a file show the mask, which can read '---' while a named
+# entry sits behind it, and a later chmod g+r would let the entry through.
+#   - the '+' that ls prints after the mode (Linux), whether or not getfacl is installed;
+#   - any named user or group entry, a mask or a default entry in what getfacl prints (Linux);
+#   - the entries ls -e lists under the file (macOS, where ls prints '@' instead of '+' when the file has extended attributes too).
+has_extended_access_list() {
+  local file="$1" listing entries
+  listing="$(ls -ldn "$file" 2>/dev/null)" || return 0
+  [ "$(printf '%s' "$listing" | cut -c11)" != "+" ] || return 0
+  # each listing is read into a variable first: under pipefail, grep -q ending early would otherwise make the pipeline fail
+  if command -v getfacl >/dev/null 2>&1; then
+    entries="$(getfacl -p -c -- "$file" 2>/dev/null)" || true
+    ! printf '%s\n' "$entries" | grep -Eq '^(default:|mask:|(user|group):[^:])' || return 0
+  fi
+  if [ "$(uname -s 2>/dev/null)" = Darwin ]; then
+    # shellcheck disable=SC2012 # only ls -e prints the access entries of a file on macOS; find cannot
+    entries="$(ls -ldne "$file" 2>/dev/null | tail -n +2)" || true
+    ! printf '%s\n' "$entries" | grep -Eq '^ *[0-9]+: ' || return 0
+  fi
+  return 1
+}
+
 # key_file_problem FILE: why FILE may not be read as the auth key, or nothing when it may (or is not there at all).
 # a key file must be a plain file (not a link), owned by root (by whoever runs this, when that is not root, which only the tests do),
-# with no permission for the group or for anyone else: a file others can write picks the tailnet this machine joins, and a file
-# others can read leaks the key.
+# with no extended access list and no permission for the group or for anyone else: a file others can write picks the tailnet this
+# machine joins, and a file others can read leaks the key.
 key_file_problem() {
   local file="$1" listing mode owner
   [ -e "$file" ] || [ -L "$file" ] || return 0
@@ -55,6 +79,10 @@ key_file_problem() {
   esac
   if [ "$owner" != "$(id -u)" ]; then
     printf 'it is owned by account number %s, not by root' "$owner"
+    return 0
+  fi
+  if has_extended_access_list "$file"; then
+    printf 'it has an extended access control list, an access entry beyond the owner, group and other bits (the mode bits do not show who it lets in); remove it (setfacl -b on Linux, chmod -N on macOS) and keep the mode 0600'
     return 0
   fi
   case "${mode#????}" in
@@ -211,7 +239,7 @@ node_prepare() {
       NODE_KEY="$(head -n 1 "$key_file")"; NODE_ORIGIN="$key_file"
     fi
   fi
-  [ -n "$NODE_KEY" ] || refuse "there is no Tailscale auth key. put one in the environment as SIRVEN_TAILSCALE_AUTHKEY (sudo --preserve-env=SIRVEN_TAILSCALE_AUTHKEY ...), or save it as ${key_file:-the key file}, owned by root, mode 0600. make it in the Tailscale admin console, settings, keys: tagged $TAILSCALE_NODE_TAG, pre-approved."
+  [ -n "$NODE_KEY" ] || refuse "there is no Tailscale auth key. save it as ${key_file:-the key file}, owned by root, mode 0600 (the safer way), or put it in the environment as SIRVEN_TAILSCALE_AUTHKEY (sudo --preserve-env=SIRVEN_TAILSCALE_AUTHKEY ..., which works only if the sudo policy allows it). make it in the Tailscale admin console, settings, keys: tagged $TAILSCALE_NODE_TAG, pre-approved."
   unset SIRVEN_TAILSCALE_AUTHKEY TAILSCALE_AUTHKEY
   case "$NODE_KEY" in *[!A-Za-z0-9_-]*) refuse "the auth key in $NODE_ORIGIN has characters a Tailscale key never has (a carriage return from Windows line ends, for one); it is not used." ;; esac
 

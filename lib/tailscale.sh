@@ -6,9 +6,9 @@
 #
 # interactive once: you log in to the tailscale admin console in a browser and make one tagged
 # auth key. after that the machine joins with that key, and the agent client connects over
-# SSH with its own key. the key is read from the environment (SIRVEN_TAILSCALE_AUTHKEY or
-# TAILSCALE_AUTHKEY) or from the key file below, never written anywhere by sirven, and removed from disk
-# after the join when it came from the file.
+# SSH with its own key. the key is read from the key file below (the safer way) or from the environment
+# (SIRVEN_TAILSCALE_AUTHKEY or TAILSCALE_AUTHKEY), never written anywhere by sirven, and removed from disk
+# after the join when it came from the file. the installer unsets the two variables once the join step has run.
 # reads: PREFIX, PACKAGE, CONFIG_DIR, STATE_DIR, SERVICE_USER, ADOPT_TAILSCALE, OPERATING_SYSTEM
 
 TAILSCALE_MACOS_REASON="applying to a macos machine is not verified yet; the join runs only on linux, inside a throwaway container"
@@ -28,7 +28,7 @@ tailscale_node_script() {
 }
 
 # true when a key is there to join with: in the environment, or in the key file. the key file counts only when it passes the
-# same check the join makes (a plain file, owned by root, no permission for anyone else), so the refusal comes before a change.
+# same check the join makes (a plain file, owned by root, no extended access control list, no permission for anyone else), so the refusal comes before a change.
 tailscale_key_available() {
   [ -n "${SIRVEN_TAILSCALE_AUTHKEY:-}" ] || [ -n "${TAILSCALE_AUTHKEY:-}" ] ||
     bash "$ROOT_DIR/lib/tailscale_node.sh" key-file-check "${PREFIX}$(tailscale_auth_key_file)" >/dev/null 2>&1 ||
@@ -56,11 +56,12 @@ tailscale_refuse_before_apply() {
     bash "$ROOT_DIR/lib/tailscale_node.sh" key-file-check "$(tailscale_auth_key_file)" >/dev/null || key_file_status=$?
     if [ "$key_file_status" -eq 2 ]; then
       printf 'error: refused: the saved auth key file cannot be trusted (above). nothing was changed.\n' >&2
-      printf 'you can: fix it (chown root:root and chmod 600 %s), or remove it and hand the key over in the environment.\n' "$(tailscale_auth_key_file)" >&2
+      printf 'you can: fix it (chown root:root %s, take off any extended access control list with setfacl -b %s, then chmod 600 %s), or remove it and hand the key over in the environment.\n' \
+        "$(tailscale_auth_key_file)" "$(tailscale_auth_key_file)" "$(tailscale_auth_key_file)" >&2
       exit 2
     fi
     printf 'error: refused: there is no Tailscale auth key to join the tailnet with. nothing was changed.\n' >&2
-    printf 'you can: make a key in the Tailscale admin console (settings, keys: tagged tag:agent, pre-approved, ephemeral if you can), then run again with it in the environment: sudo --preserve-env=SIRVEN_TAILSCALE_AUTHKEY ... or saved as %s, owned by root, mode 0600. or run again with --transport none.\n' "$(tailscale_auth_key_file)" >&2
+    printf 'you can: make a key in the Tailscale admin console (settings, keys: tagged tag:agent, pre-approved, ephemeral if you can), then run again with it saved as %s, owned by root, mode 0600 (the safer way), or in the environment: sudo --preserve-env=SIRVEN_TAILSCALE_AUTHKEY ... (which works only if the sudo policy allows it). or run again with --transport none.\n' "$(tailscale_auth_key_file)" >&2
     exit 2
   fi
   # every other refusal the join itself would make, now, so that "nothing was changed" is true: a tailscale too old to read a key from
@@ -117,8 +118,8 @@ plan_tailscale() {
   plan_owner "give the installer one tagged auth key, once" \
     "tailscale admin console, settings, keys: generate an auth key with tag:agent, pre-approved. ephemeral is the better choice: the node then leaves the tailnet by itself when it logs out.
 hand it over one of two ways, and it is the only interactive step:
-  in the environment: sudo --preserve-env=SIRVEN_TAILSCALE_AUTHKEY, with the variable set in your shell (SIRVEN_TAILSCALE_AUTHKEY, or TAILSCALE_AUTHKEY)
-  or in a file: save it as $(tailscale_auth_key_file), owned by root, mode 0600; it is removed after the join." \
+  in a file, the safer way and the one to use first: save it as $(tailscale_auth_key_file), owned by root, mode 0600, with no extra access control list; it is removed after the join.
+  in the environment: set SIRVEN_TAILSCALE_AUTHKEY (or TAILSCALE_AUTHKEY) in your shell and run sudo --preserve-env=SIRVEN_TAILSCALE_AUTHKEY. sudo allows that only when its policy does: a sudoers rule for all commands implies the SETENV tag, a narrower rule needs that tag, or an env_keep line for the variable. when the policy does not allow it, sudo may refuse the command with an error; without the option, sudo drops the variable and the join finds no key. the installer forgets the variable once the join step has run." \
     "tailscale_key_available"
   if [ "$OPERATING_SYSTEM" = macos ]; then
     plan_planonly "join the tailnet as a tagged device with that key" \
@@ -132,6 +133,9 @@ hand it over one of two ways, and it is the only interactive step:
       "# runs lib/tailscale_node.sh join; the key comes from the environment or from $key_file and is never put on a command line.
 # it records the node in $(tailscale_marker_file), and refuses with nothing changed if there is no key, no tailscale, or a login that is not ours.
 tailscale up --auth-key=file:<a private copy of the key> --advertise-tags=tag:agent --hostname=$SERVICE_USER-<this machine's name> --ssh=false --accept-dns=false --accept-routes=false --reset --timeout=60s"
+    # the join is the only step that reads the key. once it has run (done, failed or skipped) the installer drops the key from its
+    # own environment, so no later step starts a child process that inherits it.
+    plan_forget_secrets SIRVEN_TAILSCALE_AUTHKEY TAILSCALE_AUTHKEY
     plan_undo "log this machine out of the tailnet, if this installer joined it" "[ ! -e $marker ]" \
       "bash $script leave $marker" \
       "tailscale logout   # via lib/tailscale_node.sh leave, only when this machine's login is still the node recorded in $(tailscale_marker_file)"
