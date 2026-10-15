@@ -3,6 +3,16 @@
 #
 #   bash tests/harness/run-linux.sh              every scenario in tests/harness/scenarios/linux
 #   bash tests/harness/run-linux.sh 02           only scenarios whose file name contains 02
+#   bash tests/harness/run-linux.sh 01,02,real-host   several filters, separated by commas: a scenario runs if its file name contains any
+#
+# the machine the scenarios run on is chosen with SIRVEN_HARNESS_IMAGE (default debian12, so existing runs are unchanged):
+#   SIRVEN_HARNESS_IMAGE=debian12     Debian 12, Dockerfile.linux (the default)
+#   SIRVEN_HARNESS_IMAGE=ubuntu2404   Ubuntu 24.04 long-term support, Dockerfile.linux-ubuntu2404
+#   SIRVEN_HARNESS_IMAGE=fedora       Fedora 42 (the Red Hat family, package tool dnf), Dockerfile.linux-fedora
+# each recipe is pinned by digest. the core subset worth running on a non-default image (first install as observer and as
+# builder, the re-run, uninstall restoring the machine, the consent scenarios) is:
+#   SIRVEN_HARNESS_IMAGE=fedora bash tests/harness/run-linux.sh 01-install,02-uninstall,real-host
+# a scenario that needs the real Tailscale always uses the Debian image of Dockerfile.linux-tailscale, whatever is chosen here.
 #
 # each scenario gets a brand new container from one prebuilt image: the repository mounted read
 # only at /src (and copied to /srv/pkg, root-owned, which is what the scenario runs), no network, no privileged mode, no host folder other than the repository, a
@@ -60,10 +70,19 @@ trap 'exit 129' HUP
 
 total_failed=0
 ran=0
-default_image="$(ensure_image Dockerfile.linux sirven-harness-linux)"
+case "${SIRVEN_HARNESS_IMAGE:-debian12}" in
+  debian12) default_image="$(ensure_image Dockerfile.linux sirven-harness-linux)" ;;
+  ubuntu2404) default_image="$(ensure_image Dockerfile.linux-ubuntu2404 sirven-harness-linux-ubuntu2404)" ;;
+  fedora) default_image="$(ensure_image Dockerfile.linux-fedora sirven-harness-linux-fedora)" ;;
+  *) echo "unknown SIRVEN_HARNESS_IMAGE '$SIRVEN_HARNESS_IMAGE': use debian12, ubuntu2404 or fedora" >&2; exit 2 ;;
+esac
 [ -n "$default_image" ] || exit 2
 for scenario in "$HARNESS_DIR"/scenarios/linux/*.sh; do
-  case "$scenario" in *"$FILTER"*) ;; *) continue ;; esac
+  selected=""
+  IFS=, read -ra filters <<< "$FILTER"
+  [ "${#filters[@]}" -gt 0 ] || filters=("")
+  for f in "${filters[@]}"; do case "$scenario" in *"$f"*) selected=yes ;; esac; done
+  [ -n "$selected" ] || continue
   name="$(basename "$scenario" .sh)"
   printf '\n# %s\n' "$name"
   started=$SECONDS

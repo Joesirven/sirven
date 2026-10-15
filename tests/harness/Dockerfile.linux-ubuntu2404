@@ -1,0 +1,8 @@
+# the disposable machine for a real Linux apply on Ubuntu 24.04 long-term support: the same tools as
+# Dockerfile.linux (the Debian image), from the Ubuntu package archive. pinned by digest like the Debian one.
+# chosen with SIRVEN_HARNESS_IMAGE=ubuntu2404 (see the header of run-linux.sh).
+FROM ubuntu:24.04@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884ff530eb55
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends bash python3 acl passwd procps util-linux coreutils findutils diffutils openssh-server openssh-client cron at openssl curl \
+ && rm -rf /var/lib/apt/lists/*
+WORKDIR /work

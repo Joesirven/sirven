@@ -1,0 +1,8 @@
+# the disposable machine for a real Linux apply on Fedora 42, the Red Hat family (package tool dnf): the same
+# tools as Dockerfile.linux, under their Fedora package names (shadow-utils has useradd and usermod, cronie is
+# cron, openssh-clients is the ssh client). curl comes already installed as curl-minimal. pinned by digest like the
+# Debian one. chosen with SIRVEN_HARNESS_IMAGE=fedora (see the header of run-linux.sh).
+FROM fedora:42@sha256:99e203b80b1c3d8f7e161ec10a68fd02b081ef83a3963553e513c82846b97814
+RUN dnf install -y --setopt=install_weak_deps=False bash python3 acl shadow-utils procps-ng util-linux coreutils findutils diffutils openssh-server openssh-clients cronie at openssl \
+ && dnf clean all && rm -rf /var/cache/dnf
+WORKDIR /work
