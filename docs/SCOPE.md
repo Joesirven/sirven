@@ -3,14 +3,15 @@
 Status: draft for Jose's review, 2026-10-09. Working name **Sirven**, subtitle "secure agent access".
 The name lives only in `project.json`; this document says "Sirven" or "the package".
 
+Updated 2026-10-15: the repository name, the Tailscale row (W6), the `--with-bb` row (W9), and the demo outline row (W13) now match the repository (see docs/status/2026-10-15-docs-claims.md). The other status cells are as written on 2026-10-09.
+
 ## Name
 
 - **Sirven is a working name.** Known public-name collisions: sirven.com (an image content delivery
   network) and getsirven.com. Revisit the name before any public launch.
 - Positioning: "the shadcn of agent access": install it, own it, no hosted middleman.
-- The GitHub repository is still `Joesirven/secure-agent-access`. Renaming it to `Joesirven/sirven`
-  is pending Jose's GitHub authentication fix on the MacBook; update `repository` in
-  `project.json` when it happens.
+- The GitHub repository is `Joesirven/sirven`, and `repository` in `project.json` says so. It was
+  `Joesirven/secure-agent-access` when this draft was written on 2026-10-09.
 
 ## What it is
 
@@ -65,14 +66,14 @@ Each workstream lists what it delivers, what it needs first, and its honest stat
 | W3 | Permission model | Levels as data (`levels/*.json` or similar), grant schema, a compiler from grants to access control list commands | none | **Design doc plus reference data and compiler** |
 | W4 | Audit log | Log format (JSON lines), location owned by the owner, append-only from the agent's point of view, session start and end, every command via a forced-command wrapper | W2, W3 | **Format designed; wrapper built if time allows**, otherwise designed |
 | W5 | Kill switch | `revoke --all`: remove authorized keys, end sessions, lock the user, remove tunnel access, write a final audit entry | W2, W4, W6 | **Built on Linux** (applies in a container and on a real machine as root, verified by the harness in a container); plan output on macOS |
-| W6 | Transport: Tailscale | Install check, `tailscale up` with an auth key after one interactive login, tagged device, a policy snippet that lets only the owner's devices reach the agent port | W1 | **Build the plan and documentation**; never run against a real tailnet in tests |
+| W6 | Transport: Tailscale | Install check, `tailscale up` with an auth key after one interactive login, tagged device, a policy snippet that lets only the owner's devices reach the agent port | W1 | **Built for Linux containers**: the plan, the join as `tag:agent`, and the logout on revoke and uninstall (see the alpha cut table). Never run against a real tailnet in tests |
 | W7 | Transport: Cloudflare Tunnel | `cloudflared` tunnel plus Cloudflare Access service token in front of SSH | W1 | **Documented second path**, plan output only |
 | W8 | Runtime adapters | Per-runtime setup for the service user: Claude Code, Codex, Pi. Config written into the service user's home, never the owner's | W2 | **Claude Code first**; Codex and Pi stubbed with clear "not yet" errors |
-| W9 | Phone-to-agent channel | How the owner's text reaches the runtime on the machine | W6 or W7, W8 | **Not built by the package.** Alpha relies on an existing remote client (bb or the runtime's own remote mode) over the transport. Optional `--with-bb` installs bb; orca to be specified by Jose |
+| W9 | Phone-to-agent channel | How the owner's text reaches the runtime on the machine | W6 or W7, W8 | **Not built by the package.** Alpha relies on an existing remote client (bb or the runtime's own remote mode) over the transport. Optional `--with-bb` adds a bb note to the plan only; orca to be specified by Jose |
 | W10 | Friend invite | `invite --level observer --path ~/code/app --key <their public key> --expires 7d`, plus `revoke <invite>` | W3, W4, W5 | **Designed** in `docs/PERMISSIONS.md` |
 | W11 | Multi-machine | An inventory file listing machines; the same grants applied to each over SSH from the owner's laptop; per-machine state and drift report | W1 to W6 stable | **Designed only** |
 | W12 | Advanced config | One config file (its name derived from `project.json`) for custom levels, extra paths, log retention, transport options | W3 | **Schema sketched**, not built |
-| W13 | Docs, demo, video | README with diagram, `docs/DEMO.md` outline, 15-second explainer | none | **Build** |
+| W13 | Docs, demo, video | README with diagram, a demo outline (`docs/DEMO.md`, not written yet), 15-second explainer | none | **Build** |
 | W14 | Test harness | Fake-root unit tests (any machine), dry-run golden files, Linux container tests for real user and access control list creation, macOS testing plan | W1 | **Unit and dry-run tests tonight**; container tests if a container is available on the MacBook |
 
 ## Dependency order

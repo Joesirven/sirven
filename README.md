@@ -37,6 +37,8 @@ sudo bash install.sh             # answer two questions: level, folder
 bash bin/sirven grant inspect    # see exactly what the agent can touch
 ```
 
+On a machine that is logged in to Tailscale without the `tag:agent` tag, the first dry run stops before it prints a plan (exit status 2) and says why. To read the plan anyway, run `bash install.sh --dry-run --transport none`, or give the installer a fake root with `bash install.sh --dry-run --prefix /tmp/sirven-plan`.
+
 Unpack the package where only you can write, and delete that folder after the install (or grant a path that does not hold it): as root,
 it is the only code that runs from a place the agent could reach. Install lays down the launcher `/usr/local/sbin/sirven` and a
 root-owned kept copy in `/var/lib/sirven/package`; every root command after that goes through the launcher, for example

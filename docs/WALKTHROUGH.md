@@ -11,7 +11,7 @@ sirven is built for people who already have a personal agent or muse running (a 
 The installer checks first and adopts what it finds instead of installing it again:
 
 - **Tailscale.** Installed, logged in, and this machine's own tags are read from `tailscale status --json`. A machine already logged in with `tag:agent` is the agent node: the plan skips the auth key and the join, and never runs `tailscale up` on it. A machine that is installed but not logged in has no login to adopt: its install is kept, and the join is the usual fresh setup step (see the next section). sirven never logs Tailscale in or out, re-keys it, re-tags it, or changes its settings in an adopt path; the one login it ever logs out is a node its own join made and recorded.
-- **bb.** Found on the path, it is kept as it is, and `--with-bb` has nothing left to install.
+- **bb.** Found on the path, it is kept as it is. `--with-bb` only adds a note about bb to the plan for now; it installs nothing.
 - **An earlier sirven run.** The grant in force, the policy copy, the audit log, and the install record are kept. A level or path you leave open is taken from the grant in force, so a plain re-run keeps what you set up before.
 
 Each thing it keeps gets an `adopted:` line at the top of the plan, and `--dry-run` shows all of it while changing nothing. When what is there cannot be kept alongside what you asked for, the installer stops before any change, says what conflicts, and says what you can do:
@@ -45,7 +45,7 @@ cd sirven
 
 Or from npm: `npm install -g @joesirven/sirven`, then run the `install.sh` inside the global package folder.
 
-On a Mac without the command line developer tools, the installer stops with a message asking you to run `xcode-select --install` first: the python3 that macOS ships is a placeholder until they are installed. Install them, wait for that to finish, and run the installer again. Applying an install to a Mac is not verified yet: a real run stops before any change, and on a Mac with the developer tools a `--dry-run` shows the plan.
+On a Mac without the command line developer tools, the installer stops with a message asking you to run `xcode-select --install` first: the python3 that macOS ships is a placeholder until they are installed. Install them, wait for that to finish, and run the installer again. Applying an install to a Mac is not verified yet: a real run stops before any change, unless the owner's real install check is switched on with `SIRVEN_MACOS_REAL_APPLY=1` as root. On a Mac with the developer tools, a `--dry-run` shows the plan unless the Mac is logged in to Tailscale without `tag:agent`; see the README quick start for the two ways around that.
 
 The one-line command at `https://cli.sirven.xyz` installs a pinned release instead, checked against its checksum before anything runs. See [BOOTSTRAP.md](BOOTSTRAP.md).
 
@@ -64,7 +64,13 @@ Answer them, or take the defaults. With `--yes` nothing is asked: observer, no p
 
 ## 3. confirm
 
-Confirm the plan and the installer applies it: it creates the service user (this is the one step that needs sudo), sets the access level on the path, and writes an audit record. Nothing else on the machine changes.
+Confirm the plan and the installer applies it. On Linux, as root, it creates the service user (the one step that needs sudo), sets the access level on the path, and writes an audit record. It also does the following, all listed in the plan before you confirm:
+
+- creates the state folder `/var/lib/sirven` (private to root), the policy folder `/etc/sirven`, and the audit log folder `/var/log/sirven`;
+- keeps a copy of the package in `/var/lib/sirven/package`, and installs the launcher `/usr/local/sbin/sirven`, which every later root command goes through;
+- with the default transport, `--transport tailscale`, joins the machine to your tailnet as the tagged agent node, using the one auth key you supply (see the Tailscale section above).
+
+Run `--dry-run` first to see every step with its command.
 
 ## connect your agent
 

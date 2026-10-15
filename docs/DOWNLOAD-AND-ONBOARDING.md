@@ -1,8 +1,9 @@
 # download and onboarding
 
-The consumer install path: a Mac app you download from the sirven website, open, and set up in
-three steps and a confirmation. The command line install path (`docs/WALKTHROUGH.md`) stays
-available for people who prefer it.
+The planned consumer install path: a Mac app you download from the sirven website, open, and set up in
+three steps and a confirmation. It is not published yet: on 2026-10-15 the manifest address
+(`https://sirven.xyz/download/release.json`) returned a web page, not a manifest. The command line install
+path (`docs/WALKTHROUGH.md`) is the one that exists today, and it stays available for people who prefer it.
 
 | Piece | Where | What it is |
 |---|---|---|
@@ -90,7 +91,7 @@ One-time setup, all on Jose's Mac, all Jose's:
    then enter an app-specific password into the prompt (made at account.apple.com).
 4. Build: `SIRVEN_SIGNING_IDENTITY="<certificate name>" SIRVEN_NOTARY_PROFILE=sirven-notary bash app/macos/build.sh --release`.
 
-The release plan, visible with `--dry-run`: a universal build; hardened runtime signing with a
+The release plan, visible with `--dry-run` once both credentials are set (without them the dry run stops with exit status 2 and names what is missing): a universal build; hardened runtime signing with a
 secure timestamp and `app/macos/Sirven.entitlements` (empty, meaning no exceptions); verification;
 the disk image; signing the image; `notarytool submit --wait`; `stapler staple`; and a Gatekeeper
 check with `spctl`. `release.json` then records `"signing": "developer-id"` and
