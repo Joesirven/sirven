@@ -131,7 +131,9 @@ cloudflare_target_arguments() {
 
 # cloudflare_down: take the tunnel away, with the held token in the environment of that one command. what the kill switch runs.
 cloudflare_down() {
-  cloudflare_tunnel_with_token down --marker "${PREFIX}$(cloudflare_marker_file)" --token-file "${PREFIX}$(cloudflare_token_file)"
+  cloudflare_tunnel_with_token down --marker "${PREFIX}$(cloudflare_marker_file)" --config "${PREFIX}$(cloudflare_config_file)" \
+    --credentials "${PREFIX}$(cloudflare_credentials_file)" --unit "${PREFIX}$(cloudflare_unit_file)" --service "$CLOUDFLARE_SERVICE" \
+    --token-file "${PREFIX}$(cloudflare_token_file)"
 }
 
 # cloudflare_refuse_before_apply: a real apply that cannot make the tunnel stops before its first change, with what to do. a dry run and
@@ -209,7 +211,7 @@ do not add email code login or any other login method.
       "$CLOUDFLARE_MACOS_REASON" \
       "cloudflare_applied"
     plan_undo "take this machine's Cloudflare tunnel away, if this installer made it" "[ ! -e $marker ]" \
-      "bash $script down --marker $marker --token-file $token_file"
+      "bash $script down $(cloudflare_paths_arguments) --token-file $token_file"
   else
     plan_step system "make the tunnel, point the hostname at it, and run it as a service" \
       "cloudflare_applied" \
@@ -225,7 +227,7 @@ bash $script up $(cloudflare_paths_arguments) $(cloudflare_target_arguments)"
     # skipped) the held copy is dropped from the shell too, and the exported name is unset again as defense in depth.
     plan_forget_secrets HELD_SIRVEN_CLOUDFLARE_API_TOKEN SIRVEN_CLOUDFLARE_API_TOKEN
     plan_undo "take this machine's Cloudflare tunnel away, if this installer made it" "[ ! -e $marker ]" \
-      "{ set +x; } 2>/dev/null; SIRVEN_CLOUDFLARE_API_TOKEN=\"\${HELD_SIRVEN_CLOUDFLARE_API_TOKEN:-}\" bash $script down --marker $marker --token-file $token_file" \
+      "{ set +x; } 2>/dev/null; SIRVEN_CLOUDFLARE_API_TOKEN=\"\${HELD_SIRVEN_CLOUDFLARE_API_TOKEN:-}\" bash $script down $(cloudflare_paths_arguments) --token-file $token_file" \
       "cloudflared tunnel delete, and the alias record, via lib/cloudflare_tunnel.sh down: the service, the credentials and the config go from this machine; the tunnel and the alias record go from your account, each only while it is still the one this installer made. needs the token again (the token file, or SIRVEN_CLOUDFLARE_API_TOKEN)"
     plan_step run "remove the used API token file, if one was saved" \
       "[ ! -e $token_file ]" \

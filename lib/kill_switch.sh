@@ -534,7 +534,7 @@ plan_kill_switch_cloudflare_teardown() {
     plan_step system "take this machine's Cloudflare tunnel away: its service and credentials, and in your account the tunnel and the alias record this installer made, and only those" \
       "[ ! -e $marker ]" \
       "cloudflare_down" \
-      "bash $(cloudflare_tunnel_script) down --marker $(cloudflare_marker_file) --token-file $(cloudflare_token_file)   # via lib/cloudflare_tunnel.sh down; the token comes from the token file or from SIRVEN_CLOUDFLARE_API_TOKEN, and without it the service and credentials still go and the step says what is left in the account"
+      "bash $(cloudflare_tunnel_script) down $(cloudflare_paths_arguments) --token-file $(cloudflare_token_file)   # via lib/cloudflare_tunnel.sh down; the token comes from the token file or from SIRVEN_CLOUDFLARE_API_TOKEN, and without it the service and credentials still go and the step says what is left in the account"
     plan_tag verify
     plan_continue
     plan_forget_secrets HELD_SIRVEN_CLOUDFLARE_API_TOKEN SIRVEN_CLOUDFLARE_API_TOKEN
@@ -546,7 +546,7 @@ plan_kill_switch_cloudflare_teardown() {
     plan_continue
   else
     plan_planonly "take this machine's Cloudflare tunnel away: its service and credentials, and in your account the tunnel and the alias record this installer made, and only those" \
-      "bash $(cloudflare_tunnel_script) down --marker $(cloudflare_marker_file) --token-file $(cloudflare_token_file)" "$KILL_SWITCH_REASON" "[ ! -e $marker ]"
+      "bash $(cloudflare_tunnel_script) down $(cloudflare_paths_arguments) --token-file $(cloudflare_token_file)" "$KILL_SWITCH_REASON" "[ ! -e $marker ]"
   fi
 }
 

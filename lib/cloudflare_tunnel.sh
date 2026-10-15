@@ -5,7 +5,7 @@
 # lib/cloudflare.sh.
 #
 #   cloudflare_tunnel.sh up    --marker F --config F --credentials F --unit F --service NAME --user NAME --hostname H --account A [--zone Z] [--token-file F]
-#   cloudflare_tunnel.sh down  --marker F [--token-file F]
+#   cloudflare_tunnel.sh down  --marker F --config F --credentials F --unit F --service NAME [--token-file F]
 #   cloudflare_tunnel.sh check --marker F --hostname H --account A [--zone Z] [--token-file F]   every refusal 'up' can make, no change
 #   cloudflare_tunnel.sh applied MARKER                       exit 0 when the tunnel is made and its service runs (needs no token)
 #   cloudflare_tunnel.sh token-file-check FILE                exit 0 a usable token file, 1 none there, 2 there but not safe (says why)
@@ -18,9 +18,12 @@
 # every artifact is written to the record (MARKER, root-only, never the token) as soon as it exists, the unique tunnel name before
 # the tunnel is made, so a run that stops halfway leaves a record that names what exists, and 'down' undoes exactly that.
 #
-# down acts only on what the record names, and checks before it deletes: the alias record only while it still points at this tunnel,
-# the tunnel only while it still has the recorded name. the local part (stop and remove the service, remove the credentials and
-# the config) never needs the token, so the agent is cut off from this machine even when the token is gone. the part in the
+# down is given, on its command line, the exact paths and the unit name that up was given (the installer builds both from its own layout),
+# and acts on those names only: the file paths and the unit in the record are compared with them and never followed, so an edited record
+# cannot point it at another file or another service. in the Cloudflare account it acts only on what the record names, and checks before
+# it deletes: the alias record only while it still points at this tunnel, the tunnel only while it still has the recorded name. the
+# local part (stop and remove the service, remove the credentials and the config) never needs the token, so the agent is cut off from
+# this machine even when the token is gone. the part in the
 # Cloudflare account does: without the token 'down' says plainly what is left there (tunnel and record numbers), keeps the record,
 # and exits 1, so the same command with the token finishes it.
 #
@@ -133,6 +136,35 @@ valid_hostname() {
     *.*) return 0 ;;
   esac
   return 1
+}
+
+# valid_path PATH: an absolute path with no control character in it
+valid_path() {
+  case "$1" in
+    *[[:cntrl:]]*) return 1 ;;
+    /?*) return 0 ;;
+  esac
+  return 1
+}
+
+# valid_unit_name NAME: a plain systemd unit name
+valid_unit_name() {
+  case "$1" in
+    '' | -* | *[!A-Za-z0-9_.@-]*) return 1 ;;
+  esac
+  return 0
+}
+
+# require_names COMMAND: the names that COMMAND acts on were all given, and are plain. they are the only ones acted on.
+require_names() {
+  local name
+  for name in "$OPT_CONFIG" "$OPT_CREDENTIALS" "$OPT_UNIT" "$OPT_SERVICE"; do
+    [ -n "$name" ] || refuse "$1 needs --config, --credentials, --unit and --service."
+  done
+  for name in "$MARKER" "$OPT_CONFIG" "$OPT_CREDENTIALS" "$OPT_UNIT"; do
+    valid_path "$name" || refuse "'$name' is not an absolute path."
+  done
+  valid_unit_name "$OPT_SERVICE" || refuse "'$OPT_SERVICE' is not a plain unit name."
 }
 
 # parse_options ARGUMENT...: the --name value pairs into OPT_* variables
@@ -483,8 +515,9 @@ systemctl_command_run() {
 }
 
 cmd_down() {
-  local service unit config credentials path
+  local service unit config credentials path field recorded fixed
   parse_options "$@"
+  require_names down
   find_token "$OPT_TOKEN_FILE"
   rm -f "$MARKER".new.* 2>/dev/null || true
   if [ ! -e "$MARKER" ] && [ ! -L "$MARKER" ]; then
@@ -496,31 +529,27 @@ cmd_down() {
   fi
   python3 -I "$API_SCRIPT" marker-get "$MARKER" account_id >/dev/null 2>&1 </dev/null
   [ "$?" -ne 1 ] || fail "$MARKER cannot be read. nothing was removed. look for a tunnel named sirven-... in the Cloudflare dashboard."
-  service="$(record_get service)"; unit="$(record_get unit)"; config="$(record_get config)"; credentials="$(record_get credentials)"
-  # the record is root-only, so these were written by this script; they are still checked before anything is removed or stopped by name
-  for path in "$unit" "$config" "$credentials"; do
-    case "$path" in
-      '' | /*) ;;
-      *) fail "$MARKER names '$path', which is not an absolute path, so nothing was removed. check the record, and look for a tunnel named sirven-... in the Cloudflare dashboard." ;;
-    esac
+  # what is acted on: the names given on the command line, never the record's. a record that names something else (it is root-only, so
+  # only an edit by hand does) is said so and left out; what it names is not touched
+  service="$OPT_SERVICE"; unit="$OPT_UNIT"; config="$OPT_CONFIG"; credentials="$OPT_CREDENTIALS"
+  for field in service unit config credentials; do
+    case "$field" in service) fixed="$service" ;; unit) fixed="$unit" ;; config) fixed="$config" ;; *) fixed="$credentials" ;; esac
+    recorded="$(record_get "$field")"
+    if [ -n "$recorded" ] && [ "$recorded" != "$fixed" ]; then
+      printf 'warning: the record %s names the %s as %s, but sirven puts it at %s and acts only there: %s is left alone.\n' "$MARKER" "$field" "$recorded" "$fixed" "$recorded" >&2
+    fi
   done
-  case "$service" in
-    *[!A-Za-z0-9_.@-]*) fail "$MARKER names the service '$service', which is not a plain unit name, so nothing was removed." ;;
-  esac
 
   # the local part: never needs the token
-  if [ -n "$service" ]; then
-    if [ -n "$(systemctl_command)" ]; then
-      systemctl_command_run stop "$service" >/dev/null 2>&1 || true
-      systemctl_command_run disable "$service" >/dev/null 2>&1 || true
-    fi
+  if [ -n "$(systemctl_command)" ]; then
+    systemctl_command_run stop "$service" >/dev/null 2>&1 || true
+    systemctl_command_run disable "$service" >/dev/null 2>&1 || true
   fi
   for path in "$unit" "$config" "$credentials"; do
-    [ -n "$path" ] || continue
     rm -f "$path" "$path".new.* 2>/dev/null
     [ ! -e "$path" ] || { printf 'error: could not remove %s\n' "$path" >&2; FAILED=1; }
   done
-  if [ -n "$service" ] && [ -n "$(systemctl_command)" ]; then
+  if [ -n "$(systemctl_command)" ]; then
     systemctl_command_run daemon-reload >/dev/null 2>&1 || true
     if service_active "$service"; then
       printf 'error: %s is still running after stop\n' "$service" >&2

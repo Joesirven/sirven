@@ -26,6 +26,8 @@ setup_tunnel() {
   CREDENTIALS="$TEST_TMP/etc/cloudflared-credentials.json"
   UNIT="$TEST_TMP/units/sirven-cloudflared.service"
   mkdir -p "$STATE" "$TEST_TMP/etc" "$TEST_TMP/units"
+  # the names down is given: the same ones up was given, built by the installer from its own layout
+  NAMES=(--config "$CONFIG" --credentials "$CREDENTIALS" --unit "$UNIT" --service sirven-cloudflared.service)
   API_DIR="$TEST_TMP/api"
   mkdir -p "$API_DIR"
   printf '%s\n' "$SENTINEL_TOKEN" > "$TEST_TMP/api-token"
@@ -51,7 +53,7 @@ up() {
 }
 
 down() {
-  SIRVEN_CLOUDFLARE_API_TOKEN="${TOKEN_FOR_RUN-$SENTINEL_TOKEN}" bash "$HELPER" down --marker "$MARKER"
+  SIRVEN_CLOUDFLARE_API_TOKEN="${TOKEN_FOR_RUN-$SENTINEL_TOKEN}" bash "$HELPER" down --marker "$MARKER" "${NAMES[@]}"
 }
 
 # what the fake API holds
@@ -302,6 +304,46 @@ record_field_after_down() {
   api_calls | sed -n 's|^DELETE /accounts/[0-9a-f]*/cfd_tunnel/\([0-9a-f-]*\)/connections.*|\1|p' | head -n 1
 }
 
+# the names down acts on are the ones it is given. the record is root-only, but an edit by hand must not point the teardown at another
+# file or at another service (the owner's own cloudflared.service, say): what the record names is compared, said, and left alone
+test_down_acts_only_on_the_names_it_is_given_not_on_those_in_the_record() {
+  setup_tunnel
+  assert_status 0 up
+  local victim="$TEST_TMP/victim" python="$REPO_DIR/lib/cloudflare_api.py"
+  printf 'precious\n' > "$victim"
+  printf 'precious\n' > "$victim.2"
+  printf 'precious\n' > "$victim.3"
+  : > "$FAKE_SYSTEMD_DIR/cloudflared.service.active"
+  : > "$FAKE_SYSTEMD_DIR/cloudflared.service.enabled"
+  python3 -I "$python" marker-set "$MARKER" "unit=$victim" "config=$victim.2" "credentials=$victim.3" "service=cloudflared.service" >/dev/null
+  assert_status 0 down
+  assert_contains "$CAPTURED_STDERR" "left alone"
+  assert_contains "$CAPTURED_STDERR" "$victim"
+  assert_file_exists "$victim"
+  assert_file_exists "$victim.2"
+  assert_file_exists "$victim.3"
+  assert_file_exists "$FAKE_SYSTEMD_DIR/cloudflared.service.active" "another service was not stopped"
+  assert_file_exists "$FAKE_SYSTEMD_DIR/cloudflared.service.enabled" "or disabled"
+  assert_not_contains "$(cat "$FAKE_SYSTEMD_DIR/calls.log")" "systemctl stop cloudflared.service"
+  assert_not_contains "$(cat "$FAKE_SYSTEMD_DIR/calls.log")" "systemctl disable cloudflared.service"
+  assert_contains "$(cat "$FAKE_SYSTEMD_DIR/calls.log")" "systemctl stop sirven-cloudflared.service" "the one it was given"
+  assert_no_file "$UNIT"
+  assert_no_file "$CONFIG"
+  assert_no_file "$CREDENTIALS"
+  assert_no_file "$FAKE_SYSTEMD_DIR/sirven-cloudflared.service.active"
+  assert_eq 0 "$(api_value tunnels)" "the tunnel in the account is taken away, by the record's tunnel number"
+}
+
+test_down_needs_the_names_and_plain_ones() {
+  setup_tunnel
+  assert_status 2 bash "$HELPER" down --marker "$MARKER"
+  assert_contains "$CAPTURED_STDERR" "down needs --config, --credentials, --unit and --service"
+  assert_status 2 bash "$HELPER" down --marker "$MARKER" --config relative.yml --credentials "$CREDENTIALS" --unit "$UNIT" --service sirven-cloudflared.service
+  assert_contains "$CAPTURED_STDERR" "is not an absolute path"
+  assert_status 2 bash "$HELPER" down --marker "$MARKER" --config "$CONFIG" --credentials "$CREDENTIALS" --unit "$UNIT" --service '../x;y'
+  assert_contains "$CAPTURED_STDERR" "is not a plain unit name"
+}
+
 test_a_second_down_does_nothing_and_does_not_fail() {
   setup_tunnel
   assert_status 0 up
@@ -521,7 +563,7 @@ test_an_exported_variable_named_token_does_not_carry_the_token_to_a_child() {
   chmod 600 "$file"
   : > "$TEST_TMP/shim-log"
   TOKEN_FOR_RUN="" PATH="$SHIM_BIN:$PATH" assert_status 0 bash "$HELPER" up --token-file "$file" --marker "$MARKER" --config "$CONFIG" --credentials "$CREDENTIALS" --unit "$UNIT" --service sirven-cloudflared.service --user agent --hostname "$HOST_NAME" --account "$ACCOUNT"
-  TOKEN_FOR_RUN="" PATH="$SHIM_BIN:$PATH" assert_status 0 bash "$HELPER" down --marker "$MARKER" --token-file "$file"
+  TOKEN_FOR_RUN="" PATH="$SHIM_BIN:$PATH" assert_status 0 bash "$HELPER" down --marker "$MARKER" "${NAMES[@]}" --token-file "$file"
   assert_no_child_had_the_token
   unset TOKEN TOKEN_ORIGIN
 }
@@ -540,7 +582,7 @@ test_a_shell_trace_of_the_helper_does_not_carry_the_token() {
   assert_not_contains "$CAPTURED_STDERR" "$wrong" "a refusal made with xtrace in SHELLOPTS"
   SIRVEN_CLOUDFLARE_API_TOKEN="$SENTINEL_TOKEN" assert_status 0 bash -x "$HELPER" up "${arguments[@]}"
   assert_token_nowhere
-  SHELLOPTS=xtrace SIRVEN_CLOUDFLARE_API_TOKEN="$SENTINEL_TOKEN" assert_status 0 bash "$HELPER" down --marker "$MARKER"
+  SHELLOPTS=xtrace SIRVEN_CLOUDFLARE_API_TOKEN="$SENTINEL_TOKEN" assert_status 0 bash "$HELPER" down --marker "$MARKER" "${NAMES[@]}"
   assert_token_nowhere
   assert_eq 0 "$(api_value tunnels)" "the teardown did its work"
 }
