@@ -7,6 +7,10 @@ mkdir -p "$state"
 printf 'systemctl %s\n' "$*" >> "$state/calls.log"
 # the names (never the values) of the variables this process was started with, so a test can prove the token was not among them
 env | sed 's/=.*//' | tr '\n' ' ' >> "$state/environment-names.log"; printf '\n' >> "$state/environment-names.log"
+# the values too, without ever writing one (see the fake cloudflared): FAKE_LEAK_CHECK_FILE names a file whose first line is a secret
+if [ -n "${FAKE_LEAK_CHECK_FILE:-}" ] && [ -s "$FAKE_LEAK_CHECK_FILE" ]; then
+  case "$(env)" in *"$(head -n 1 "$FAKE_LEAK_CHECK_FILE")"*) printf 'LEAK\n' >> "$state/leaks.log" ;; esac
+fi
 case "$1" in
   daemon-reload) ;;
   enable)

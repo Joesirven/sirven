@@ -34,7 +34,11 @@
 
 set -uo pipefail
 
-unset CF_ENV_TOKEN
+# the first thing this script does, before it starts any process: take the token out of the environment into a variable that is not
+# exported. the variables this script later puts the token in (TOKEN, TOKEN_ORIGIN, CF_ENV_TOKEN) are unset first, because a caller
+# that had exported one of those names would otherwise leave the new value exported too, and every process started below would be
+# given the real token under that name.
+unset CF_ENV_TOKEN TOKEN TOKEN_ORIGIN
 CF_ENV_TOKEN="${SIRVEN_CLOUDFLARE_API_TOKEN:-}"
 unset SIRVEN_CLOUDFLARE_API_TOKEN
 

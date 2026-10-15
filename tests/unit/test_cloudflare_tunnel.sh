@@ -38,6 +38,8 @@ setup_tunnel() {
   export SIRVEN_CLOUDFLARE_API
   export SIRVEN_CLOUDFLARED="$FIXTURES/cloudflared" SIRVEN_SYSTEMCTL="$FIXTURES/systemctl"
   export FAKE_CF_DIR="$TEST_TMP/fake-cloudflared" FAKE_SYSTEMD_DIR="$TEST_TMP/fake-systemd"
+  # the fakes say (never print) when any variable they were started with holds the token, under any name
+  export FAKE_LEAK_CHECK_FILE="$TEST_TMP/api-token"
   unset SIRVEN_CLOUDFLARE_API_TOKEN FAKE_CF_VERSION FAKE_CF_BAD_CONFIG FAKE_SYSTEMCTL_START_FAILS FAKE_SYSTEMCTL_STOP_FAILS
   mkdir -p "$FAKE_CF_DIR" "$FAKE_SYSTEMD_DIR"
 }
@@ -460,9 +462,10 @@ test_applied_is_true_only_while_everything_is_there() {
   assert_status 1 bash "$HELPER" applied "$MARKER"
 }
 
-# the token reaches no process the helper starts: not cloudflared, not systemctl, not the interpreter, not date or hostname
-test_no_process_the_helper_starts_has_the_token_in_its_environment() {
-  setup_tunnel
+# make_shims: stand-ins for the commands the helper starts, first on the search path. each logs "clean NAME: variable names" or
+# "LEAK NAME: variable names" to shim-log, LEAK when the VALUE of any variable it was started with holds the token (under whatever
+# name), then runs the real command. the log never holds a value.
+make_shims() {
   local bin="$TEST_TMP/shims" name real
   mkdir -p "$bin"
   : > "$TEST_TMP/shim-log"
@@ -470,19 +473,57 @@ test_no_process_the_helper_starts_has_the_token_in_its_environment() {
     real="$(command -v "$name")" || continue
     cat > "$bin/$name" <<SHIM
 #!/bin/sh
-printf '%s: %s\\n' "$name" "\$(env | /usr/bin/sed 's/=.*//' | /usr/bin/tr '\\n' ' ')" >> "$TEST_TMP/shim-log"
+e="\$(env)"
+case "\$e" in *"$SENTINEL_TOKEN"*) leak=LEAK ;; *) leak=clean ;; esac
+printf '%s %s: %s\\n' "\$leak" "$name" "\$(printf '%s\\n' "\$e" | /usr/bin/sed 's/=.*//' | /usr/bin/tr '\\n' ' ')" >> "$TEST_TMP/shim-log"
 exec "$real" "\$@"
 SHIM
     chmod 755 "$bin/$name"
   done
-  PATH="$bin:$PATH" assert_status 0 up
-  PATH="$bin:$PATH" assert_status 0 down
-  assert_contains "$(cat "$TEST_TMP/shim-log")" "python3:" "children were started (else this test proves nothing)"
-  assert_contains "$(cat "$TEST_TMP/shim-log")" "mv:"
-  assert_not_contains "$(cat "$TEST_TMP/shim-log")" "CLOUDFLARE_API_TOKEN" "the environment of every child"
+  SHIM_BIN="$bin"
+}
+
+assert_no_child_had_the_token() {
+  local log
+  log="$(cat "$TEST_TMP/shim-log")"
+  assert_contains "$log" "python3:" "children were started (else this test proves nothing)"
+  assert_contains "$log" "mv:"
+  assert_eq 0 "$(printf '%s\n' "$log" | grep -c '^LEAK ' || true)" "children that had the token as the value of a variable (under any name)"
+  assert_not_contains "$log" "CLOUDFLARE_API_TOKEN" "the environment of every child"
   assert_not_contains "$(cat "$FAKE_CF_DIR/environment-names.log")" "CLOUDFLARE_API_TOKEN" "cloudflared"
   assert_not_contains "$(cat "$FAKE_SYSTEMD_DIR/environment-names.log")" "CLOUDFLARE_API_TOKEN" "systemctl"
   assert_contains "$(cat "$FAKE_CF_DIR/environment-names.log")" "PATH" "the fake saw an environment (else this proves nothing)"
+  assert_no_file "$FAKE_CF_DIR/leaks.log"
+  assert_no_file "$FAKE_SYSTEMD_DIR/leaks.log"
+}
+
+# the token reaches no process the helper starts: not cloudflared, not systemctl, not the interpreter, not date or hostname
+test_no_process_the_helper_starts_has_the_token_in_its_environment() {
+  setup_tunnel
+  make_shims
+  PATH="$SHIM_BIN:$PATH" assert_status 0 up
+  PATH="$SHIM_BIN:$PATH" assert_status 0 down
+  assert_no_child_had_the_token
+}
+
+# a caller that had a variable named TOKEN exported (a shell that did "export TOKEN=...", sudo -E) must not make the helper's own
+# variable of that name exported too: the real token, whichever way it was handed over, would then reach every child as TOKEN.
+test_an_exported_variable_named_token_does_not_carry_the_token_to_a_child() {
+  setup_tunnel
+  make_shims
+  local file="$TEST_TMP/token-file"
+  export TOKEN="a-caller-variable-that-is-not-a-secret" TOKEN_ORIGIN="neither-is-this"
+  PATH="$SHIM_BIN:$PATH" assert_status 0 up
+  PATH="$SHIM_BIN:$PATH" assert_status 0 down
+  assert_no_child_had_the_token
+  # the same when the token comes from the token file, and for the other command that reads it
+  printf '%s\n' "$SENTINEL_TOKEN" > "$file"
+  chmod 600 "$file"
+  : > "$TEST_TMP/shim-log"
+  TOKEN_FOR_RUN="" PATH="$SHIM_BIN:$PATH" assert_status 0 bash "$HELPER" up --token-file "$file" --marker "$MARKER" --config "$CONFIG" --credentials "$CREDENTIALS" --unit "$UNIT" --service sirven-cloudflared.service --user agent --hostname "$HOST_NAME" --account "$ACCOUNT"
+  TOKEN_FOR_RUN="" PATH="$SHIM_BIN:$PATH" assert_status 0 bash "$HELPER" down --marker "$MARKER" --token-file "$file"
+  assert_no_child_had_the_token
+  unset TOKEN TOKEN_ORIGIN
 }
 
 test_the_token_variable_is_used_only_as_a_check_or_as_standard_input_to_the_interpreter() {

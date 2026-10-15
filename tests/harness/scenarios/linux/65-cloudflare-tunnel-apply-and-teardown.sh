@@ -29,8 +29,14 @@ python3 -I "$FIXTURES/api_server.py" "$API_DIR" --token-file /tmp/fake-api-token
 for _ in $(seq 1 50); do [ -s "$API_DIR/port" ] && break; sleep 0.1; done
 export SIRVEN_CLOUDFLARE_API="http://127.0.0.1:$(cat "$API_DIR/port")"
 
-install_cf() { bash install.sh --yes --level "${LEVEL:-observer}" --transport cloudflare --cloudflare-hostname "$HOST" --cloudflare-account "$ACCOUNT" "$@"; }
-revoke_cf() { bash install.sh revoke --all --yes "$@"; }
+# the scenario exports TOKEN and KEY itself, for the checks below. the installer must not be given them by accident, or every child it starts
+# would carry the sentinel for a reason that is the scenario's, so each run drops both. CALLER_EXPORTED_TOKEN puts back a variable named TOKEN
+# with a value that is NOT a secret: a caller that had exported that name (a shell that did export TOKEN=..., sudo -E). the helper must not
+# let its own variable of that name be exported too, or the real token would reach its children as TOKEN.
+as_a_caller() { env -u TOKEN -u KEY ${CALLER_EXPORTED_TOKEN:+"TOKEN=$CALLER_EXPORTED_TOKEN"} "$@"; }
+install_cf() { as_a_caller bash install.sh --yes --level "${LEVEL:-observer}" --transport cloudflare --cloudflare-hostname "$HOST" --cloudflare-account "$ACCOUNT" "$@"; }
+revoke_cf() { as_a_caller bash install.sh revoke --all --yes "$@"; }
+uninstall_cf() { as_a_caller bash uninstall.sh --yes "$@"; }
 api_value() { python3 -I -c '
 import json, sys
 state = json.load(open(sys.argv[1]))
@@ -42,15 +48,22 @@ cloudflare_files() { world_files | grep -i -e cloudflare -e sirven-cloudflared |
 export -f api_value api_state_empty no_token_on_disk
 reset_machine() { bash uninstall.sh --yes >/dev/null 2>&1; rm -f /var/lib/sirven/agent-revoked-agent.json; rm -rf /var/lib/sirven/package; rm -rf "$FAKE_CF_DIR" "$FAKE_SYSTEMD_DIR"; }
 
-# stand-ins for mkdir, chown and install (the commands the steps before the tunnel run) that record the NAMES, never the values, of the
-# variables in the environment they were started with, then run the real command. for the runs that follow only (a disposable machine).
+# stand-ins for mkdir, chown and install (the commands the steps before the tunnel run) that record the NAMES of the variables in the
+# environment they were started with, and "LEAK" when the VALUE of any variable holds the token (whatever its name), never the value
+# itself, then run the real command. for the runs that follow only (a disposable machine).
 CHILD_ENV_LOG=/tmp/child-environment-names
 shim_children_on() {
   local name
   : > "$CHILD_ENV_LOG"
   for name in mkdir chown install; do
     mv "/usr/bin/$name" "/usr/bin/$name.real"
-    printf '#!/bin/sh\nprintf "%%s: %%s\\n" "%s" "$(env | /usr/bin/sed "s/=.*//" | /usr/bin/tr "\\n" " ")" >> %s\nexec /usr/bin/%s.real "$@"\n' "$name" "$CHILD_ENV_LOG" "$name" > "/usr/bin/$name"
+    sed -e "s|@NAME@|$name|g" -e "s|@LOG@|$CHILD_ENV_LOG|g" > "/usr/bin/$name" <<'SHIM'
+#!/bin/sh
+e="$(env)"
+case "$e" in *"$(cat /tmp/fake-api-token)"*) leak=LEAK ;; *) leak=clean ;; esac
+printf '%s @NAME@: %s\n' "$leak" "$(printf '%s\n' "$e" | /usr/bin/sed 's/=.*//' | /usr/bin/tr '\n' ' ')" >> @LOG@
+exec /usr/bin/@NAME@.real "$@"
+SHIM
     chmod 755 "/usr/bin/$name"
   done
 }
@@ -120,16 +133,28 @@ mkdir -p /etc/sirven
 printf '%s\n' "$TOKEN" > "$TOKEN_FILE"; chown root:root "$TOKEN_FILE"; chmod 600 "$TOKEN_FILE"
 calls_at_start="$(wc -l < /tmp/fake-api/calls.log)"
 mv /usr/bin/rm /usr/bin/rm.real
-printf '#!/bin/sh\ncase "$*" in *cloudflare-api-token*) env | /usr/bin/sed "s/=.*//" > /tmp/rm-environment-names ;; esac\nexec /usr/bin/rm.real "$@"\n' > /usr/bin/rm
+cat > /usr/bin/rm <<'SHIM'
+#!/bin/sh
+case "$*" in
+  *cloudflare-api-token*)
+    e="$(env)"
+    printf '%s\n' "$e" | /usr/bin/sed "s/=.*//" > /tmp/rm-environment-names
+    case "$e" in *"$(cat /tmp/fake-api-token)"*) : > /tmp/rm-leak ;; esac ;;
+esac
+exec /usr/bin/rm.real "$@"
+SHIM
 chmod 755 /usr/bin/rm
 shim_children_on
-FAKE_CF_PS_LOG=/tmp/ps-during-apply SIRVEN_CLOUDFLARE_API_TOKEN="$TOKEN" check_exit "apply with a token makes the tunnel" 0 install_cf
+# the caller here has a variable named TOKEN exported (not a secret), and the fakes look at the VALUE of every variable they get
+FAKE_LEAK_CHECK_FILE=/tmp/fake-api-token CALLER_EXPORTED_TOKEN="a-caller-variable-that-is-not-a-secret" FAKE_CF_PS_LOG=/tmp/ps-during-apply SIRVEN_CLOUDFLARE_API_TOKEN="$TOKEN" check_exit "apply with a token makes the tunnel" 0 install_cf
 out="$LAST_OUTPUT"
 mv -f /usr/bin/rm.real /usr/bin/rm
 shim_children_off
-check "steps before the tunnel did start children (so the next check proves something)" bash -c '[ "$(grep -c "^mkdir:" "$0")" -gt 0 ] && [ "$(grep -c "^chown:" "$0")" -gt 0 ]' "$CHILD_ENV_LOG"
+check "steps before the tunnel did start children (so the next check proves something)" bash -c '[ "$(grep -c " mkdir:" "$0")" -gt 0 ] && [ "$(grep -c " chown:" "$0")" -gt 0 ]' "$CHILD_ENV_LOG"
 check "and none of them was started with the token variable in its environment" bash -c '! grep -q "CLOUDFLARE_API_TOKEN" "$0"' "$CHILD_ENV_LOG"
-check "the step after the tunnel started its child without the token variable in the environment" bash -c '[ -s /tmp/rm-environment-names ] && ! grep -q "CLOUDFLARE_API_TOKEN" /tmp/rm-environment-names'
+check "and none had the token as the value of any variable, under any name (they looked at the values)" bash -c 'grep -q "^clean mkdir:" "$0" && ! grep -q "^LEAK " "$0"' "$CHILD_ENV_LOG"
+check "the step after the tunnel started its child without the token variable in the environment" bash -c '[ -s /tmp/rm-environment-names ] && ! grep -q "CLOUDFLARE_API_TOKEN" /tmp/rm-environment-names && [ ! -e /tmp/rm-leak ]'
+check "the tunnel step's own children (cloudflared, systemctl) had the token in no variable of any name, though the caller exported one named TOKEN" bash -c '[ -s /tmp/fake-cloudflared/calls.log ] && [ -s /tmp/fake-systemd/calls.log ] && [ ! -e /tmp/fake-cloudflared/leaks.log ] && [ ! -e /tmp/fake-systemd/leaks.log ]'
 check "the saved token file was removed by that step" bash -c '[ ! -e "$0" ]' "$TOKEN_FILE"
 check "one tunnel and one alias record in the account" bash -c '[ "$(api_value tunnels)" = 1 ] && [ "$(api_value records)" = 1 ]'
 check "the alias record points at the tunnel" bash -c 'python3 -I -c "
@@ -159,16 +184,16 @@ world_unchanged_if 'true' "and it changed no file" files /tmp/one.files
 shim_children_on
 SIRVEN_CLOUDFLARE_API_TOKEN="$TOKEN" check_exit "a second apply with a token in the environment (no tunnel is made) exits 0" 0 install_cf
 shim_children_off
-check "the steps that ran started children, and none had the token variable" bash -c '[ -s "$0" ] && ! grep -q CLOUDFLARE_API_TOKEN "$0"' "$CHILD_ENV_LOG"
+check "the steps that ran started children, and none had the token variable or its value" bash -c '[ -s "$0" ] && ! grep -q CLOUDFLARE_API_TOKEN "$0" && ! grep -q "^LEAK " "$0"' "$CHILD_ENV_LOG"
 
 # 4. revoke that names no transport at all (so the default one) takes the tunnel away, because the record says there is one
 shim_children_on
-SIRVEN_CLOUDFLARE_API_TOKEN="$TOKEN" check_exit "revoke --all applies" 0 revoke_cf
+FAKE_LEAK_CHECK_FILE=/tmp/fake-api-token CALLER_EXPORTED_TOKEN="a-caller-variable-that-is-not-a-secret" SIRVEN_CLOUDFLARE_API_TOKEN="$TOKEN" check_exit "revoke --all applies" 0 revoke_cf
 shim_children_off
 check "the plan showed the teardown and the audit log recorded the step" bash -c 'grep -q "take this machine.s Cloudflare tunnel away" <<< "$0" && grep -q "take this machine.s Cloudflare tunnel away" /var/log/sirven/audit.jsonl' "$LAST_OUTPUT"
 check "the account has no tunnel and no record of ours any more" api_state_empty
 check "the service is stopped and disabled, and the files are gone" bash -c '[ ! -e /tmp/fake-systemd/sirven-cloudflared.service.active ] && [ ! -e /tmp/fake-systemd/sirven-cloudflared.service.enabled ] && [ ! -e /etc/systemd/system/sirven-cloudflared.service ] && [ ! -e /etc/sirven/cloudflared.yml ] && [ ! -e /etc/sirven/cloudflared-credentials.json ] && [ ! -e /var/lib/sirven/cloudflare-tunnel.json ]'
-check "no child of the revoke had the token variable, and the token is nowhere" bash -c '! grep -q CLOUDFLARE_API_TOKEN "$0"' "$CHILD_ENV_LOG"
+check "no child of the revoke had the token variable or its value, and the token is nowhere" bash -c '! grep -q CLOUDFLARE_API_TOKEN "$0" && ! grep -q "^LEAK " "$0" && [ ! -e /tmp/fake-cloudflared/leaks.log ] && [ ! -e /tmp/fake-systemd/leaks.log ]' "$CHILD_ENV_LOG"
 check "the token is in no output of the revoke" bash -c '! grep -qF -- "$TOKEN" <<< "$0"' "$LAST_OUTPUT"
 deletes_before="$(grep -c '^DELETE ' /tmp/fake-api/calls.log)"
 check_exit "a second revoke exits 0" 0 revoke_cf
@@ -233,8 +258,9 @@ json.dump(s, open(p, "w"))'
 reset_machine
 SIRVEN_CLOUDFLARE_API_TOKEN="$TOKEN" install_cf >/dev/null 2>&1
 check "setup: the tunnel is made" bash -c '[ "$(api_value tunnels)" = 1 ]'
-SIRVEN_CLOUDFLARE_API_TOKEN="$TOKEN" check_exit "uninstall takes the tunnel away" 0 bash uninstall.sh --yes
+FAKE_LEAK_CHECK_FILE=/tmp/fake-api-token CALLER_EXPORTED_TOKEN="a-caller-variable-that-is-not-a-secret" SIRVEN_CLOUDFLARE_API_TOKEN="$TOKEN" check_exit "uninstall takes the tunnel away" 0 uninstall_cf
 out="$LAST_OUTPUT"
+check "the children of the uninstall (cloudflared, systemctl) had the token in no variable of any name, though the caller exported one named TOKEN" bash -c '[ -s /tmp/fake-systemd/calls.log ] && [ ! -e /tmp/fake-cloudflared/leaks.log ] && [ ! -e /tmp/fake-systemd/leaks.log ]'
 check "the account has nothing of ours" api_state_empty
 check "this machine has no file of cloudflare's or of the unit left, but the stand-in tool" bash -c '[ -z "$(cloudflare_files)" ]'
 check "the token is in no output of the uninstall" bash -c '! grep -qF -- "$TOKEN" <<< "$0"' "$out"
@@ -248,7 +274,7 @@ SIRVEN_CLOUDFLARE_API_TOKEN="$TOKEN" check_exit "apply when the alias record is 
 check "it says which step failed and why" bash -c 'grep -q "could not point agent.example.test at the tunnel" <<< "$0"' "$LAST_OUTPUT"
 check "the tunnel exists in the account and the record file names it" bash -c '[ "$(api_value tunnels)" = 1 ] && grep -q tunnel_id /var/lib/sirven/cloudflare-tunnel.json'
 check "the install record has no line for the failed step" bash -c '! grep -q cloudflare_tunnel.sh /var/lib/sirven/install-record.tsv'
-SIRVEN_CLOUDFLARE_API_TOKEN="$TOKEN" check_exit "uninstall takes the half-made tunnel away" 0 bash uninstall.sh --yes
+SIRVEN_CLOUDFLARE_API_TOKEN="$TOKEN" check_exit "uninstall takes the half-made tunnel away" 0 uninstall_cf
 check "it says it is the one a run left behind" bash -c 'grep -q "a run left behind" <<< "$0"' "$LAST_OUTPUT"
 check "the account has nothing of ours, and the record file is gone" bash -c 'api_state_empty && [ ! -e /var/lib/sirven/cloudflare-tunnel.json ]'
 rm -f /tmp/fake-api/refuse-records
@@ -260,14 +286,14 @@ first_tunnel="$(python3 -I -c 'import json; print([t for t in json.load(open("/t
 rm -f /tmp/fake-api/refuse-records
 SIRVEN_CLOUDFLARE_API_TOKEN="$TOKEN" check_exit "a second apply finishes the half-made tunnel" 0 install_cf
 check "with the same tunnel, one record, and the service running" bash -c '[ "$(api_value tunnels)" = 1 ] && [ "$(api_value records)" = 1 ] && grep -q "$0" /var/lib/sirven/cloudflare-tunnel.json && [ -e /tmp/fake-systemd/sirven-cloudflared.service.active ]' "$first_tunnel"
-SIRVEN_CLOUDFLARE_API_TOKEN="$TOKEN" bash uninstall.sh --yes >/dev/null 2>&1
+SIRVEN_CLOUDFLARE_API_TOKEN="$TOKEN" uninstall_cf >/dev/null 2>&1
 
 # 9. the routing is the same for every level
 for level in observer builder operator; do
   reset_machine
   LEVEL="$level" SIRVEN_CLOUDFLARE_API_TOKEN="$TOKEN" install_cf >/dev/null 2>&1
   sed '1d' /etc/sirven/cloudflared.yml | sed "s|^credentials-file:.*||" > "/tmp/config-$level"
-  SIRVEN_CLOUDFLARE_API_TOKEN="$TOKEN" bash uninstall.sh --yes >/dev/null 2>&1
+  SIRVEN_CLOUDFLARE_API_TOKEN="$TOKEN" uninstall_cf >/dev/null 2>&1
 done
 check "the config is the same text for observer, builder and operator (but for the tunnel number)" bash -c 'cmp -s /tmp/config-observer /tmp/config-builder && cmp -s /tmp/config-observer /tmp/config-operator && grep -q "service: ssh://localhost:22" /tmp/config-observer && [ "$(grep -c "service:" /tmp/config-observer)" = 2 ]'
 
