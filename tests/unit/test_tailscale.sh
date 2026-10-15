@@ -531,3 +531,74 @@ SHIM
   assert_no_file "$root/etc/sirven/tailscale-auth-key"
   assert_key_nowhere "$root" "$TEST_TMP/rm-environment-names"
 }
+
+# ---- a key file with an access entry for another account
+
+# add an access entry for another account to FILE. returns 1 when this machine has no way to make one.
+give_another_account_access() {
+  case "$(uname -s)" in
+    Darwin) chmod +a "group:everyone allow read" "$1" ;;
+    # the mask is set to '---' on purpose: it is what keeps the entry out of the group bits that ls shows
+    *) command -v setfacl >/dev/null 2>&1 && setfacl -m u:65534:r "$1" && setfacl -m m::--- "$1" ;;
+  esac
+}
+
+# the owner, group and other bits as ls prints them: nine characters, with no '+' or '@' after them
+mode_bits_of() {
+  # shellcheck disable=SC2012 # ls -ln is the portable way to read a mode string on macos and linux, as the other tests do
+  ls -ldn "$1" | cut -c1-10
+}
+
+test_a_key_file_with_an_access_entry_for_another_account_is_refused() {
+  setup_node
+  printf '%s\n' "$SENTINEL_KEY" > "$TEST_TMP/key-file"
+  chmod 600 "$TEST_TMP/key-file"
+  assert_status 0 bash "$NODE" key-file-check "$TEST_TMP/key-file"
+  if ! give_another_account_access "$TEST_TMP/key-file"; then
+    printf 'skipped: this machine has no way to make an access control list entry (no setfacl)\n'
+    return 0
+  fi
+  # a file that already has extended attributes (macos shows '@' and hides the '+') is no way round it either
+  if [ "$(uname -s)" = Darwin ]; then xattr -w sirven.test value "$TEST_TMP/key-file"; fi
+  assert_eq "-rw-------" "$(mode_bits_of "$TEST_TMP/key-file")" "the mode bits alone look right"
+  assert_status 2 bash "$NODE" key-file-check "$TEST_TMP/key-file"
+  assert_contains "$CAPTURED_STDERR" "extended access control list"
+  assert_status 2 bash "$NODE" join "$MARKER" agent "$TEST_TMP/key-file"
+  assert_contains "$CAPTURED_STDERR" "extended access control list"
+  assert_contains "$CAPTURED_STDERR" "nothing was changed"
+  assert_status 2 bash "$NODE" check agent "$TEST_TMP/key-file"
+  assert_not_contains "$(calls)" "up --auth-key"
+  assert_no_file "$MARKER"
+  # the key is not echoed in the refusal
+  assert_key_nowhere "$STATE" "$FAKE_TS_DIR"
+  # taken away again, the same file is used
+  case "$(uname -s)" in Darwin) chmod -N "$TEST_TMP/key-file" ;; *) setfacl -b "$TEST_TMP/key-file" ;; esac
+  assert_status 0 bash "$NODE" key-file-check "$TEST_TMP/key-file"
+  assert_status 0 bash "$NODE" join "$MARKER" agent "$TEST_TMP/key-file"
+}
+
+# on Linux the group bits of a file with an access control list show the mask. a mask of '---' hides a named entry from the
+# mode bits completely, and the file has to be refused anyway, whatever the mask is.
+test_a_key_file_with_an_access_entry_hidden_by_the_mask_is_refused_whatever_the_mask_is() {
+  setup_node
+  local mask
+  command -v setfacl >/dev/null 2>&1 || { printf 'skipped: this test needs setfacl (Linux)\n'; return 0; }
+  printf '%s\n' "$SENTINEL_KEY" > "$TEST_TMP/key-file"
+  chmod 600 "$TEST_TMP/key-file"
+  setfacl -m u:65534:r "$TEST_TMP/key-file" 2>/dev/null || { printf 'skipped: this file system keeps no access control lists\n'; return 0; }
+  for mask in 'r--' 'rw-' '---'; do
+    setfacl -m "m::$mask" "$TEST_TMP/key-file"
+    assert_status 2 bash "$NODE" key-file-check "$TEST_TMP/key-file"
+    assert_status 2 bash "$NODE" join "$MARKER" agent "$TEST_TMP/key-file"
+    assert_not_contains "$(calls)" "up --auth-key"
+  done
+  # with the mask at '---' the mode bits show nothing for the group: this is the case a mode check alone lets through
+  assert_eq "-rw-------" "$(mode_bits_of "$TEST_TMP/key-file")" "mode bits with the mask at ---"
+  assert_contains "$CAPTURED_STDERR" "extended access control list"
+  # a named group entry counts the same
+  setfacl -b "$TEST_TMP/key-file"
+  setfacl -m g:65534:r "$TEST_TMP/key-file"
+  assert_status 2 bash "$NODE" key-file-check "$TEST_TMP/key-file"
+  setfacl -b "$TEST_TMP/key-file"
+  assert_status 0 bash "$NODE" key-file-check "$TEST_TMP/key-file"
+}
