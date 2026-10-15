@@ -243,6 +243,31 @@ test_token_file_check_says_usable_missing_or_unsafe() {
   assert_contains "$CAPTURED_STDERR" "not a plain file"
 }
 
+# the checks a saved token file must pass live in lib/secret_file.sh. a copy of the script without that file, or with one that defines
+# nothing, must fail closed: a group readable token file is not accepted because the rule that refuses it is missing
+test_a_token_file_is_refused_when_the_file_of_checks_is_missing_or_defines_nothing() {
+  setup_tunnel
+  local lonely="$TEST_TMP/lonely" kind
+  mkdir -p "$lonely/missing" "$lonely/empty"
+  cp "$HELPER" "$lonely/missing/cloudflare_tunnel.sh"
+  cp "$HELPER" "$lonely/empty/cloudflare_tunnel.sh"
+  : > "$lonely/empty/secret_file.sh"
+  printf '%s\n' "$SENTINEL_TOKEN" > "$TEST_TMP/open-token"
+  chmod 644 "$TEST_TMP/open-token"
+  for kind in missing empty; do
+    assert_status 2 bash "$lonely/$kind/cloudflare_tunnel.sh" token-file-check "$TEST_TMP/open-token"
+    assert_contains "$CAPTURED_STDERR" "cannot be checked"
+    assert_not_contains "$CAPTURED_STDERR" "$SENTINEL_TOKEN"
+    TOKEN_FOR_RUN="" assert_status 2 bash "$lonely/$kind/cloudflare_tunnel.sh" up --token-file "$TEST_TMP/open-token" --marker "$MARKER" --config "$CONFIG" --credentials "$CREDENTIALS" --unit "$UNIT" --service sirven-cloudflared.service --user agent --hostname "$HOST_NAME" --account "$ACCOUNT"
+    assert_contains "$CAPTURED_STDERR" "nothing was changed"
+  done
+  assert_no_file "$MARKER"
+  assert_eq 0 "$(api_value tunnels)" "no tunnel was made"
+  # the real script, with its file of checks beside it, refuses the same file for its mode (the control)
+  assert_status 2 bash "$HELPER" token-file-check "$TEST_TMP/open-token"
+  assert_contains "$CAPTURED_STDERR" "its mode is"
+}
+
 test_down_takes_away_exactly_what_up_made() {
   setup_tunnel
   assert_status 0 up

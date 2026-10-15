@@ -214,6 +214,31 @@ test_a_key_file_others_can_read_or_write_is_refused() {
   assert_status 0 bash "$NODE" join "$MARKER" agent "$TEST_TMP/key-file"
 }
 
+# the checks a saved key file must pass live in lib/secret_file.sh. a copy of the script without that file, or with one that defines
+# nothing, must fail closed: an unreadable-by-others rule that is not there cannot wave a group readable key file through
+test_a_key_file_is_refused_when_the_file_of_checks_is_missing_or_defines_nothing() {
+  setup_node
+  local lonely="$TEST_TMP/lonely" kind
+  mkdir -p "$lonely/missing" "$lonely/empty"
+  cp "$NODE" "$lonely/missing/tailscale_node.sh"
+  cp "$NODE" "$lonely/empty/tailscale_node.sh"
+  : > "$lonely/empty/secret_file.sh"
+  printf '%s\n' "$SENTINEL_KEY" > "$TEST_TMP/open-key"
+  chmod 644 "$TEST_TMP/open-key"
+  for kind in missing empty; do
+    assert_status 2 bash "$lonely/$kind/tailscale_node.sh" key-file-check "$TEST_TMP/open-key"
+    assert_contains "$CAPTURED_STDERR" "cannot be checked"
+    assert_not_contains "$CAPTURED_STDERR" "$SENTINEL_KEY"
+    assert_status 2 bash "$lonely/$kind/tailscale_node.sh" join "$MARKER" agent "$TEST_TMP/open-key"
+    assert_contains "$CAPTURED_STDERR" "nothing was changed"
+  done
+  assert_not_contains "$(calls)" "up --auth-key"
+  assert_no_file "$MARKER"
+  # the real script, with its file of checks beside it, refuses the same file for its mode (the control)
+  assert_status 2 bash "$NODE" key-file-check "$TEST_TMP/open-key"
+  assert_contains "$CAPTURED_STDERR" "its mode is"
+}
+
 test_a_key_file_that_is_a_link_or_a_folder_is_refused_and_a_missing_one_is_just_missing() {
   setup_node
   printf '%s\n' "$SENTINEL_KEY" > "$TEST_TMP/real-key"

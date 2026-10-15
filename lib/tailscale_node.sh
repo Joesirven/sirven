@@ -56,7 +56,18 @@ fail() {
 # sourced by parameter expansion only: a command substitution here would start a process that inherits the environment.
 case "${BASH_SOURCE[0]}" in */*) SECRET_FILE_DIR="${BASH_SOURCE[0]%/*}" ;; *) SECRET_FILE_DIR="." ;; esac
 # shellcheck source=lib/secret_file.sh
-. "$SECRET_FILE_DIR/secret_file.sh"
+. "$SECRET_FILE_DIR/secret_file.sh" 2>/dev/null || true
+
+# secret_checks_loaded: the checks above are there. a copy of this script run without lib/secret_file.sh (or with a file that does not
+# define them) must not read a saved file as if it had passed them, so every use below is guarded: the answer is a refusal.
+secret_checks_loaded() {
+  declare -F key_file_problem >/dev/null 2>&1 && declare -F has_extended_access_list >/dev/null 2>&1
+}
+
+# require_secret_checks FILE: refuse (exit 2) when the checks are missing
+require_secret_checks() {
+  secret_checks_loaded || refuse "the saved file $1 cannot be checked, because the file of checks that goes with this script (lib/secret_file.sh) is missing or damaged, so it is not used."
+}
 
 # the tailscale command, or nothing. SIRVEN_TAILSCALE is a seam for the tests ('none' means not installed), and root ignores it:
 # root runs only the tailscale that the search path, vetted by the root gate, finds.
@@ -200,6 +211,7 @@ node_prepare() {
   elif [ -n "$NODE_ENV_PLAIN_KEY" ]; then
     NODE_KEY="$NODE_ENV_PLAIN_KEY"; NODE_ORIGIN="TAILSCALE_AUTHKEY"
   elif [ -n "$key_file" ]; then
+    require_secret_checks "$key_file"
     problem="$(key_file_problem "$key_file")"
     [ -z "$problem" ] || refuse "the auth key file $key_file is not used: $problem."
     if [ -f "$key_file" ]; then
@@ -233,6 +245,7 @@ node_check() {
 node_key_file_check() {
   local problem
   [ -n "${1:-}" ] || refuse "key-file-check needs a path."
+  require_secret_checks "$1"
   problem="$(key_file_problem "$1")"
   if [ -n "$problem" ]; then
     printf 'error: the auth key file %s is not used: %s.\n' "$1" "$problem" >&2

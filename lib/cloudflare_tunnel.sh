@@ -40,7 +40,7 @@ unset SIRVEN_CLOUDFLARE_API_TOKEN
 
 case "${BASH_SOURCE[0]}" in */*) SELF_DIR="${BASH_SOURCE[0]%/*}" ;; *) SELF_DIR="." ;; esac
 # shellcheck source=lib/secret_file.sh
-. "$SELF_DIR/secret_file.sh"
+. "$SELF_DIR/secret_file.sh" 2>/dev/null || true
 API_SCRIPT="$SELF_DIR/cloudflare_api.py"
 
 TOKEN=""
@@ -50,6 +50,14 @@ FAILED=0
 refuse() {
   printf 'error: refused: %s nothing was changed.\n' "$1" >&2
   exit 2
+}
+
+# require_secret_checks FILE: a copy of this script run without lib/secret_file.sh (or with a file that does not define the checks) must
+# not read a saved file as if it had passed them: the answer is a refusal. guarded where the checks are used, not at load, so that
+# taking the tunnel away (down) does not depend on them.
+require_secret_checks() {
+  { declare -F key_file_problem >/dev/null 2>&1 && declare -F has_extended_access_list >/dev/null 2>&1; } ||
+    refuse "the saved file $1 cannot be checked, because the file of checks that goes with this script (lib/secret_file.sh) is missing or damaged, so it is not used."
 }
 
 fail() {
@@ -148,6 +156,7 @@ find_token() {
   if [ -n "$CF_ENV_TOKEN" ]; then
     TOKEN="$CF_ENV_TOKEN"; TOKEN_ORIGIN="SIRVEN_CLOUDFLARE_API_TOKEN"
   elif [ -n "$file" ]; then
+    require_secret_checks "$file"
     problem="$(key_file_problem "$file")"
     [ -z "$problem" ] || refuse "the API token file $file is not used: $problem."
     if [ -f "$file" ]; then
@@ -360,6 +369,7 @@ cmd_applied() {
 cmd_token_file_check() {
   local problem
   [ -n "${1:-}" ] || refuse "token-file-check needs a path."
+  require_secret_checks "$1"
   problem="$(key_file_problem "$1")"
   if [ -n "$problem" ]; then
     printf 'error: the API token file %s is not used: %s.\n' "$1" "$problem" >&2
