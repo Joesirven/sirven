@@ -40,6 +40,24 @@ check_exit() {
   if [ "$status" -eq "$wanted" ]; then pass "$name (exit $status)"; else fail "$name: wanted exit $wanted, got $status" "$(printf '%s\n' "$LAST_OUTPUT" | tail -15)"; fi
 }
 
+# world_account_gets_spool: exit 0 when this image's account tool gives a new account a mail spool (Fedora does, Debian and
+# Ubuntu do not). it makes and removes a throwaway account, so call it before any snapshot is taken.
+world_account_gets_spool() {
+  local status=1
+  useradd -m harness-spool-probe && [ -e /var/spool/mail/harness-spool-probe ] && status=0
+  userdel -r harness-spool-probe >/dev/null 2>&1
+  return "$status"
+}
+
+# world_mail_spool_gone NAME: exit 0 when no mail spool or link named NAME is left in either spool folder (/var/mail is
+# usually a link to /var/spool/mail on Fedora, so both are looked at).
+world_mail_spool_gone() {
+  local path
+  for path in "/var/spool/mail/$1" "/var/mail/$1"; do
+    if [ -e "$path" ] || [ -L "$path" ]; then return 1; fi
+  done
+}
+
 # skip NAME REASON: an assertion that cannot run here (a missing credential, say). it reports as "skipped", does not
 # fail the run, and is counted, so a run that skipped what mattered says so on its last line.
 skip() {

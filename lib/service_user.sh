@@ -54,6 +54,13 @@ plan_service_user_linux() {
   plan_undo "end every process of $user, then remove the account, keeping $(service_user_home)" \
     "! id -u $user >/dev/null 2>&1" \
     "{ pkill -KILL -u $user || true; } && userdel $user"
+  plan_step system "remove the empty mail spool the account tool made for $user (Fedora makes one, Debian and Ubuntu do not)" \
+    "id -u $user >/dev/null 2>&1 && layout_mail_spool_gone $user" \
+    "layout_remove_mail_spool $user" \
+    "rm -f /var/spool/mail/$user   # only an empty plain file owned by $user, never a link; mail already in it is kept"
+  plan_undo "remove the empty mail spool of $user, before the account goes" \
+    "layout_mail_spool_gone $user" "layout_remove_mail_spool $user" \
+    "rm -f /var/spool/mail/$user   # only an empty plain file owned by $user, never a link"
   plan_step system "turn off password login for $user, keys only" \
     "[ \"\$(getent shadow $user 2>/dev/null | cut -d: -f2)\" = '*' ]" \
     "usermod --password '*' $user"

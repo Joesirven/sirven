@@ -6,6 +6,9 @@ set -uo pipefail
 cd "$SRC" || exit 2
 
 mkdir -p /srv/app && echo hello > /srv/app/file.txt
+# decided before the snapshot, because the probe makes and removes a throwaway account (see lib/world.sh)
+makes_spool=no
+world_account_gets_spool && makes_spool=yes
 world_files > /tmp/before.files
 world_accounts > /tmp/before.accounts
 world_acls /srv > /tmp/before.acls
@@ -16,6 +19,11 @@ check_exit "uninstall from the pinned copy applies" 0 bash /var/lib/sirven/packa
 check "service user is gone" bash -c '! getent passwd agent && ! getent group agent'
 check "its home is kept on purpose" test -d /home/agent
 check "audit log is kept on purpose" test -s /var/log/sirven/audit.jsonl
+if [ "$makes_spool" = yes ]; then
+  check "service user's mail spool is gone after the uninstall (this image makes one)" world_mail_spool_gone agent
+else
+  skip "service user's mail spool gone after the uninstall" "this image's account tool makes no mail spool"
+fi
 world_unchanged "files match the machine before the install" files /tmp/before.files
 world_unchanged "accounts match the machine before the install" accounts /tmp/before.accounts
 # finding of the first real run, 2026-10-13, fixed by the snapshot and restore: the access control lists

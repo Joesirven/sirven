@@ -317,7 +317,8 @@ the kill switch reads it to know what to remove.
   harness scenarios 67 (revoke) and 68 (uninstall) keep the default profile and check that, on the deepest chain
   the confined agent can build, every access list entry is removed and no process is left. revoke (scenario 67) also locks the account;
   uninstall (scenario 68) removes the service user. the SIR-83 commit message records both passing on the server
-  ba-sing-se (zero access list entries left); not re-run from this Mac. not yet verified: a tree
+  ba-sing-se (zero access list entries left); not re-run from this Mac. that commit message calls them 63 (revoke)
+  and 64 (uninstall); they were renumbered to 67 and 68 at integration. not yet verified: a tree
   built with AppArmor lifted, then revoked under the default profile. the attempt to carry such a tree between two
   containers failed (a committed image kept only about 1,996 levels and lost the grant), so that case is open.
 
