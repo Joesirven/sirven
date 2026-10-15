@@ -9,7 +9,8 @@ one token, read from the first line of --token-file (never from the command line
 tunnel_secret of at least 32 bytes in base64, a tunnel with connections cannot be deleted until they are ended, deleting a
 tunnel keeps it visible with deleted_at set, and a record is an alias to TUNNEL.cfargotunnel.com.
 knobs (a file in DIR, read on every request): refuse-records, fail-tunnel-delete, connections-stay (the tunnel reports
-connections that the cleanup call does not end, so delete fails).
+connections that the cleanup call does not end, so delete fails), redirect-to (a file holding "CODE URL": every request is
+answered with that redirect and nothing else).
 """
 import argparse
 import base64
@@ -68,6 +69,14 @@ class Handler(BaseHTTPRequestHandler):
         with open(os.path.join(DIR, "calls.log"), "a") as log:
             log.write("%s %s %s\n" % (method, self.path, "authorized" if authorized else "unauthorized"))
         body = self.payload() if method in ("POST", "PUT") else {}
+        if knob("redirect-to"):
+            with open(os.path.join(DIR, "redirect-to")) as handle:
+                code, location = handle.read().split()
+            self.send_response(int(code))
+            self.send_header("Location", location)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
         # a test may change the state file between two requests (the owner editing a record in the dashboard): read it again
         if os.path.exists(STATE_FILE):
             with open(STATE_FILE) as handle:

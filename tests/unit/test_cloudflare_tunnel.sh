@@ -581,6 +581,52 @@ print(module.api_base())' "$REPO_DIR/lib/cloudflare_api.py")"
   assert_eq "http://127.0.0.1:9" "$base" "an address on this machine is honored"
 }
 
+# the Authorization header goes to the one address and to no other: every redirect is refused, so a redirect to a listener of
+# someone else never reaches it
+test_every_redirect_is_refused_and_the_token_is_not_forwarded() {
+  setup_tunnel
+  local code catcher_pid waited=0
+  cat > "$TEST_TMP/catcher.py" <<'CATCHER'
+import os, sys
+from http.server import BaseHTTPRequestHandler, HTTPServer
+directory = sys.argv[1]
+
+
+class Catcher(BaseHTTPRequestHandler):
+    def log_message(self, *args):
+        pass
+
+    def do_GET(self):
+        with open(os.path.join(directory, "catcher.log"), "a") as log:
+            log.write("%s %s\n" % (self.path, "with-authorization" if self.headers.get("Authorization") else "without-authorization"))
+        self.send_response(200)
+        self.send_header("Content-Length", "2")
+        self.end_headers()
+        self.wfile.write(b"{}")
+
+
+server = HTTPServer(("127.0.0.1", 0), Catcher)
+with open(os.path.join(directory, "catcher-port.new"), "w") as handle:
+    handle.write(str(server.server_address[1]))
+os.rename(os.path.join(directory, "catcher-port.new"), os.path.join(directory, "catcher-port"))
+server.serve_forever()
+CATCHER
+  python3 -I "$TEST_TMP/catcher.py" "$API_DIR" >/dev/null 2>&1 &
+  catcher_pid=$!
+  trap 'kill "$API_PID" "$catcher_pid" 2>/dev/null' EXIT
+  while [ ! -s "$API_DIR/catcher-port" ] && [ "$waited" -lt 50 ]; do sleep 0.1; waited=$((waited + 1)); done
+  [ -s "$API_DIR/catcher-port" ] || fail "the listener of someone else did not start"
+  for code in 301 302 303 307 308; do
+    printf '%s http://127.0.0.1:%s/stolen\n' "$code" "$(cat "$API_DIR/catcher-port")" > "$API_DIR/redirect-to"
+    # shellcheck disable=SC2016 # the quotes keep the shell of the test from expanding what the inner bash expands
+    assert_status 1 bash -c 'printf "%s\n" "$1" | python3 -I "$2" verify "$3"' _ "$SENTINEL_TOKEN" "$REPO_DIR/lib/cloudflare_api.py" "$ACCOUNT"
+    assert_contains "$CAPTURED_STDERR" "follows no redirect" "HTTP $code"
+    assert_not_contains "$CAPTURED_STDERR" "$SENTINEL_TOKEN"
+    assert_not_contains "$CAPTURED_STDERR" "stolen" "where the redirect pointed is not echoed"
+  done
+  assert_no_file "$API_DIR/catcher.log"
+}
+
 test_the_api_helper_takes_the_token_from_standard_input_only() {
   setup_tunnel
   # shellcheck disable=SC2016 # the quotes keep the shell of the test from expanding what the inner bash expands

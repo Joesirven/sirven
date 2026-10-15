@@ -27,6 +27,7 @@ record file actions (no token, no network):
 SIRVEN_CLOUDFLARE_API replaces the API address for the tests, and is honored only when it names this machine itself
 (http://127.0.0.1:PORT or http://localhost:PORT), as root too: the test harness runs as root, and an address on this machine
 cannot take the token anywhere else. any other value is ignored, with a note, and the real address is used.
+this program follows no redirect: the Authorization header is sent to the one address and to no other.
 """
 import base64
 import json
@@ -70,12 +71,20 @@ def check(pattern, value, what):
     return value
 
 
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    """refuses every redirect: a redirect to another address would be sent the Authorization header (or, from https to http, in plain)"""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise Failure("the API answered with a redirect (HTTP %d); sirven follows no redirect, because it would send the token along" % code)
+
+
 class Client:
     def __init__(self, token):
         if not token:
             raise Failure("there is no API token on standard input", 2)
         self.token = token
         self.base = api_base()
+        self.opener = urllib.request.build_opener(NoRedirect())
 
     def blank(self, text):
         return text.replace(self.token, "[token hidden]")
@@ -90,7 +99,7 @@ class Client:
         request.add_header("Authorization", "Bearer " + self.token)
         request.add_header("Content-Type", "application/json")
         try:
-            with urllib.request.urlopen(request, timeout=TIMEOUT) as answer:
+            with self.opener.open(request, timeout=TIMEOUT) as answer:
                 status, raw = answer.status, answer.read()
         except urllib.error.HTTPError as error:
             status, raw = error.code, error.read()
