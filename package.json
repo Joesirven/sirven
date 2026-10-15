@@ -1,6 +1,6 @@
 {
   "name": "@joesirven/sirven",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Secure access levels for your personal AI agent. Install it, own it, no hosted middleman.",
   "bin": {
     "sirven": "bin/sirven"
