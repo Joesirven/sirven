@@ -245,7 +245,8 @@ ask on, nothing is asked: the level is observer and no path is granted.
 what is already on the machine is adopted, never reinstalled or overwritten: a Tailscale login,
 a bb install, and the grant, policy, and audit log of an earlier run. with a grant in force, a
 level or path left open is taken from it. when what is there conflicts with the request, the
-run stops before any change and says what to do.
+run stops before any change and says what to do. a dry run on a machine with a conflict still
+prints the plan, marks the conflict, and exits 2.
 
 options:
   --dry-run                  print the plan and change nothing

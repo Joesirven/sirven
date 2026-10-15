@@ -126,7 +126,7 @@ test_a_dry_run_with_a_conflict_prints_the_plan_and_the_conflict_and_exits_2() {
   assert_contains "$CAPTURED_STDOUT" "you can: keep it as it is and run again with --transport none"
   assert_contains "$CAPTURED_STDOUT" "tag this machine tag:agent yourself"
   assert_contains "$CAPTURED_STDOUT" "service user"
-  assert_contains "$CAPTURED_STDOUT" "1 of them blocked by a conflict"
+  assert_contains "$CAPTURED_STDOUT" ", 1 blocked by a conflict."
   assert_contains "$CAPTURED_STDOUT" "dry run: nothing was changed."
   assert_contains "$CAPTURED_STDOUT" "a real run would refuse until the conflicts above are resolved, and would change nothing. this dry run exits 2, the same status as that refusal."
   assert_not_contains "$CAPTURED_STDOUT" "run the same command without --dry-run to apply this plan"
@@ -142,7 +142,7 @@ test_a_dry_run_lists_every_conflict_and_a_clean_dry_run_still_exits_0() {
   assert_contains "$CAPTURED_STDOUT" "a grant is in force for agent"
   assert_contains "$CAPTURED_STDOUT" "differs from this package's levels/builder.json"
   assert_contains "$CAPTURED_STDOUT" "belongs to example, and this run would give it to someone."
-  assert_contains "$CAPTURED_STDOUT" "3 of them blocked by a conflict"
+  assert_contains "$CAPTURED_STDOUT" ", 3 blocked by a conflict."
   assert_status 0 install_sh --dry-run --prefix "$TEST_TMP/clean" --level observer --transport none
   assert_not_contains "$CAPTURED_STDOUT" "blocked by a conflict"
   assert_not_contains "$CAPTURED_STDOUT" "a real run would refuse"

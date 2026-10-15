@@ -366,17 +366,16 @@ _plan_count_status() {
 }
 
 plan_summary() {
-  local steps=0 index=0
+  local steps=0 index=0 blocked blocked_clause=""
   while [ "$index" -lt "$PLAN_COUNT" ]; do
     if [ -n "${PLAN_NUMBER[index]}" ]; then steps=$((steps + 1)); fi
     index=$((index + 1))
   done
-  printf '\nsummary: %s steps. %s to do, %s already done, %s by the owner, %s plan only.\n' \
+  blocked="$(_plan_count_status blocked)"
+  if [ "$blocked" -gt 0 ]; then blocked_clause=", $blocked blocked by a conflict"; fi
+  printf '\nsummary: %s steps. %s to do, %s already done, %s by the owner, %s plan only%s.\n' \
     "$steps" "$(_plan_count_status todo)" "$(_plan_count_status "done")" \
-    "$(_plan_count_status owner)" "$(_plan_count_status planonly)"
-  if [ "$(_plan_count_status blocked)" -gt 0 ]; then
-    printf '%s of them blocked by a conflict with what is already on this machine.\n' "$(_plan_count_status blocked)"
-  fi
+    "$(_plan_count_status owner)" "$(_plan_count_status planonly)" "$blocked_clause"
 }
 
 # why a real macos apply is refused, or nothing when it is allowed. the steps are built and tested

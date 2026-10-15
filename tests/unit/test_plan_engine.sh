@@ -106,6 +106,28 @@ test_a_conflict_step_is_numbered_blocked_and_stops_apply_before_any_change() {
   assert_no_file "$ROOT/etc/sirven"
 }
 
+# a real run with a conflict is refused before the person is asked to type yes: nobody confirms a plan that will refuse.
+test_a_real_run_with_a_conflict_is_refused_before_the_confirmation_question() {
+  gate_stubs
+  setup_fake_root
+  PLAN_PREFIX=""
+  PLAN_OPERATING_SYSTEM=linux
+  unset SIRVEN_YES
+  ASSUME_YES=no
+  STUB_TERMINAL=stdin
+  # shellcheck disable=SC2329 # called by plan_real_apply_refusal in lib/plan.sh
+  id() { printf '0'; }
+  plan_conflict "tailscale login is not ours" "run again with --transport none"
+  add_directory_step /etc/sirven
+  plan_evaluate
+  capture plan_apply <<< "yes"
+  assert_eq 3 "$CAPTURED_STATUS"
+  assert_contains "$CAPTURED_STDERR" "blocked by a conflict"
+  assert_not_contains "$CAPTURED_STDERR" "type yes"
+  assert_not_contains "$CAPTURED_STDOUT" "applying"
+  assert_no_file "$ROOT/etc/sirven"
+}
+
 test_failed_step_stops_the_apply() {
   setup_fake_root
   plan_step run "always fails" "" "false"

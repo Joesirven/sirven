@@ -105,8 +105,7 @@ transport: tailscale
        $ rm -f <prefix>/etc/sirven/tailscale-auth-key
      note: the agent client connects with: ssh agent@<this machine's tailnet name>. tailscale ssh stays off; the machine's own SSH server and keys are used.
 
-summary: 34 steps. 29 to do, 1 already done, 3 by the owner, 0 plan only.
-1 of them blocked by a conflict with what is already on this machine.
+summary: 34 steps. 29 to do, 1 already done, 3 by the owner, 0 plan only, 1 blocked by a conflict.
 dry run: nothing was changed.
 a real run would refuse until the conflicts above are resolved, and would change nothing. this dry run exits 2, the same status as that refusal.
 to cut the agent off later: sudo /usr/local/sbin/sirven revoke --all --dry-run to read the plan; to remove everything: sudo /usr/local/sbin/sirven uninstall --dry-run
