@@ -50,7 +50,7 @@ audit_format_json() {
   },
   "rules": [
     "the directory belongs to the owner, mode 0750; the agent cannot read, edit, or remove entries",
-    "entries are appended by a forced-command wrapper on the SSH key; it sees what you send, not every system call",
+    "install, grant, and revoke entries are appended by this package; session and command entries are meant to come from a forced-command wrapper on the SSH key, which is designed, not built yet, and it will see what you send, not every system call",
     "install, uninstall, grant rollback, sirven add, and sirven remove write step and grant entries when they apply for real, never in a dry run",
     "install writes one adopt entry for each thing it found and kept, when it applies for real",
     "the kill switch writes revoke_started first and revoke_finished last"

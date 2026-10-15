@@ -50,7 +50,7 @@ command that revokes everything.
 | Level | A preset bundle of permissions: `observer`, `builder`, `operator`. Defined in `docs/PERMISSIONS.md`. |
 | Grant | A level applied to specific paths for a specific principal (the owner's agent or a friend's), with an optional expiry. |
 | Invite | A grant to a friend's agent, bound to that agent's public key. |
-| Audit log | Append-only record of every session and command run as the service user. |
+| Audit log | Append-only record of install and grant changes. Session and command logging is planned, not built yet. |
 | Kill switch | One command that revokes every key, ends every session, and locks the service user. |
 | Access control list | Per-file permission entries (`setfacl` on Linux, `chmod +a` on macOS) used to grant one path without opening the whole home directory. |
 
@@ -130,8 +130,8 @@ safely") is W1 → W2 → W3 → W4 → W6 → W8 → W9. Everything else makes 
 ## Risks
 
 1. **Audit capture is weaker than it sounds.** A forced-command wrapper logs what enters through
-   SSH, but a process the agent starts can do things the wrapper never sees. Honest framing for
-   alpha: "every session and command you send is logged", not "every system call". Kernel-level
+   SSH, but a process the agent starts can do things the wrapper never sees. Honest framing once
+   the wrapper is built: "every session and command you send is logged", not "every system call". Kernel-level
    audit is designed, not built.
 2. **macOS access control lists and privacy controls.** macOS protects some folders (Desktop,
    Documents, Downloads) behind privacy prompts that a service user cannot answer. Alpha defaults

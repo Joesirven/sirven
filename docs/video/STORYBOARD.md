@@ -218,7 +218,7 @@ no terminal remnant, no accumulating feature tiles. All text below is verbatim.
 2. Frames 642–653: reveal `Per-path access`, with two aligned rows:
    `~/code` paired with `read · write`; `~/.ssh` paired with `denied` and an outlined lock.
    Both rows use near-black text. Frames 654–713: hold (60 frames).
-3. Frames 714–725: reveal `Audit log`, body `Sessions and submitted commands, recorded.`
+3. Frames 714–725: reveal `Audit log`, body `Install and grant changes, recorded.`
    Below, one Mono entry, explicitly broken across two lines:
    `12:04:07 agent` / `git checkout -b fix/login-flake`.
    Frames 726–785: hold (60 frames). No second denied example and no live log updates.
