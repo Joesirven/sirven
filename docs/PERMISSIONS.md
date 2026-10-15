@@ -37,7 +37,7 @@ switch, and granting access to anyone else.
 - `paths`: the policy for which paths can be granted at all (below). `default_grants` is always
   empty: nothing is granted unless the owner names it.
 - `expiry`: owner grants have no expiry; friend invites always do
-- `audit`: sessions and commands are always logged; the agent can never read or write the log
+- `audit`: install and grant changes are logged; session and command logging is planned, not built yet. the agent can never read or write the log
 - `widening`: every field is `false`
 - `owner_listed` (operator only): the services and logs the owner names for operator. both
   lists are empty and nothing reads them yet.
@@ -98,7 +98,7 @@ subcommand validates the level first, so a broken file never reaches a plan.
 5. only observer is the default level for friend invites. with several files, `validate` checks
    that exactly one, observer, is.
 6. the audit log stays out of reach: `agent_can_read_log` and `agent_can_write_log` are false,
-   and sessions and commands are always logged.
+   and session and command logging is planned, not built yet.
 7. passing through a parent folder grants nothing else: the linux traverse entry is exactly
    `x` and the macos one exactly `search`.
 8. no capability is both allowed and denied.
@@ -486,5 +486,6 @@ revoke <invite>
 - `audit.retention_days` is not enforced: nothing rotates or trims the log yet.
 - reinstalling with different paths adds the new entries but does not remove the old ones.
   use `bin/sirven grant rollback`, or the kill switch, to remove access.
-- audit capture is per session and per command through the forced-command wrapper. a process
-  the agent starts can do things the wrapper never sees.
+- audit capture per session and per command is designed, not built: it is meant to come through
+  the forced-command wrapper. a process the agent starts can do things that wrapper would never
+  see.
