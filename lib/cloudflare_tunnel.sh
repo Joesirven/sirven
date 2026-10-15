@@ -512,8 +512,9 @@ cmd_down() {
   if [ -z "$(record_get tunnel_id)$(record_get tunnel_name)$(record_get record_id)" ]; then
     :
   elif [ -z "$TOKEN" ]; then
-    printf 'error: there is no Cloudflare API token, so what this machine made in your Cloudflare account is still there: tunnel %s (%s), alias record %s (%s). the agent can no longer use it from this machine: the service and the credentials are gone. to finish, run the same command again with the token (saved as the token file, or in SIRVEN_CLOUDFLARE_API_TOKEN) and it deletes them; or delete them in the dashboard and then remove %s.\n' \
-      "$(record_get tunnel_name)" "$(record_get tunnel_id)" "$(record_get hostname)" "$(record_get record_id)" "$MARKER" >&2
+    printf 'access is already cut: the service is stopped and removed and the tunnel credentials and config are deleted, so no connector can attach to the tunnel any more. what is left is only the inert tunnel object and the alias record in your Cloudflare account: tunnel %s (%s), alias record %s (%s).\n' \
+      "$(record_get tunnel_name)" "$(record_get tunnel_id)" "$(record_get hostname)" "$(record_get record_id)" >&2
+    printf 'error: there is no Cloudflare API token, so those two could not be deleted. to finish, run the same command again with the token (saved as the token file, or in SIRVEN_CLOUDFLARE_API_TOKEN) and it deletes them, or delete them in the dashboard and then remove %s. the record stays until then.\n' "$MARKER" >&2
     exit 1
   elif ! remote_cleanup; then
     FAILED=1

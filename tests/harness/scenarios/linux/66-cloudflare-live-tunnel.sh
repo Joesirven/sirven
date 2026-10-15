@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # SIR-2, SIR-34. the Cloudflare tunnel transport against the REAL Cloudflare API and the real cloudflared, in a disposable machine.
-# scenario 63 does the same with fakes. this one needs a network and a SCOPED TEST token: an API token limited to Account, Cloudflare
+# scenario 65 does the same with fakes. this one needs a network and a SCOPED TEST token: an API token limited to Account, Cloudflare
 # Tunnel, Edit and Zone, domain name records, Edit on one dedicated TEST zone (never a production zone, never a token that can deploy
 # anything), the account number, and the name of that test zone. without them the steps that make anything say "skipped: needs a
 # Cloudflare test token" and the rest still runs against the real API: apply without a token is refused, and a wrong token is turned
 # away with nothing recorded and the token nowhere in the output.
 # to run the steps that make a tunnel for real, put these lines in a dotenv file and run, as one command:
-#   SIRVEN_HARNESS_SECRETS_FILE=/path/to/that.env bash tests/harness/run-linux.sh 64
+#   SIRVEN_HARNESS_SECRETS_FILE=/path/to/that.env bash tests/harness/run-linux.sh 66
 #     SIRVEN_CLOUDFLARE_API_TOKEN=...   SIRVEN_CLOUDFLARE_ACCOUNT_ID=...   SIRVEN_CLOUDFLARE_TEST_ZONE=sirven-test.example
 #     (and SIRVEN_CLOUDFLARE_ZONE_ID=... when the token cannot list zones)
 # (or export them in the shell). they go into the container by name or by file, only those lines, never on a command line.

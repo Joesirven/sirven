@@ -13,7 +13,7 @@ HOST_NAME="agent.example.test"
 
 # setup: the fake API on a free port of this machine, the fake commands, and the paths a real run is given.
 # the helper ignores the SIRVEN_CLOUDFLARED and SIRVEN_SYSTEMCTL seams as root (root runs only the vetted commands), so as root these
-# tests could not use the fakes: they end here, and scenario 63 covers the same ground as root, in a container.
+# tests could not use the fakes: they end here, and scenario 65 covers the same ground as root, in a container.
 setup_tunnel() {
   local waited=0
   if [ "$(id -u)" -eq 0 ]; then
@@ -301,6 +301,8 @@ test_down_without_the_token_still_cuts_the_machine_off_and_finishes_when_given_t
   tunnel="$(api_value tunnel_id)"
   record="$(api_value record_id)"
   TOKEN_FOR_RUN="" assert_status 1 down
+  assert_contains "$CAPTURED_STDERR" "access is already cut"
+  assert_contains "$CAPTURED_STDERR" "only the inert tunnel object and the alias record"
   assert_contains "$CAPTURED_STDERR" "there is no Cloudflare API token"
   assert_contains "$CAPTURED_STDERR" "$tunnel"
   assert_contains "$CAPTURED_STDERR" "$record"

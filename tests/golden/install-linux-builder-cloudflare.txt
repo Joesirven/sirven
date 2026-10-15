@@ -80,6 +80,7 @@ access to paths, level builder
        $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh release agent <prefix>/var/lib/sirven/agent-quiesce.json
 
 transport: cloudflare tunnel
+     note: warning: until you put cloudflare access in front of agent.example.org (an owner step below), anyone on the internet can reach that hostname, and only the SSH keys of agent stand in the way. do that before you give the hostname to anyone.
      note: the tunnel routes exactly one hostname, agent.example.org, to this machine's SSH server (ssh://localhost:22), whatever the level; every other name gets 404. no other port, no private network route.
    29. give the installer one Cloudflare API token, once (owner, by hand)
        Cloudflare dashboard, My Profile, API Tokens: create a token with the permissions Account, Cloudflare Tunnel, Edit and Zone, domain name records, Edit (and Zone, Zone, Read, unless you give the zone number in SIRVEN_CLOUDFLARE_ZONE_ID), limited to your one account and the one zone of agent.example.org. never a token that can do anything else.

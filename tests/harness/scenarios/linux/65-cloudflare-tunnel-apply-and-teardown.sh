@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SIR-2, SIR-34. the Cloudflare tunnel transport on a real install, with a fake Cloudflare API that keeps state (on this machine's own
 # loopback), a fake cloudflared that validates the config, and a stand-in systemctl that keeps unit state in files (the container has no
-# systemd). the real API is scenario 64, which needs a test token and a network. apply without a token is refused before the first change;
+# systemd). the real API is scenario 66, which needs a test token and a network. apply without a token is refused before the first change;
 # apply with a token makes one tunnel, one alias record and one service, root-only credentials, and records them; a second apply needs no
 # token and does nothing; revoke (whatever transport it names) and uninstall each take away exactly that and nothing else in the account,
 # loudly and repeatably when the token is missing; a half-made tunnel is taken away by uninstall; the token is nowhere on the disk, in
@@ -181,6 +181,7 @@ SIRVEN_CLOUDFLARE_API_TOKEN="$TOKEN" install_cf --reinstate >/dev/null 2>&1
 check "setup: the tunnel is made again" bash -c '[ "$(api_value tunnels)" = 1 ]'
 tunnel_number="$(python3 -I -c 'import json; print([t for t in json.load(open("/tmp/fake-api/state.json"))["tunnels"].values() if not t.get("deleted_at")][0]["id"])')"
 check_exit "revoke --all without a token exits 4" 4 revoke_cf
+check "it says access is already cut and only the inert tunnel object and the alias record remain" bash -c 'grep -q "access is already cut" <<< "$0" && grep -q "only the inert tunnel object and the alias record" <<< "$0"' "$LAST_OUTPUT"
 check "it names the tunnel and the record that are still in the account, and how to finish" bash -c 'grep -q "there is no Cloudflare API token" <<< "$0" && grep -qF -- "$1" <<< "$0" && grep -q "run the same command again with the token" <<< "$0"' "$LAST_OUTPUT" "$tunnel_number"
 check "the service and the credentials are gone, the agent is locked out, and the record stays" bash -c '[ ! -e /etc/sirven/cloudflared-credentials.json ] && [ ! -e /etc/systemd/system/sirven-cloudflared.service ] && [ ! -e /tmp/fake-systemd/sirven-cloudflared.service.active ] && [ -s /var/lib/sirven/cloudflare-tunnel.json ] && passwd --status agent | grep -q "^agent L"'
 check "the account still has the tunnel and the record (not touched)" bash -c '[ "$(api_value tunnels)" = 1 ] && [ "$(api_value records)" = 1 ]'

@@ -48,6 +48,7 @@ test_the_apply_on_a_fake_root_records_the_tunnel_step_and_its_undo() {
 test_the_plan_names_the_hostname_the_account_and_the_service_and_no_token() {
   TEST_ROOT="$TEST_TMP/root"
   SIRVEN_CLOUDFLARE_API_TOKEN="$SENTINEL_TOKEN" assert_status 0 cloudflare_install --dry-run
+  assert_contains "$CAPTURED_STDOUT" "warning: until you put cloudflare access in front of $HOST_NAME"
   assert_contains "$CAPTURED_STDOUT" "--hostname $HOST_NAME --account $ACCOUNT"
   assert_contains "$CAPTURED_STDOUT" "sirven-cloudflared.service"
   assert_contains "$CAPTURED_STDOUT" "/etc/sirven/cloudflare-api-token"

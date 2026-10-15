@@ -169,6 +169,7 @@ plan_cloudflare() {
   if [ -z "$CLOUDFLARE_HOSTNAME" ]; then
     plan_note "no hostname is named, so $CLOUDFLARE_PLACEHOLDER_HOSTNAME stands in. a real apply needs --cloudflare-hostname (a name in a zone of your own that nothing uses yet) and --cloudflare-account."
   fi
+  plan_note "warning: until you put cloudflare access in front of $hostname (an owner step below), anyone on the internet can reach that hostname, and only the SSH keys of $SERVICE_USER stand in the way. do that before you give the hostname to anyone."
   plan_note "the tunnel routes exactly one hostname, $hostname, to this machine's SSH server (ssh://localhost:22), whatever the level; every other name gets 404. no other port, no private network route."
   if cloudflare_applied; then
     plan_note "this machine already has its tunnel, made by an earlier run of this installer and recorded in $(cloudflare_marker_file): no API token and no new tunnel. the kill switch and uninstall delete that tunnel and its alias record, and only them."
