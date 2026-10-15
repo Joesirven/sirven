@@ -11,8 +11,10 @@ file outside `docs/design/`. It ends with the decisions only Jose can make.
   release's `install.sh`. `bootstrap/release.sh` writes the pin and prints, but never runs, the upload.
   `docs/BOOTSTRAP.md` is the maintainer's procedure. Today the pin is `v0.2.0`.
 - **Kept copy.** A real install keeps the package at `/var/lib/sirven/package` with a marker file
-  (`tag=`, `sha256=`; `lib/layout.sh`, `layout_stage_package`). A newer release replaces it by building
-  beside the old one and moving it into place only when complete (`layout_keep_package`). Root commands
+  named `PINNED-COPY` (`tag=`, `sha256=`; `lib/layout.sh:117`, `layout_stage_package`). The state
+  directory around it is mode 0700 and owned by root (`lib/layout.sh:296-297`). A newer release replaces
+  the copy by building `package.new` beside it, removing the old copy, then moving the new one into place
+  (`layout_keep_package`, `lib/layout.sh:272-276`). Root commands
   run through the launcher `/usr/local/sbin/sirven`, which runs the kept copy
   (`docs/PERMISSIONS.md`, the root-trust gate described around the launcher). That gate decides whether
   the code about to run as root is writable by anyone but root and the owner, and `install.sh` is the
@@ -20,6 +22,10 @@ file outside `docs/design/`. It ends with the decisions only Jose can make.
 - **Confirmation.** `plan_confirm_real_apply` in `lib/plan.sh` makes the first change to a real machine
   never silent: `--yes` (or `SIRVEN_YES`), or the word `yes` typed on a terminal. With no terminal and no
   `--yes` it applies nothing and returns status 3. The kill switch passes its own typed word instead.
+- **No update command, no signing key.** `bin/sirven` has `grant`, `runtime`, `awake`, `phone`, `add`
+  and `remove` only (usage, `bin/sirven:247-262`), and nothing in the repository pins a signing key
+  (a search for `ssh-keygen` and `allowed_signers` finds no use). A machine installed from `v0.2.0` therefore
+  has neither the command nor the key; see the limits in section 3.
 - **Mac apply is off.** A Mac does not apply an install by default (`SIRVEN_MACOS_REAL_APPLY=1` is the
   owner's switch; `docs/BOOTSTRAP.md`, last section). The command line on a Mac is plan-only today.
 - **The app.** `app/macos` builds `Sirven.app`. A local build is ad-hoc signed and not notarized; the
@@ -34,17 +40,26 @@ Putting that same mechanism on a timer would turn a one-time trust decision into
 
 ## 2. What "automatic update" should mean
 
-Three levels, in increasing order of power. Each is a separate opt-in.
+Three levels, in increasing order of power. These are plain descriptions, not names. Levels 2 and 3
+are separate opt-ins.
 
-1. **Know** (default, on). The machine checks, read-only, whether a newer verified release exists and
-   says so: a line in `sirven status`, a line in install and uninstall output, an item in the menu bar.
-   Nothing is downloaded beyond a small signed manifest, nothing on the machine changes, so no consent
-   is needed.
-2. **Stage** (opt-in). The new archive is downloaded and verified and the update plan is computed and
-   shown, but not applied. The owner applies it with one command that goes through the normal
-   confirmation.
-3. **Apply** (opt-in, narrow). The update is applied without a person present, only when it is the
-   narrow kind described in section 5.
+1. **Level 1, check only** (on by default, but only when someone asks; see the trigger below). The
+   machine reads a small signed manifest and says whether a newer verified release exists: a line in
+   `sirven grant inspect` (the existing read-only command, `bin/sirven:250`; a new `sirven status`
+   command is not needed), a line in install and uninstall output, an item in the menu bar. Nothing is
+   downloaded beyond the manifest and nothing on the machine changes, so no consent is needed.
+2. **Level 2, download and stage** (opt-in). The new archive is downloaded and verified and the update
+   plan is computed and shown, but not applied. The owner applies it with one command that goes through
+   the normal confirmation.
+3. **Level 3, download and apply** (opt-in, narrow). The update is applied without a person present,
+   only when it is the narrow kind described in section 5.
+
+**Who fetches the manifest, and when.** At level 1 there is no background job. The manifest is fetched
+only (a) when a person runs `sirven update --check`, and (b) by the menu bar app, which runs that same
+command (not root) when it is opened and at most once a day while it stays open. Nothing starts at boot
+or login on its own account. A scheduled job that fetches without anyone asking would be a startup item,
+which needs a plan step and consent (section 4), so it is not part of level 1; whether to add one is
+decision 2.
 
 ### Command-line install
 
@@ -79,9 +94,13 @@ be enough to run attacker code on a machine as root.
 - Signing tool: `ssh-keygen -Y sign` and `-Y verify`. It is already on every Mac and nearly every Linux
   machine, so the updater gains no new dependency, and it supports hardware security keys, which is the
   best form of "held offline" for one maintainer. (minisign is the alternative; it adds an install step.)
-- The public key is pinned in three independent places: inside the kept copy of the package, in the
-  bootstrap script, and in the repository (printed in `docs/BOOTSTRAP.md` with its fingerprint). The
-  updater verifies with the copy it already trusts, never with a key fetched alongside the manifest.
+- The public key is written in three places: inside the kept copy of the package, in the bootstrap
+  script, and in the repository (printed in `docs/BOOTSTRAP.md` with its fingerprint). They are three
+  copies of one key, not three independent anchors: whoever can change the repository can change all
+  three for the next install. What they give is that each moment has its own copy (a new install, an
+  existing install, a person comparing a fingerprint). The updater verifies with the copy it already
+  trusts, never with a key fetched alongside the manifest. A non-root copy for the read-only check is in
+  section 8.
 - The manifest is published to the GitHub release and to cli.sirven.xyz. The updater may read either;
   signature verification, not the transport, is what makes it believable.
 
@@ -96,6 +115,14 @@ What each compromise now buys an attacker:
 
 Honest limits:
 
+- **Machines installed before this exists cannot update themselves.** Nothing from `v0.2.0` carries a
+  public key or an `update` command (section 1). Such a machine can never run the check. Moving it
+  forward means running the bootstrap again, which is a fresh trust-on-first-use decision. This is
+  decision 13.
+- **A malicious change that Jose signs.** Signing proves who released, not that the release is good. A
+  hostile pull request merged and then released, or a stolen laptop at signing time, produces a valid
+  signature. The controls are the ordinary ones (review before merge, the critic step, the revoked list in
+  section 6), not the signature.
 - **First install is still trust on first use.** A new machine trusts whatever `curl` returns from
   cli.sirven.xyz over transport encryption. Signing does not fix that, because the script is what
   carries the key. Mitigation: the key fingerprint is also printed on the download page, in the
@@ -109,7 +136,7 @@ Honest limits:
 - **Downgrade.** The updater refuses a release number lower than the installed one, so a replayed old
   manifest cannot reinstall a vulnerable build. Going back is always a local, owner-run action (section 6).
 - **Freeze.** An attacker who blocks updates entirely is only caught by the expiry date. An expired
-  manifest should make the "know" level warn loudly ("no verified update information for N days"),
+  manifest should make level 1 (check only) warn loudly ("no verified update information for N days"),
   not silently continue.
 
 ## 4. Consent: does an update go through the same confirmation?
@@ -128,7 +155,7 @@ and it ends in `plan_confirm_real_apply` like every other real change. Concretel
 owner gave consent in advance, and that advance consent must be narrow:
 
 - The owner turns on level 3 once, with a typed word (as `revoke` is typed for the kill switch). The
-  grant is written to the audit log like any other grant change, shown by `sirven status`, undone by
+  grant is written to the audit log like any other grant change, shown by `sirven grant inspect` (which would list it), undone by
   `sirven update --auto off`, and removed by `revoke --all` and uninstall.
 - It covers only **replacement of the kept copy by a newer verified release whose plan has the same
   step kinds as the installed record**: no new permissions, no new system user, no new network
@@ -152,11 +179,20 @@ not have to infer it from a diff.
 ## 6. Rollback
 
 - **Keep the previous kept copy.** Before moving the new copy into place, rename the old one to
-  `/var/lib/sirven/package.previous` (complete, with its marker), keeping one generation. The existing
+  `/var/lib/sirven/package.previous` (complete, with its marker), keeping one generation. This changes
+  two existing pieces, as a plan, not code:
+  `layout_keep_package` today removes the old copy before moving the new one (`lib/layout.sh:275`), so
+  that line becomes "remove any older `package.previous`, rename `package` to `package.previous`, move
+  `package.new` into place", with a failure after the rename putting the old copy back. And uninstall
+  removes only `package` (`layout_remove_package_copy`, `lib/layout.sh:324-325`) and removes the state
+  directory only when it is empty (`layout_remove_directory`, `lib/layout.sh:300-307`), so without a
+  matching undo step a leftover `package.previous` would keep the state directory on disk after
+  uninstall. The install record gets a step for it, undone the same way. The existing
   rule that the kept copy must always be able to undo the install record (`docs/BOOTSTRAP.md`, "The copy
   kept after install") holds for both generations: a release may change the record only in ways it can
   also undo.
-- **Health check, then commit.** After the swap, run the new copy's read-only status check. On failure,
+- **Health check, then commit.** After the swap, run the new copy's `grant inspect` (read-only, and the
+  nearest thing to a status check that exists today). On failure,
   swap back automatically and report; the update counts as not applied. This is the only automatic
   rollback, and it only restores a copy that was working a minute earlier.
 - **Owner-run rollback.** `sirven update --rollback` swaps back to `package.previous` with no network, still
@@ -190,8 +226,9 @@ Sparkle is the standard open-source updater for Mac apps outside the App Store. 
    `release.json`; the appcast could be generated from the same data by `build.sh`). The feed URL
    (`SUFeedURL`) must be https and is hard to change once apps ship, like the bundle identifier
    (`xyz.sirven.app`, an open decision already).
-5. **A consent surface that fits the app.** Sparkle asks the person on first run whether to check
-   automatically, and offers to install each update. That is the app's equivalent of section 4: the
+5. **A consent surface that fits the app.** As I remember it, Sparkle asks the person whether to check
+   automatically on the second launch, not the first, and offers to install each update (unverified: I did
+   not read Sparkle's documentation or run it). That is the app's equivalent of section 4: the
    person says yes once, and updates replace only the app bundle, never the root-run package.
 
 ## 8. The smallest safe first step, with no Apple credentials
@@ -199,24 +236,38 @@ Sparkle is the standard open-source updater for Mac apps outside the App Store. 
 Ship level 1 for the command line, and a pointer for the app. No machine change, no Apple account.
 
 1. `release.sh` writes and signs `latest.json` (needs only Jose's offline key, not Apple credentials).
-2. `sirven update --check`: fetch the manifest, verify the signature, expiry, and release number against
-   the pinned public key and the marker in the kept copy, and print "up to date" or "vX is available;
-   to apply it: sudo /usr/local/sbin/sirven update". Read-only, no root, no confirmation needed.
-3. `sirven status` and install output show the line. The menu bar gets an "update available" item that
-   opens the download page; the app does not download or install anything itself.
-4. Tests: a fixed signed manifest in `tests/fixtures`, plus failure cases (bad signature, expired,
-   lower release number, revoked tag). All can run in the existing harness without a real machine.
+2. **A place a non-root user can read.** The kept copy and its marker sit under the state directory,
+   mode 0700 and owned by root (`lib/layout.sh:296-297`), so a non-root user and the menu bar app cannot
+   read them. `install.sh` therefore also writes, as ordinary plan steps with undo, two small files in
+   the policy directory `/etc/sirven`, which is mode 0755 and root-written (`lib/layout.sh:15,306`):
+   `update/public-key` and `update/installed-release` (tag and release number). Root writes them at
+   install and at every upgrade; uninstall removes them. They are read-only inputs to the check. The root
+   `update` command never trusts them: it takes the key from the kept copy.
+3. `sirven update --check`: fetch the manifest, verify the signature, expiry, and release number against
+   those two files, and print "up to date" or "vX is available; to apply it: sudo
+   /usr/local/sbin/sirven update". Read-only, no root, no confirmation needed. It is new; it does not
+   exist today (section 1).
+4. `sirven grant inspect` and install output show the line. The menu bar gets an "update available"
+   item that runs the same check and opens the download page; the app does not download or install
+   anything itself.
+5. Tests: a fixed signed manifest in `tests/fixtures`, plus failure cases (bad signature, expired,
+   lower release number, revoked tag, wrong signing namespace, file unreadable by the user). All can
+   run in the existing harness without a real machine.
 
 This delivers the part of "automatic" that matters most (a machine that cannot learn about a security
 fix is the real risk) and also builds the trust chain every later level needs, while changing nothing
-on any machine. Applying (levels 2 and 3), the app's updater, and a scheduled job each come later.
+on any machine, except the two small files above on machines that install or upgrade after it ships.
+It does not help machines installed from `v0.2.0` (section 3). Applying (levels 2 and 3), the app's
+updater, and a scheduled job each come later.
 
 ## 9. Decisions only Jose can make
 
 1. **Signing key.** Approve creating an Ed25519 release signing key, and say where it lives (hardware
    security key recommended) and who holds a backup. Nothing in sections 3, 6, or 8 can ship without it.
-2. **Default level.** Is level 1 ("know") on by default for everyone, and does it make a network request
-   to cli.sirven.xyz or GitHub on a schedule? That is a privacy choice as well as an engineering one.
+2. **Default level and trigger.** Is level 1 (check only) on by default, as proposed, fetching only when
+   a person runs the check or the menu bar app is open? Or may there be a scheduled job that fetches on
+   its own, which is a startup item and needs consent? Either way it makes a network request to
+   cli.sirven.xyz or GitHub, a privacy choice as well as an engineering one.
 3. **Is level 3 (unattended apply) wanted at all** before the real macOS install check, and if so is
    the "same step kinds only" rule in section 4 narrow enough?
 4. **First install trust.** Accept trust on first use for `curl | bash`, or add a stronger first-install
@@ -233,10 +284,24 @@ on any machine. Applying (levels 2 and 3), the app's updater, and a scheduled jo
 10. **npm channel.** When npm publishing is unparked, should an npm install ever self-update, or always
     defer to the npm client (proposed)?
 11. **Revocation policy.** Who may add a tag to the revoked list, and does a revoked release force an
-    announcement in the menu bar and `sirven status`?
+    announcement in the menu bar and `sirven grant inspect`?
+
+12. **Manifest expiry window.** How long a signed manifest stays believable (a few weeks is proposed). Short
+    catches a freeze sooner but warns loudly whenever Jose is away and cannot sign a fresh one.
+13. **Existing installs.** Machines installed from `v0.2.0` have no key and no `update` command. Accept
+    that they must re-run the bootstrap once (proposed), or ship a one-off `v0.2.x` bridge release that
+    carries the key and the command, and say who is told.
 
 ## Not verified
 
-No code was run for this note. The behavior of Sparkle on an unnotarized app, `ssh-keygen -Y` on
-every supported Linux distribution, and the exact step kinds in the install record (section 4) were
-not checked and should be before any of this is built.
+No code was run for this note. These were not checked and should be before any of this is built:
+
+- Sparkle on an unnotarized app, and when it asks about automatic checks (section 7).
+- `ssh-keygen -Y` on every supported Linux distribution and on macOS. Signing needs a namespace chosen
+  once (`-n`), and verifying needs an allowed-signers file plus the same namespace; neither is
+  designed here.
+- Whether `ssh-keygen -Y sign` can use a hardware security key for Ed25519 signing on Jose's machine
+  (the key type that supports it is a security-key key type, not a plain Ed25519 file; the note's claim
+  is untested).
+- The exact step kinds in the install record (section 4); `lib/plan.sh:8-10` names two, `run` and `system`.
+- That `grant inspect` is a sufficient health check for a rolled-forward copy (section 6).
