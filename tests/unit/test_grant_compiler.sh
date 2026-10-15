@@ -76,7 +76,7 @@ test_revoke_from_record_matches_revoke_from_paths() {
 
 # on macos the undo is not the revoke subtraction: it sweeps every entry of the agent (see
 # lib/access_control_macos.py), because a subtraction leaves the entries a new file inherited and fails
-# on a file with no list. revoke keeps its subtraction, which the kill switch uses.
+# on a file with no list. revoke on macos is the same sweep (the next test), so the two agree.
 test_with_undo_pairs_every_grant_with_its_removal() {
   local os=macos with_undo undo_commands
   with_undo="$(compiler compile --level "$LEVEL_BUILDER" --os "$os" --with-undo --path /srv/b --path /opt/site/app)"
@@ -91,11 +91,35 @@ test_with_undo_pairs_every_grant_with_its_removal() {
   assert_eq "" "$(printf '%s\n' "$undo_commands" | grep -F 'chmod')" "no macos undo is a subtraction"
 }
 
-test_macos_revoke_keeps_its_subtraction() {
-  local revoke
-  revoke="$(compiler revoke --level "$LEVEL_BUILDER" --os macos --path /srv/b)"
-  assert_contains "$revoke" "/bin/chmod -h -a "
-  assert_not_contains "$revoke" "access_control_macos.sh"
+# revoke on macos is the sweep the undo of a grant is, not a subtraction: the kill switch and uninstall leave
+# the same state, and no entry that names the agent is left on an old, an inherited, or a list-less item.
+test_macos_revoke_is_the_same_sweep_as_the_undo() {
+  local revoke with_undo
+  revoke="$(compiler revoke --level "$LEVEL_BUILDER" --os macos --path /srv/b --path /srv/b/sub --path /opt/site/app)"
+  with_undo="$(compiler compile --level "$LEVEL_BUILDER" --os macos --with-undo --path /srv/b --path /srv/b/sub --path /opt/site/app)"
+  assert_not_contains "$revoke" "chmod"
+  assert_not_contains "$revoke" "find "
+  assert_eq "" "$(printf '%s\n' "$revoke" | grep -v '^#' | grep -v 'access_control_macos.sh sweep agent ')" "every macos revoke line is a sweep"
+  # the title, the check and the command are the undo's, line for line, with the repeats of the two-line grant gone
+  assert_eq "$(printf '%s\n' "$with_undo" | grep -v '^#' | cut -f4-6 | sort -u)" \
+    "$(printf '%s\n' "$revoke" | grep -v '^#' | sort -u)" "revoke is the undo of the grant, step for step"
+  # each granted folder is swept with everything inside it, and each pass-through parent alone
+  assert_contains "$revoke" "sweep agent yes /srv/b"
+  assert_contains "$revoke" "sweep agent yes /srv/b/sub"
+  assert_contains "$revoke" "sweep agent no /srv"
+  assert_contains "$revoke" "sweep agent no /opt"
+  assert_eq "yes yes yes no no no" "$(printf '%s\n' "$revoke" | grep -v '^#' | cut -f3 | awk '{print $5}' | tr '\n' ' ' | sed 's/ $//')" \
+    "the order is as it was: granted folders, then parents"
+  # a prefix is put in front of the helper and the path, as the grant does
+  assert_contains "$(compiler revoke --level "$LEVEL_BUILDER" --os macos --prefix /tmp/fake --path /srv/b)" \
+    "bash /tmp/fake/var/lib/sirven/package/lib/access_control_macos.sh sweep agent yes /tmp/fake/srv/b"
+}
+
+test_macos_revoke_from_record_matches_revoke_from_paths() {
+  compiler record --level "$LEVEL_BUILDER" --path /srv/app > "$TEST_TMP/grant.json"
+  assert_eq \
+    "$(compiler revoke --level "$REPO_DIR/levels/observer.json" --os macos --record "$TEST_TMP/grant.json")" \
+    "$(compiler revoke --level "$LEVEL_BUILDER" --os macos --path /srv/app)"
 }
 
 test_linux_with_undo_records_a_snapshot_before_any_change() {
