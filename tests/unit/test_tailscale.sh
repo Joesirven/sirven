@@ -504,3 +504,30 @@ test_uninstall_does_not_log_out_twice_when_the_install_record_already_does() {
   assert_contains "$CAPTURED_STDOUT" "log this machine out of the tailnet, if this installer joined it"
   assert_not_contains "$CAPTURED_STDOUT" "a join left behind"
 }
+
+# ---- the key does not outlive the join step in the installer's environment
+
+# a step that runs after the join starts a child process; one that is given the saved key file's name to remove is such a
+# step. a stand-in for rm records the environment it was started with (the names of the variables only, never a value).
+test_a_step_after_the_join_starts_a_child_that_does_not_inherit_the_key() {
+  local root="$TEST_TMP/root" bin="$TEST_TMP/bin" real_rm
+  real_rm="$(command -v rm)"
+  mkdir -p "$bin" "$root/etc/sirven"
+  cat > "$bin/rm" <<SHIM
+#!/bin/sh
+case "\$*" in
+  *tailscale-auth-key*) env | sed 's/=.*//' > "$TEST_TMP/rm-environment-names" ;;
+esac
+exec "$real_rm" "\$@"
+SHIM
+  chmod 755 "$bin/rm"
+  printf '%s\n' "$SENTINEL_KEY" > "$root/etc/sirven/tailscale-auth-key"
+  chmod 600 "$root/etc/sirven/tailscale-auth-key"
+  PATH="$bin:$PATH" SIRVEN_TAILSCALE_AUTHKEY="$SENTINEL_KEY" TAILSCALE_AUTHKEY="$SENTINEL_KEY" \
+    assert_status 0 install_sh --prefix "$root" --level observer --transport tailscale
+  assert_contains "$CAPTURED_STDOUT" "remove the used auth key from disk"
+  assert_file_exists "$TEST_TMP/rm-environment-names"
+  assert_not_contains "$(cat "$TEST_TMP/rm-environment-names")" "TAILSCALE_AUTHKEY" "the environment of the step after the join"
+  assert_no_file "$root/etc/sirven/tailscale-auth-key"
+  assert_key_nowhere "$root" "$TEST_TMP/rm-environment-names"
+}

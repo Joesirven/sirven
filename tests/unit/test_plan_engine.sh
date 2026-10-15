@@ -444,3 +444,66 @@ test_without_recheck_the_first_reading_stands() {
   assert_no_file "$ROOT/removed"
   assert_file_exists "$ROOT/made"
 }
+
+# ---- plan_forget_secrets: a variable a step is the last to need is gone before the next step starts a child process
+
+# a step that writes whether the variable is in its environment ("seen" or "absent") to the file named NAME.
+add_env_probe_step() {
+  plan_step run "probe $1" "" "printf '%s\\n' \"\${PLAN_SECRET_FOR_TEST:-absent}\" > $TEST_TMP/$1"
+}
+
+test_a_variable_a_step_forgets_is_not_in_the_environment_of_the_next_step() {
+  setup_fake_root
+  PLAN_SECRET_FOR_TEST=seen
+  export PLAN_SECRET_FOR_TEST
+  add_env_probe_step before
+  plan_forget_secrets PLAN_SECRET_FOR_TEST
+  add_env_probe_step after
+  plan_evaluate
+  assert_status 0 plan_apply
+  assert_eq "seen" "$(cat "$TEST_TMP/before")" "the step that marked the variable still has it"
+  assert_eq "absent" "$(cat "$TEST_TMP/after")" "the next step has it no more"
+}
+
+test_a_variable_is_forgotten_after_a_step_that_failed_and_after_a_step_recorded_on_a_fake_root() {
+  setup_fake_root
+  PLAN_SECRET_FOR_TEST=seen
+  export PLAN_SECRET_FOR_TEST
+  plan_step run "fails" "" "false"
+  plan_continue
+  plan_forget_secrets PLAN_SECRET_FOR_TEST
+  add_env_probe_step after-failure
+  plan_evaluate
+  assert_status 4 plan_apply
+  assert_eq "absent" "$(cat "$TEST_TMP/after-failure")" "after a failed step that the run goes on from"
+  setup_fake_root
+  PLAN_SECRET_FOR_TEST=seen
+  export PLAN_SECRET_FOR_TEST
+  plan_step system "recorded, not run" "" "true"
+  plan_forget_secrets PLAN_SECRET_FOR_TEST
+  add_env_probe_step after-recorded
+  plan_evaluate
+  assert_status 0 plan_apply
+  assert_eq "absent" "$(cat "$TEST_TMP/after-recorded")" "after a step only recorded under a prefix"
+}
+
+test_a_variable_is_forgotten_when_the_step_is_skipped_as_already_done() {
+  setup_fake_root
+  PLAN_SECRET_FOR_TEST=seen
+  export PLAN_SECRET_FOR_TEST
+  plan_step run "already done" "true" "false"
+  plan_forget_secrets PLAN_SECRET_FOR_TEST
+  add_env_probe_step after-skip
+  plan_evaluate
+  assert_status 0 plan_apply
+  assert_contains "$CAPTURED_STDOUT" "skipped, already done"
+  assert_eq "absent" "$(cat "$TEST_TMP/after-skip")"
+}
+
+test_plan_forget_secrets_takes_variable_names_only() {
+  setup_fake_root
+  plan_step run "a step" "" "true"
+  assert_status 1 plan_forget_secrets 'NAME; touch /tmp/x'
+  assert_status 1 plan_forget_secrets '1BAD'
+  assert_status 0 plan_forget_secrets GOOD_NAME another
+}

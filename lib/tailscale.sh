@@ -132,6 +132,9 @@ hand it over one of two ways, and it is the only interactive step:
       "# runs lib/tailscale_node.sh join; the key comes from the environment or from $key_file and is never put on a command line.
 # it records the node in $(tailscale_marker_file), and refuses with nothing changed if there is no key, no tailscale, or a login that is not ours.
 tailscale up --auth-key=file:<a private copy of the key> --advertise-tags=tag:agent --hostname=$SERVICE_USER-<this machine's name> --ssh=false --accept-dns=false --accept-routes=false --reset --timeout=60s"
+    # the join is the only step that reads the key. once it has run (done, failed or skipped) the installer drops the key from its
+    # own environment, so no later step starts a child process that inherits it.
+    plan_forget_secrets SIRVEN_TAILSCALE_AUTHKEY TAILSCALE_AUTHKEY
     plan_undo "log this machine out of the tailnet, if this installer joined it" "[ ! -e $marker ]" \
       "bash $script leave $marker" \
       "tailscale logout   # via lib/tailscale_node.sh leave, only when this machine's login is still the node recorded in $(tailscale_marker_file)"
