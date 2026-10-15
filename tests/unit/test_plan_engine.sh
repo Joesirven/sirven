@@ -91,6 +91,21 @@ test_plan_only_step_blocks_apply_before_any_change() {
   assert_no_file "$ROOT/etc/sirven"
 }
 
+test_a_conflict_step_is_numbered_blocked_and_stops_apply_before_any_change() {
+  setup_fake_root
+  plan_conflict "tailscale login is not ours" "run again with --transport none"
+  add_directory_step /etc/sirven
+  plan_evaluate
+  assert_eq 1 "$(plan_conflict_count)"
+  assert_status 0 plan_print
+  assert_contains "$CAPTURED_STDOUT" "  1. tailscale login is not ours (blocked by a conflict)"
+  assert_contains "$CAPTURED_STDOUT" "you can: run again with --transport none"
+  assert_contains "$CAPTURED_STDOUT" "  2. create /etc/sirven (to do)"
+  assert_status 3 plan_apply
+  assert_contains "$CAPTURED_STDERR" "blocked by a conflict"
+  assert_no_file "$ROOT/etc/sirven"
+}
+
 test_failed_step_stops_the_apply() {
   setup_fake_root
   plan_step run "always fails" "" "false"

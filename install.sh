@@ -503,7 +503,12 @@ finish() {
   plan_print
   plan_summary
   if [ "$DRY_RUN" = yes ]; then
-    say "dry run: nothing was changed. run the same command without --dry-run to apply this plan."
+    if adopt_has_conflicts; then
+      say "dry run: nothing was changed."
+      say "a real run would refuse until the conflicts above are resolved, and would change nothing. this dry run exits 2, the same status as that refusal."
+    else
+      say "dry run: nothing was changed. run the same command without --dry-run to apply this plan."
+    fi
     if [ -n "$(plan_blockers)" ]; then
       say "applying would stop before any change: the plan has plan-only steps the alpha cut does not apply yet."
     fi
@@ -513,6 +518,7 @@ finish() {
     if [ "$COMMAND" = install ]; then
       say "to cut the agent off later: $(layout_root_command revoke) --dry-run to read the plan; to remove everything: $(layout_root_command uninstall) --dry-run"
     fi
+    if adopt_has_conflicts; then return 2; fi
     return 0
   fi
   if [ "$COMMAND" = revoke ]; then

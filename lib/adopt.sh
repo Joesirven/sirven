@@ -7,8 +7,10 @@
 # thing it keeps, and leaves out the steps that would install it again. nothing here ever logs
 # Tailscale in or out, changes its keys, tags, or settings, reinstalls bb, or rewrites a grant
 # record, a policy copy, or the audit log. when what is there cannot be kept alongside what was
-# asked, the run stops before any change, in a dry run too, and says what conflicts and what the
-# person can do (adopt_refuse_conflicts).
+# asked, a real run stops before any change and says what conflicts and what the person can do
+# (adopt_refuse_conflicts). a dry run changes nothing anyway, so it goes on and prints the whole
+# plan with each conflict as a blocked step (plan_adopt), then exits 2, the status of the real
+# refusal, so a script that tests for 2 sees the same answer with or without --dry-run.
 #
 # detection is read only: 'tailscale version', 'tailscale status --json' (only the backend state
 # and this machine's own tags are kept), 'bb --version', and files under the package directories.
@@ -276,19 +278,26 @@ _adopt_audit_owner() {
   ls -ld "$AUDIT_DIR" | awk '$3 != "root" {print $3}'
 }
 
-_ADOPT_CONFLICTS=""
+_ADOPT_CONFLICT_WHAT=()
+_ADOPT_CONFLICT_ADVICE=()
 
 _adopt_conflict() {
-  _ADOPT_CONFLICTS="${_ADOPT_CONFLICTS}  - $1
-    you can: $2
-"
+  _ADOPT_CONFLICT_WHAT+=("$1")
+  _ADOPT_CONFLICT_ADVICE+=("$2")
 }
 
-# adopt_refuse_conflicts: stop before any change, in a dry run too, when what is on the machine
-# cannot be kept alongside what was asked. prints every conflict and what to do about it.
+# adopt_has_conflicts: true when adopt_refuse_conflicts found something that cannot be kept.
+adopt_has_conflicts() {
+  [ "${#_ADOPT_CONFLICT_WHAT[@]}" -gt 0 ]
+}
+
+# adopt_refuse_conflicts: find what on the machine cannot be kept alongside what was asked. a real
+# run (also under --prefix) prints every conflict and what to do about it, then stops before any
+# change. a dry run keeps them for plan_adopt to show and for install.sh to report and exit on.
 adopt_refuse_conflicts() {
-  local copy shipped owner wanted record_file
-  _ADOPT_CONFLICTS=""
+  local copy shipped owner wanted record_file index=0
+  _ADOPT_CONFLICT_WHAT=()
+  _ADOPT_CONFLICT_ADVICE=()
   [ "$COMMAND" = install ] || return 0
 
   if [ "$TRANSPORT" = tailscale ] && [ "$ADOPT_TAILSCALE" = other_node ]; then
@@ -334,10 +343,14 @@ adopt_refuse_conflicts() {
       "run again with --owner $owner to keep it as it is."
   fi
 
-  [ -n "$_ADOPT_CONFLICTS" ] || return 0
+  adopt_has_conflicts || return 0
+  [ "$DRY_RUN" != yes ] || return 0
   printf 'error: refused: what is already on this machine conflicts with this request. nothing was changed.\n' >&2
   printf 'sirven adopts what it finds and never overwrites it. each conflict, and what you can do:\n' >&2
-  printf '%s' "$_ADOPT_CONFLICTS" >&2
+  while [ "$index" -lt "${#_ADOPT_CONFLICT_WHAT[@]}" ]; do
+    printf '  - %s\n    you can: %s\n' "${_ADOPT_CONFLICT_WHAT[index]}" "${_ADOPT_CONFLICT_ADVICE[index]}" >&2
+    index=$((index + 1))
+  done
   exit 2
 }
 
@@ -378,7 +391,15 @@ _adopt_tailscale_line() {
 
 # plan_adopt: the "already on this machine" section, only when something was found.
 plan_adopt() {
-  local policy
+  local policy index=0
+  if adopt_has_conflicts; then
+    plan_section "conflicts with what is already on this machine: a real run would refuse"
+    plan_note "sirven adopts what it finds and never overwrites it. a real run stops before any change until each of these is resolved; this dry run shows the rest of the plan as it would be."
+    while [ "$index" -lt "${#_ADOPT_CONFLICT_WHAT[@]}" ]; do
+      plan_conflict "${_ADOPT_CONFLICT_WHAT[index]}" "${_ADOPT_CONFLICT_ADVICE[index]}"
+      index=$((index + 1))
+    done
+  fi
   adopt_found_anything || return 0
   plan_section "already on this machine, adopted as it is"
   if [ "$ADOPT_TAILSCALE" != none ]; then

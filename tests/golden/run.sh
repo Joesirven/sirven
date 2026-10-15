@@ -135,6 +135,12 @@ adopt_case() {
 # adoption: a second run on a machine that already has Tailscale, bb, and an earlier install
 adopt_case adopt-linux-builder-tailscale-bb linux --level builder --path /home/example/project --transport tailscale --with-bb
 
+# a conflict: this machine is logged in to Tailscale as a personal device, so a dry run shows the whole
+# plan with the conflict as a blocked step and exits 2, the status a real run's refusal has
+golden_case install-linux-builder-tailscale-conflict linux env SIRVEN_TAILSCALE="$FAKES/tailscale" SIRVEN_BB=none \
+  FAKE_TAILSCALE_STATE=personal-node "$INSTALL" --dry-run --prefix "$(case_prefix install-linux-builder-tailscale-conflict)" \
+  --owner example --level builder --path /home/example/project --transport tailscale
+
 # grant compiler fragments, both operating systems, every level
 for os in linux macos; do
   for level in observer builder operator; do
