@@ -312,7 +312,7 @@ the kill switch reads it to know what to remove.
   **AppArmor (SIR-83, measured on the server ba-sing-se).** with AppArmor enforcing under its docker-default
   profile, the agent cannot build a deep chain at all: its folder creation stops at depth 4,090 with Errno 36
   (ENAMETOOLONG), at about 8,189 bytes of absolute path. unconfined, the same chain reaches 12,000 levels. the
-  harness scenarios 63 (revoke) and 64 (uninstall) keep the default profile and check that, on the deepest chain
+  harness scenarios 67 (revoke) and 68 (uninstall) keep the default profile and check that, on the deepest chain
   the confined agent can build, every access list entry is removed, the account is locked, and no process is left.
   both pass on ba-sing-se: revoke and uninstall exit 0, zero access list entries left. not yet verified: a tree
   built with AppArmor lifted, then revoked under the default profile. the attempt to carry such a tree between two
