@@ -26,9 +26,10 @@ The script is `bootstrap/sirven-bootstrap.sh`. Read it before you run it.
 ## Handing the Tailscale auth key to the installer
 
 The script passes its arguments on and starts the installer in the environment it was started in, so a
-Tailscale auth key reaches the join in one of two ways. The default is a key file: save the key as
-`/etc/sirven/tailscale-auth-key`, owned by root, mode 0600, with no extended access control list (a
-file with any extra access entry for another account is refused, even when the mode bits look right).
+Tailscale auth key reaches the join in one of two ways. The default, and the one to use, is a key file:
+save the key as `/etc/sirven/tailscale-auth-key`, owned by root, mode 0600, with one name only (a hard
+link to it is refused) and no extended access control list (a file with any extra access entry for
+another account is refused, even when the mode bits look right).
 The key then never passes through sudo or your shell history, and the installer removes the file after
 the join. To make the file without the key appearing on a command line:
 
@@ -47,7 +48,12 @@ does not allow it, sudo may refuse the whole command with an error. Plain `sudo`
 drops the variable, and the installer then refuses with "there is no Tailscale auth key", changing
 nothing. Read the key into the variable with `read -rs SIRVEN_TAILSCALE_AUTHKEY; export SIRVEN_TAILSCALE_AUTHKEY`, not
 `SIRVEN_TAILSCALE_AUTHKEY=<the key> command`, since a command line is kept in shell history and shows
-in the process list. When the plan joins, the installer unsets both variables as soon as the join step has run. A machine that is already the agent node has no join step, and the key stays in the environment there; use the file.
+in the process list. The installer takes both variables out of its own environment as the first thing it does, keeps
+the key in variables that are not exported, and hands it only to the join step (and to the first look that checks the
+join would be accepted); no other step starts a process that has it, whether or not a join runs. One thing this cannot do:
+the block of the environment the installer was started with stays readable by root in
+`/proc/<installer process number>/environ` for as long as the installer runs, and unsetting a variable does not scrub
+it. The key file is the only route that never puts the key in an environment, so use the file.
 
 ## Where the pin lives
 

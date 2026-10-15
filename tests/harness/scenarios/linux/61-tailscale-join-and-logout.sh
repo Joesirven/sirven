@@ -14,6 +14,23 @@ install_ts() { bash install.sh --yes --level observer --transport tailscale "$@"
 state() { cat "$FAKE_TS_DIR/state" 2>/dev/null; }
 no_key_on_disk() { local hits; hits="$(grep -rl -F -- "$KEY" /etc /var /root /home /usr/local 2>/dev/null)"; [ -z "$hits" ] || { printf "the key is in: %s\n" "$hits"; return 1; }; }
 
+# stand-ins for mkdir, chown and install (the commands the steps before the join run) that record the NAMES, never the values, of the
+# variables in the environment they were started with, then run the real command. for the runs that follow only (a disposable machine).
+CHILD_ENV_LOG=/tmp/child-environment-names
+shim_children_on() {
+  local name
+  : > "$CHILD_ENV_LOG"
+  for name in mkdir chown install; do
+    mv "/usr/bin/$name" "/usr/bin/$name.real"
+    printf '#!/bin/sh\nprintf "%%s: %%s\\n" "%s" "$(env | /usr/bin/sed "s/=.*//" | /usr/bin/tr "\\n" " ")" >> %s\nexec /usr/bin/%s.real "$@"\n' "$name" "$CHILD_ENV_LOG" "$name" > "/usr/bin/$name"
+    chmod 755 "/usr/bin/$name"
+  done
+}
+shim_children_off() {
+  local name
+  for name in mkdir chown install; do mv -f "/usr/bin/$name.real" "/usr/bin/$name"; done
+}
+
 # 1. no key: refused up front, nothing changed
 world_files > /tmp/empty.files
 world_accounts > /tmp/empty.accounts
@@ -38,6 +55,13 @@ check "with the mask at --- the group bits show nothing: the case the mode bits 
 check_exit "the same file is refused with the mask hiding the entry" 2 install_ts
 check "and it names the access control list" bash -c 'grep -q "extended access control list" <<< "$0"' "$LAST_OUTPUT"
 check "tailscale was never asked to join" bash -c '! grep -q "^tailscale up --auth-key" /tmp/fake-ts/calls.log 2>/dev/null'
+# 1c. a key file with a second name (a hard link) is refused too: the other name may sit where others can read it
+setfacl -b "$KEY_FILE"
+mkdir -p /var/other-name && ln "$KEY_FILE" /var/other-name/copy
+check_exit "apply with a root-owned 0600 key file that has a second name is refused" 2 install_ts
+check "the refusal says the file has more than one name, and nothing was changed" bash -c 'grep -q "more than one name" <<< "$0" && grep -q "nothing was changed" <<< "$0"' "$LAST_OUTPUT"
+check "the key is not in the refusal" bash -c '! grep -qF -- "$KEY" <<< "$0"' "$LAST_OUTPUT"
+rm -rf /var/other-name
 rm -rf /etc/sirven
 world_unchanged_if 'true' "and it changed nothing: files" files /tmp/empty.files
 world_unchanged_if 'true' "and it changed nothing: accounts" accounts /tmp/empty.accounts
@@ -50,9 +74,13 @@ printf '%s\n' "$KEY" > "$KEY_FILE"; chown root:root "$KEY_FILE"; chmod 600 "$KEY
 mv /usr/bin/rm /usr/bin/rm.real
 printf '#!/bin/sh\ncase "$*" in *tailscale-auth-key*) env | /usr/bin/sed "s/=.*//" > /tmp/rm-environment-names ;; esac\nexec /usr/bin/rm.real "$@"\n' > /usr/bin/rm
 chmod 755 /usr/bin/rm
+shim_children_on
 SIRVEN_TAILSCALE_AUTHKEY="$KEY" TAILSCALE_AUTHKEY="$KEY" check_exit "apply with a key joins the tailnet" 0 install_ts
 out="$LAST_OUTPUT"
 mv -f /usr/bin/rm.real /usr/bin/rm
+shim_children_off
+check "steps before the join did start children (so the next check proves something)" bash -c '[ "$(grep -c "^mkdir:" "$0")" -gt 0 ] && [ "$(grep -c "^chown:" "$0")" -gt 0 ]' "$CHILD_ENV_LOG"
+check "and none of them was started with either key variable in its environment" bash -c '! grep -q "AUTHKEY" "$0"' "$CHILD_ENV_LOG"
 check "the step after the join started its child with neither key variable in the environment" bash -c '[ -s /tmp/rm-environment-names ] && ! grep -q "TAILSCALE_AUTHKEY" /tmp/rm-environment-names'
 check "and the saved key file was removed by that step" bash -c '[ ! -e "$0" ]' "$KEY_FILE"
 check "the node is up, tagged tag:agent, named after the account" bash -c '[ "$(cat /tmp/fake-ts/state)" = Running ] && grep -q tag:agent /tmp/fake-ts/tags && grep -q -- "--hostname=agent-harness-node" /tmp/fake-ts/up-arguments'
@@ -67,6 +95,12 @@ check "the install record can undo the join" grep -q 'tailscale_node.sh leave /v
 # 3. again: nothing more happens, no error, and no key is needed
 world_files > /tmp/one.files
 check_exit "a second apply without any key exits 0" 0 install_ts
+# the machine is the agent node now, so the join is skipped: a key in the environment must still reach no child
+shim_children_on
+SIRVEN_TAILSCALE_AUTHKEY="$KEY" TAILSCALE_AUTHKEY="$KEY" check_exit "a second apply with a key in the environment (no join runs) exits 0" 0 install_ts
+shim_children_off
+check "no join ran, and the steps that did run started children" bash -c '[ "$(grep -c "^tailscale up --auth-key" /tmp/fake-ts/calls.log)" = 1 ] && [ -s "$0" ]' "$CHILD_ENV_LOG"
+check "none of them was started with either key variable in its environment" bash -c '! grep -q "AUTHKEY" "$0"' "$CHILD_ENV_LOG"
 check "and it did not join again" bash -c '[ "$(grep -c "^tailscale up --auth-key" /tmp/fake-ts/calls.log)" = 1 ]'
 world_unchanged_if 'true' "and it changed no file" files /tmp/one.files
 
