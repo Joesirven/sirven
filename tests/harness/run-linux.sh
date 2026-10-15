@@ -12,6 +12,11 @@
 # scenario reaches a network, and the key is passed by name or by a private file holding that one line, never on a command line. the host's own
 # install.sh is never run. exit status: 0 all passed, 1 an assertion failed, 77 no container
 # engine is running (a skip, not a pass), 2 the harness itself broke.
+#
+# several runs may go at once on one host. every container, network and temporary file a run makes carries that run's identifier
+# (in its label and, for containers, its name), and the cleanup removes only those. to stop a run, send kill -TERM to the process number
+# it prints at its start. never pkill -f (it matches every run's command line) and never remove containers by the bare label name (it
+# matches every run). the shared image is never removed. a stopped run removes its own containers at once.
 
 set -uo pipefail
 HARNESS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -19,6 +24,7 @@ REPO_DIR="$(cd "$HARNESS_DIR/../.." && pwd)"
 FILTER="${1:-}"
 ENGINE="${SIRVEN_HARNESS_ENGINE:-docker}"
 RUN_ID="$(date +%Y%m%d%H%M%S)-$$"
+printf 'run %s, process %s: to stop only this run, kill -TERM %s\n' "$RUN_ID" "$$" "$$" >&2
 
 if ! command -v "$ENGINE" >/dev/null 2>&1 || ! "$ENGINE" info >/dev/null 2>&1; then
   printf 'skipped: no running container engine (%s). on a Mac, start Docker Desktop, or set SIRVEN_HARNESS_ENGINE=podman.\n' "$ENGINE" >&2
@@ -39,12 +45,18 @@ ensure_image() {
 # the private file that carries the test key into a container, made per scenario and removed with it
 KEY_ENV_FILE=""
 remove_key_env_file() { [ -z "$KEY_ENV_FILE" ] || rm -f "$KEY_ENV_FILE"; KEY_ENV_FILE=""; }
+# run_pid is the container client of the scenario in progress; it runs in the background so a stop signal is handled at once
+run_pid=""
 cleanup() {
+  [ -z "$run_pid" ] || kill "$run_pid" 2>/dev/null
   remove_key_env_file
   "$ENGINE" ps -aq --filter "label=sirven-harness=$RUN_ID" | xargs -r "$ENGINE" rm -f >/dev/null 2>&1
   "$ENGINE" network ls -q --filter "label=sirven-harness=$RUN_ID" | xargs -r "$ENGINE" network rm >/dev/null 2>&1
 }
 trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
 
 total_failed=0
 ran=0
@@ -95,13 +107,16 @@ for scenario in "$HARNESS_DIR"/scenarios/linux/*.sh; do
   # the repository is mounted read only at /src and copied inside the container to /srv/pkg, owned by root: the installer
   # refuses, as root, to run code from a folder owned by someone else (the host user who owns the mount), so the scenario
   # runs the copy (SRC=/srv/pkg). the scenario script itself is read from /src.
-  "$ENGINE" run --rm --label "sirven-harness=$RUN_ID" --network "$network" \
+  "$ENGINE" run --rm --name "sirven-harness-$RUN_ID-$name" --label "sirven-harness=$RUN_ID" --network "$network" \
     --memory "${memory:-256m}" --pids-limit 256 --cap-drop NET_RAW $apparmor_option \
     "$@" \
     -v "$REPO_DIR":/src:ro \
     "$image" bash -c 'cp -r /src /srv/pkg && SRC=/srv/pkg exec bash "$0"' \
-    "/src/tests/harness/scenarios/linux/$name.sh" < /dev/null
+    "/src/tests/harness/scenarios/linux/$name.sh" < /dev/null &
+  run_pid=$!
+  wait "$run_pid"
   status=$?
+  run_pid=""
   remove_key_env_file
   [ -z "$own_network" ] || "$ENGINE" network rm "$own_network" >/dev/null 2>&1
   printf 'scenario %s: exit %s, %s seconds\n' "$name" "$status" "$((SECONDS - started))"
