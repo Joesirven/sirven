@@ -1,0 +1,25 @@
+#!/bin/sh
+# a fake systemctl that keeps unit state in files, for the tests of lib/cloudflare_tunnel.sh and the harness. state: FAKE_SYSTEMD_DIR
+# (default /tmp/fake-systemd), one file NAME.active and NAME.enabled per unit, and calls.log. FAKE_SYSTEMCTL_START_FAILS=yes makes
+# 'enable --now' fail; FAKE_SYSTEMCTL_STOP_FAILS=yes makes 'stop' fail. any other call answers nothing, as a machine with no such units.
+state="${FAKE_SYSTEMD_DIR:-/tmp/fake-systemd}"
+mkdir -p "$state"
+printf 'systemctl %s\n' "$*" >> "$state/calls.log"
+# the names (never the values) of the variables this process was started with, so a test can prove the token was not among them
+env | sed 's/=.*//' | tr '\n' ' ' >> "$state/environment-names.log"; printf '\n' >> "$state/environment-names.log"
+case "$1" in
+  daemon-reload) ;;
+  enable)
+    shift
+    now=no; unit=""
+    for argument in "$@"; do case "$argument" in --now) now=yes ;; *) unit="$argument" ;; esac; done
+    if [ "$now" = yes ] && [ "${FAKE_SYSTEMCTL_START_FAILS:-}" = yes ]; then echo "fake: Job for $unit failed" >&2; exit 1; fi
+    : > "$state/$unit.enabled"
+    [ "$now" = no ] || : > "$state/$unit.active"
+    ;;
+  stop) [ "${FAKE_SYSTEMCTL_STOP_FAILS:-}" != yes ] || { echo "fake: cannot stop $2" >&2; exit 1; }; rm -f "$state/$2.active" ;;
+  disable) rm -f "$state/$2.enabled" ;;
+  is-active) shift; [ "$1" != --quiet ] || shift; [ -e "$state/$1.active" ]; exit $? ;;
+  is-enabled) shift; [ "$1" != --quiet ] || shift; [ -e "$state/$1.enabled" ]; exit $? ;;
+esac
+exit 0

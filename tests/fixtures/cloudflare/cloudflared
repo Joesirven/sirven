@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# a fake cloudflared for the tests of lib/cloudflare_tunnel.sh. it keeps a log of every call in FAKE_CF_DIR/calls.log and checks what a
+# real one checks about a config: the tunnel number, a credentials file that is there, and an ingress list that ends in a catch-all.
+#   FAKE_CF_VERSION=X     the version it reports (default 2024.8.2)
+#   FAKE_CF_BAD_CONFIG=yes  'ingress validate' fails
+dir="${FAKE_CF_DIR:?FAKE_CF_DIR is not set}"
+mkdir -p "$dir"
+printf 'cloudflared %s\n' "$*" >> "$dir/calls.log"
+# the names (never the values) of the variables this process was started with, so a test can prove the token was not among them
+env | sed 's/=.*//' | tr '\n' ' ' >> "$dir/environment-names.log"; printf '\n' >> "$dir/environment-names.log"
+case "${1:-}" in
+  --version) printf 'cloudflared version %s (built 2024-08-20-1200)\n' "${FAKE_CF_VERSION:-2024.8.2}" ;;
+  tunnel)
+    shift
+    config=""
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --config) config="$2"; shift 2 ;;
+        ingress) shift; break ;;
+        *) shift ;;
+      esac
+    done
+    if [ "${1:-}" = validate ]; then
+      [ "${FAKE_CF_BAD_CONFIG:-}" != yes ] || { printf 'error parsing ingress rules: fake\n' >&2; exit 1; }
+      [ -f "$config" ] || { printf 'config %s not found\n' "$config" >&2; exit 1; }
+      grep -q '^tunnel: [0-9a-f-]\{36\}$' "$config" || { printf 'no tunnel in the config\n' >&2; exit 1; }
+      credentials="$(sed -n 's/^credentials-file: //p' "$config")"
+      [ -s "$credentials" ] || { printf 'credentials file %s is not there\n' "$credentials" >&2; exit 1; }
+      tail -n 1 "$config" | grep -q 'service: http_status:404' || { printf 'the last ingress rule must be a catch-all\n' >&2; exit 1; }
+      printf 'the ingress rules are valid\n'
+    else
+      printf 'fake cloudflared: unknown tunnel call\n' >&2; exit 9
+    fi
+    ;;
+  *) printf 'fake cloudflared: unknown call %s\n' "$*" >&2; exit 9 ;;
+esac
