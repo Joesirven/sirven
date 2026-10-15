@@ -245,7 +245,8 @@ ask on, nothing is asked: the level is observer and no path is granted.
 what is already on the machine is adopted, never reinstalled or overwritten: a Tailscale login,
 a bb install, and the grant, policy, and audit log of an earlier run. with a grant in force, a
 level or path left open is taken from it. when what is there conflicts with the request, the
-run stops before any change and says what to do.
+run stops before any change and says what to do. a dry run on a machine with a conflict still
+prints the plan, marks the conflict, and exits 2.
 
 options:
   --dry-run                  print the plan and change nothing
@@ -503,7 +504,12 @@ finish() {
   plan_print
   plan_summary
   if [ "$DRY_RUN" = yes ]; then
-    say "dry run: nothing was changed. run the same command without --dry-run to apply this plan."
+    if adopt_has_conflicts; then
+      say "dry run: nothing was changed."
+      say "a real run would refuse until the conflicts above are resolved, and would change nothing. this dry run exits 2, the same status as that refusal."
+    else
+      say "dry run: nothing was changed. run the same command without --dry-run to apply this plan."
+    fi
     if [ -n "$(plan_blockers)" ]; then
       say "applying would stop before any change: the plan has plan-only steps the alpha cut does not apply yet."
     fi
@@ -513,6 +519,7 @@ finish() {
     if [ "$COMMAND" = install ]; then
       say "to cut the agent off later: $(layout_root_command revoke) --dry-run to read the plan; to remove everything: $(layout_root_command uninstall) --dry-run"
     fi
+    if adopt_has_conflicts; then return 2; fi
     return 0
   fi
   if [ "$COMMAND" = revoke ]; then

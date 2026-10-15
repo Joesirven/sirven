@@ -38,6 +38,13 @@
 # in the environment). the installer unsets them as soon as that step has run, whether it was applied, failed or skipped, so no
 # later step starts a child process that inherits them.
 #
+# plan_conflict TITLE ADVICE: a step blocked by something already on the machine that cannot be kept
+# alongside what was asked (see lib/adopt.sh). it is never applied: a real run refuses before the plan
+# is made, and plan_apply refuses a plan that holds one. ADVICE is what the person can do about it.
+plan_conflict() {
+  _plan_add conflict "$1" "" "" "$2" ""
+}
+
 # plan_continue: the most recent step may fail without stopping the run. the run goes on, records the failure,
 # and ends with exit 4 listing every failed step. for a plan whose steps each remove access, so one step that
 # cannot finish (a name the agent planted, a unit that will not stop) never leaves a later one undone.
@@ -249,6 +256,10 @@ plan_evaluate() {
         PLAN_STATUS[index]="owner"
         if _plan_check_passes "${PLAN_CHECK[index]}"; then PLAN_STATUS[index]="done"; fi
         ;;
+      conflict)
+        number=$((number + 1))
+        PLAN_STATUS[index]="blocked"
+        ;;
       planonly)
         number=$((number + 1))
         PLAN_STATUS[index]="planonly"
@@ -284,6 +295,7 @@ _plan_status_label() {
     done) printf 'already done' ;;
     owner) printf 'owner, by hand' ;;
     planonly) printf 'plan only' ;;
+    blocked) printf 'blocked by a conflict' ;;
     todo)
       if [ "${PLAN_KIND[index]}" = system ] && [ -n "$PLAN_PREFIX" ]; then
         printf 'to do, recorded not run under --prefix'
@@ -324,6 +336,10 @@ plan_print() {
       section) printf '\n%s\n' "${PLAN_TITLE[index]}" ;;
       note) printf '     note: %s\n' "${PLAN_TITLE[index]}" ;;
       adopted) printf '     adopted: %s\n' "${PLAN_TITLE[index]}" ;;
+      conflict)
+        printf '  %3s. %s (%s)\n' "${PLAN_NUMBER[index]}" "${PLAN_TITLE[index]}" "$(_plan_status_label "$index")"
+        printf '       you can: %s\n' "${PLAN_SHOWN[index]}"
+        ;;
       *)
         printf '  %3s. %s (%s)\n' "${PLAN_NUMBER[index]}" "${PLAN_TITLE[index]}" "$(_plan_status_label "$index")"
         if [ "$kind" = owner ]; then
@@ -350,14 +366,16 @@ _plan_count_status() {
 }
 
 plan_summary() {
-  local steps=0 index=0
+  local steps=0 index=0 blocked blocked_clause=""
   while [ "$index" -lt "$PLAN_COUNT" ]; do
     if [ -n "${PLAN_NUMBER[index]}" ]; then steps=$((steps + 1)); fi
     index=$((index + 1))
   done
-  printf '\nsummary: %s steps. %s to do, %s already done, %s by the owner, %s plan only.\n' \
+  blocked="$(_plan_count_status blocked)"
+  if [ "$blocked" -gt 0 ]; then blocked_clause=", $blocked blocked by a conflict"; fi
+  printf '\nsummary: %s steps. %s to do, %s already done, %s by the owner, %s plan only%s.\n' \
     "$steps" "$(_plan_count_status todo)" "$(_plan_count_status "done")" \
-    "$(_plan_count_status owner)" "$(_plan_count_status planonly)"
+    "$(_plan_count_status owner)" "$(_plan_count_status planonly)" "$blocked_clause"
 }
 
 # why a real macos apply is refused, or nothing when it is allowed. the steps are built and tested
@@ -395,6 +413,11 @@ plan_blockers() {
     fi
     index=$((index + 1))
   done
+}
+
+# the number of steps blocked by a conflict, 0 when the plan holds none.
+plan_conflict_count() {
+  _plan_count_status blocked
 }
 
 # a field of the install record. empty fields are written as '-', because read with a tab in
@@ -485,6 +508,10 @@ plan_apply() {
   refusal="$(plan_real_apply_refusal)"
   if [ -n "$refusal" ]; then
     printf '\nnot applied: %s\n' "$refusal" >&2
+    return 3
+  fi
+  if [ "$(plan_conflict_count)" -gt 0 ]; then
+    printf '\nnot applied: this plan has steps blocked by a conflict with what is already on this machine. nothing was changed.\n' >&2
     return 3
   fi
   blockers="$(plan_blockers)"

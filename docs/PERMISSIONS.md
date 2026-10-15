@@ -229,7 +229,9 @@ the kill switch reads it to know what to remove.
   or the environment comes from the grant record, nothing is asked for it, and the plan shows it
   as `adopted:`. giving a different level or path is a grant change, shown as one. granting no
   path over a grant in force, or reinstalling a level whose policy copy was edited, is refused
-  before any change. see `lib/adopt.sh`.
+  before any change (exit 2, no plan). a dry run prints the whole plan with each such conflict as
+  a step blocked by the conflict, ends with a line saying a real run would refuse, and also exits
+  2. see `lib/adopt.sh`.
 - **install.** `install.sh` writes the grant record and the entries. when it applies for real,
   each step it actually runs appends its undo to the install record,
   `/var/lib/<package>/install-record.tsv`, and a changed grant record writes a `grant` entry to
@@ -391,7 +393,7 @@ the kill switch reads it to know what to remove.
 
   **a stopped revoke is never undone by an install.** the marker `agent-revoked-USER.json` (one per account) is separate from the install's
   `agent-quiesce.json` (which remembers the account's earlier state so a finished install can give it back). while the marker is
-  there, install refuses (exit 2, also in a dry run, and also when the kill switch stopped halfway), and the step that gives an
+  there, install refuses (exit 2, in a dry run too where the plan is printed with the refusal as a blocked step, and also when the kill switch stopped halfway), and the step that gives an
   account back (`release`) refuses too. install also refuses an account that is left expired when no install was in the middle of
   changing it. `sirven grant rollback` is refused (the grant record no longer matches the audit log). the owner brings the
   account back on purpose with `install.sh --reinstate`: it unlocks the account, removes the expiry, gives back the `/bin/bash`
