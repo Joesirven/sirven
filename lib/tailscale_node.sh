@@ -56,6 +56,7 @@ has_extended_access_list() {
     ! printf '%s\n' "$entries" | grep -Eq '^(default:|mask:|(user|group):[^:])' || return 0
   fi
   if [ "$(uname -s 2>/dev/null)" = Darwin ]; then
+    # shellcheck disable=SC2012 # only ls -e prints the access entries of a file on macOS; find cannot
     entries="$(ls -ldne "$file" 2>/dev/null | tail -n +2)" || true
     ! printf '%s\n' "$entries" | grep -Eq '^ *[0-9]+: ' || return 0
   fi
