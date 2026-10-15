@@ -78,11 +78,15 @@ case "${SIRVEN_HARNESS_IMAGE:-debian12}" in
 esac
 [ -n "$default_image" ] || exit 2
 for scenario in "$HARNESS_DIR"/scenarios/linux/*.sh; do
+  # a wholly empty filter selects every scenario. an empty element ("01,", "01,,02", ",01") names nothing and is skipped:
+  # matched as a pattern it would match every file name.
   selected=""
+  [ -n "$FILTER" ] || selected=yes
   rest="$FILTER,"
   while [ -n "$rest" ]; do
     f="${rest%%,*}"
     rest="${rest#*,}"
+    [ -n "$f" ] || continue
     case "$scenario" in *"$f"*) selected=yes ;; esac
   done
   [ -n "$selected" ] || continue

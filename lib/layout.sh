@@ -89,14 +89,17 @@ layout_remove_ssh_folder() {
 # layout_mail_spool_removable USER: print the mail spool files of USER that this package may remove, one per line.
 # a file qualifies only when it is a plain file (never a link), owned by USER, and empty: that is what the account
 # creation tool leaves behind on Fedora (mode 660, group mail). a spool with mail in it, or one owned by someone else,
-# is not ours and is never listed. both spool locations are looked at; one is usually a link to the other, which the
-# plain-file test steps over.
+# is not ours and is never listed. both spool locations are looked at. /var/mail is usually a link to /var/spool/mail,
+# and the link test looks only at the last part of a path, so both paths can name one file: that file is listed once.
 layout_mail_spool_removable() {
-  local user="$1" path
+  local user="$1" path listed=""
   for path in "$(rooted "/var/spool/mail/$user")" "$(rooted "/var/mail/$user")"; do
     # ls reads the owner's name the same way on linux and macos, unlike stat
     # shellcheck disable=SC2012
     if [ -f "$path" ] && [ ! -L "$path" ] && [ ! -s "$path" ] && [ "$(ls -ld -- "$path" | awk '{ print $3 }')" = "$user" ]; then
+      # same device and inode as the file already listed: the same file reached through the other path
+      if [ -n "$listed" ] && [ "$path" -ef "$listed" ]; then continue; fi
+      listed="${listed:-$path}"
       printf '%s\n' "$path"
     fi
   done

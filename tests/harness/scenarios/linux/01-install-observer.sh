@@ -12,6 +12,14 @@ check_exit "install observer on /srv/app applies" 0 bash install.sh --yes --leve
 check "install says it applied 26 steps (24 and the two that stop and give back the agent's account)" grep -q 'applied 26 steps' <<< "$LAST_OUTPUT"
 
 check "service user agent exists" id -u agent
+# Fedora's account tool gives every new account an empty mail spool, Debian and Ubuntu give none. the install removes the service
+# user's on every image, so the check runs everywhere; it only counts where the image makes a spool, which neighbor (made above by
+# the same tool) shows.
+if [ -e /var/spool/mail/neighbor ]; then
+  check "service user's mail spool is gone after the install (this image makes one)" world_mail_spool_gone agent
+else
+  skip "service user's mail spool gone after the install" "this image's account tool makes no mail spool"
+fi
 check "service user is not an administrator" bash -c '! id -nG agent | tr " " "\n" | grep -qx -e sudo -e wheel -e admin'
 check "password login is off" bash -c '[ "$(getent shadow agent | cut -d: -f2)" = "*" ]'
 check "ssh folder is 0700 and owned by agent" bash -c '[ "$(stat -c "%a %U" /home/agent/.ssh)" = "700 agent" ]'

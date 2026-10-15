@@ -29,6 +29,13 @@ test_an_empty_plain_spool_owned_by_the_user_is_listed_and_removed() {
   layout_mail_spool_gone "$ME" || fail "the spool is not reported gone after removal"
 }
 
+test_a_spool_reached_through_the_link_is_listed_once() {
+  # /var/mail links to /var/spool/mail, so both paths name the same empty file: one line, one removal
+  setup_spool_root
+  : > "$PREFIX/var/spool/mail/$ME"
+  assert_eq "$PREFIX/var/spool/mail/$ME" "$(layout_mail_spool_removable "$ME")"
+}
+
 test_a_spool_with_mail_in_it_is_kept() {
   setup_spool_root
   printf 'a message\n' > "$PREFIX/var/spool/mail/$ME"
