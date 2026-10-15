@@ -15,15 +15,27 @@
 # MARKER names, and only when this machine's login is still that node with the tag. a login sirven did not
 # make is never logged out, and no other node of the tailnet is touched: logout acts on this machine only.
 #
-# the auth key comes from the environment, SIRVEN_TAILSCALE_AUTHKEY or TAILSCALE_AUTHKEY, or else from
-# KEY_FILE, which must be a plain file owned by root (whoever runs this, when not root) that no other account can read or
-# write: mode 0600 and no extended access control list (an access entry for another account, which the mode bits can hide). it is never put on a command line: tailscale reads it from a private temporary file. whatever
-# tailscale prints is shown with the key blanked out.
+# the auth key comes from KEY_FILE (the safer way), which must be a plain file owned by root (whoever runs this, when not root)
+# that no other account can read or write: mode 0600, one name only (a hard link is refused, because the other name may sit where
+# others can read it) and no extended access control list (an access entry for another account, which the mode bits can hide).
+# or else from the environment, SIRVEN_TAILSCALE_AUTHKEY or TAILSCALE_AUTHKEY, which this script takes into variables of its own
+# and unsets before it starts any other process, so no process it starts inherits them. unsetting cannot scrub the block of the
+# environment that this process (and whoever started it) was given, which root can read in /proc/<process number>/environ for as
+# long as the process runs; a key file is the only route that never puts the key in an environment. the key is never put on a
+# command line: tailscale reads it from a private temporary file. whatever tailscale prints is shown with the key blanked out.
 #
 # the tailscale command is found on the search path. SIRVEN_TAILSCALE names another one for the tests (not honored as root).
 # exit status: 0 done (or nothing to do), 1 failed, 2 refused before any change.
 
 set -uo pipefail
+
+# the first thing this script does, before any process of its own: take the key out of the environment into variables that are
+# not exported, so no process this script starts (hostname, tailscale, python) is given it. a variable of the same name that the
+# caller exported is dropped first, so the new one is not exported either.
+unset NODE_ENV_SIRVEN_KEY NODE_ENV_PLAIN_KEY
+NODE_ENV_SIRVEN_KEY="${SIRVEN_TAILSCALE_AUTHKEY:-}"
+NODE_ENV_PLAIN_KEY="${TAILSCALE_AUTHKEY:-}"
+unset SIRVEN_TAILSCALE_AUTHKEY TAILSCALE_AUTHKEY
 
 TAILSCALE_NODE_TAG="tag:agent"
 TAILSCALE_NODE_WAIT="${SIRVEN_TAILSCALE_WAIT:-60}"
@@ -64,15 +76,16 @@ has_extended_access_list() {
 }
 
 # key_file_problem FILE: why FILE may not be read as the auth key, or nothing when it may (or is not there at all).
-# a key file must be a plain file (not a link), owned by root (by whoever runs this, when that is not root, which only the tests do),
+# a key file must be a plain file (not a link, one name only), owned by root (by whoever runs this, when that is not root, which only the tests do),
 # with no extended access list and no permission for the group or for anyone else: a file others can write picks the tailnet this
 # machine joins, and a file others can read leaks the key.
 key_file_problem() {
-  local file="$1" listing mode owner
+  local file="$1" listing mode owner links
   [ -e "$file" ] || [ -L "$file" ] || return 0
   listing="$(ls -ldn "$file" 2>/dev/null)" || { printf 'it cannot be examined'; return 0; }
   mode="$(printf '%s' "$listing" | cut -c1-10)"
   owner="$(printf '%s' "$listing" | awk '{print $3}')"
+  links="$(printf '%s' "$listing" | awk '{print $2}')"
   case "$mode" in
     -*) ;;
     *) printf 'it is not a plain file (a link or a folder is not used)'; return 0 ;;
@@ -81,6 +94,12 @@ key_file_problem() {
     printf 'it is owned by account number %s, not by root' "$owner"
     return 0
   fi
+  # a second name for the same file (a hard link) passes the owner and mode checks above, and the other name may sit in a folder
+  # others can read
+  case "$links" in
+    1) ;;
+    *) printf 'it has more than one name (%s hard links): another name for the same file may be readable by others; copy the key into a new file (umask 077; cat KEY_FILE > NEW_FILE), mode 0600, and remove the old names' "$links"; return 0 ;;
+  esac
   if has_extended_access_list "$file"; then
     printf 'it has an extended access control list, an access entry beyond the owner, group and other bits (the mode bits do not show who it lets in); remove it (setfacl -b on Linux, chmod -N on macOS) and keep the mode 0600'
     return 0
@@ -228,10 +247,10 @@ node_prepare() {
   case "$NODE_HOSTNAME" in -* | *[!a-z0-9-]*) refuse "the host name '$NODE_HOSTNAME' is not a plain lowercase name (letters, digits, hyphens)." ;; esac
   NODE_COMMAND="$(node_command)"
   [ -n "$NODE_COMMAND" ] || refuse "tailscale is not installed on this machine. $(install_hint)"
-  if [ -n "${SIRVEN_TAILSCALE_AUTHKEY:-}" ]; then
-    NODE_KEY="$SIRVEN_TAILSCALE_AUTHKEY"; NODE_ORIGIN="SIRVEN_TAILSCALE_AUTHKEY"
-  elif [ -n "${TAILSCALE_AUTHKEY:-}" ]; then
-    NODE_KEY="$TAILSCALE_AUTHKEY"; NODE_ORIGIN="TAILSCALE_AUTHKEY"
+  if [ -n "$NODE_ENV_SIRVEN_KEY" ]; then
+    NODE_KEY="$NODE_ENV_SIRVEN_KEY"; NODE_ORIGIN="SIRVEN_TAILSCALE_AUTHKEY"
+  elif [ -n "$NODE_ENV_PLAIN_KEY" ]; then
+    NODE_KEY="$NODE_ENV_PLAIN_KEY"; NODE_ORIGIN="TAILSCALE_AUTHKEY"
   elif [ -n "$key_file" ]; then
     problem="$(key_file_problem "$key_file")"
     [ -z "$problem" ] || refuse "the auth key file $key_file is not used: $problem."
@@ -240,7 +259,7 @@ node_prepare() {
     fi
   fi
   [ -n "$NODE_KEY" ] || refuse "there is no Tailscale auth key. save it as ${key_file:-the key file}, owned by root, mode 0600 (the safer way), or put it in the environment as SIRVEN_TAILSCALE_AUTHKEY (sudo --preserve-env=SIRVEN_TAILSCALE_AUTHKEY ..., which works only if the sudo policy allows it). make it in the Tailscale admin console, settings, keys: tagged $TAILSCALE_NODE_TAG, pre-approved."
-  unset SIRVEN_TAILSCALE_AUTHKEY TAILSCALE_AUTHKEY
+  NODE_ENV_SIRVEN_KEY="" NODE_ENV_PLAIN_KEY=""
   case "$NODE_KEY" in *[!A-Za-z0-9_-]*) refuse "the auth key in $NODE_ORIGIN has characters a Tailscale key never has (a carriage return from Windows line ends, for one); it is not used." ;; esac
 
   read_status "$NODE_COMMAND"

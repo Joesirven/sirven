@@ -533,6 +533,8 @@ finish() {
 }
 
 main() {
+  # first, before anything starts a process: the Tailscale auth key leaves the exported environment (see lib/tailscale.sh)
+  tailscale_hold_key
   parse_arguments "$@"
   setup_from_environment
   OPERATING_SYSTEM="$(detect_os)"

@@ -254,7 +254,7 @@ test_tailscale_key_available_applies_the_same_check_to_the_key_file() {
   assert_status 1 tailscale_key_available
   rm "$file"
   assert_status 1 tailscale_key_available
-  SIRVEN_TAILSCALE_AUTHKEY="$SENTINEL_KEY" assert_status 0 tailscale_key_available
+  HELD_SIRVEN_TAILSCALE_AUTHKEY="$SENTINEL_KEY" assert_status 0 tailscale_key_available
 }
 
 test_check_makes_the_refusals_of_the_join_and_changes_nothing() {
@@ -433,7 +433,7 @@ test_an_apply_without_a_key_is_refused_before_any_change() {
   ADOPT_TAILSCALE=unanswered assert_status 2 tailscale_refuse_before_apply
   assert_contains "$CAPTURED_STDERR" "tailscaled does not answer"
   # a key, an adopted agent node, a dry run, a fake root, or another transport: no refusal
-  SIRVEN_TAILSCALE_AUTHKEY="$SENTINEL_KEY" assert_status 0 tailscale_refuse_before_apply
+  HELD_SIRVEN_TAILSCALE_AUTHKEY="$SENTINEL_KEY" assert_status 0 tailscale_refuse_before_apply
   ADOPT_TAILSCALE=agent_node assert_status 0 tailscale_refuse_before_apply
   DRY_RUN=yes assert_status 0 tailscale_refuse_before_apply
   PREFIX=/tmp/fake assert_status 0 tailscale_refuse_before_apply
@@ -448,10 +448,10 @@ test_an_apply_that_the_join_would_refuse_late_is_refused_before_any_change() {
   CONFIG_DIR="$TEST_TMP/etc-sirven"
   mkdir -p "$CONFIG_DIR"
   # a tailscale too old to read a key file, and a key with a stray carriage return: refused up front, with "nothing was changed" true
-  FAKE_TS_OLD=yes SIRVEN_TAILSCALE_AUTHKEY="$SENTINEL_KEY" assert_status 2 tailscale_refuse_before_apply
+  FAKE_TS_OLD=yes HELD_SIRVEN_TAILSCALE_AUTHKEY="$SENTINEL_KEY" assert_status 2 tailscale_refuse_before_apply
   assert_contains "$CAPTURED_STDERR" "cannot read an auth key from a file"
   assert_contains "$CAPTURED_STDERR" "nothing was changed"
-  SIRVEN_TAILSCALE_AUTHKEY="$(printf '%s\r' "$SENTINEL_KEY")" assert_status 2 tailscale_refuse_before_apply
+  HELD_SIRVEN_TAILSCALE_AUTHKEY="$(printf '%s\r' "$SENTINEL_KEY")" assert_status 2 tailscale_refuse_before_apply
   assert_contains "$CAPTURED_STDERR" "characters a Tailscale key never has"
   # a key file that others can write is named as the reason, not reported as "no key"
   printf '%s\n' "$SENTINEL_KEY" > "$CONFIG_DIR/tailscale-auth-key"
@@ -531,6 +531,102 @@ SHIM
   assert_not_contains "$(cat "$TEST_TMP/rm-environment-names")" "TAILSCALE_AUTHKEY" "the environment of the step after the join"
   assert_no_file "$root/etc/sirven/tailscale-auth-key"
   assert_key_nowhere "$root" "$TEST_TMP/rm-environment-names"
+}
+
+# ---- the key is not in the environment of any step, before the join or after it, whether or not the join runs
+
+# stand-ins for the commands the installer's steps run (before the join: the service user's folders, the access control, the
+# layout), each recording the NAMES (never the values) of the variables in the environment it was started with, then running the
+# real command. sets SHIM_BIN to the folder that holds them and SHIM_LOG to the file they write (called directly, not in a substitution,
+# so the variables stay).
+shim_commands_that_record_their_environment() {
+  local bin="$TEST_TMP/shims" name real
+  mkdir -p "$bin"
+  SHIM_BIN="$bin"
+  SHIM_LOG="$TEST_TMP/child-environment-names"
+  : > "$SHIM_LOG"
+  for name in mkdir chmod chown install ln touch cp mv rm id; do
+    real="$(command -v "$name")" || continue
+    cat > "$bin/$name" <<SHIM
+#!/bin/sh
+printf '%s: %s\\n' "$name" "\$(env | /usr/bin/sed 's/=.*//' | /usr/bin/tr '\\n' ' ')" >> "$SHIM_LOG"
+exec "$real" "\$@"
+SHIM
+    chmod 755 "$bin/$name"
+  done
+}
+
+test_no_step_before_the_join_starts_a_child_that_inherits_the_key() {
+  local root="$TEST_TMP/root"
+  shim_commands_that_record_their_environment
+  # the held names are exported by the caller with junk in them: they must not become exported copies of the key
+  PATH="$SHIM_BIN:$PATH" SIRVEN_TAILSCALE_AUTHKEY="$SENTINEL_KEY" TAILSCALE_AUTHKEY="$SENTINEL_KEY" \
+    HELD_SIRVEN_TAILSCALE_AUTHKEY=junk HELD_TAILSCALE_AUTHKEY=junk \
+    assert_status 0 install_sh --prefix "$root" --level observer --transport tailscale
+  assert_contains "$(cat "$SHIM_LOG")" "mkdir:" "the steps before the join started children (else this test proves nothing)"
+  assert_contains "$(cat "$SHIM_LOG")" "chmod:"
+  assert_not_contains "$(cat "$SHIM_LOG")" "AUTHKEY" "the environment of every child the steps started"
+  assert_key_nowhere "$root" "$SHIM_LOG"
+}
+
+test_when_the_machine_is_already_the_agent_node_no_later_child_sees_the_key() {
+  setup_node
+  local root="$TEST_TMP/root"
+  fake_login Running node-1 '"tag:agent"'
+  shim_commands_that_record_their_environment
+  # the join is skipped here, and the old code returned before it forgot the key
+  PATH="$SHIM_BIN:$PATH" SIRVEN_OS_OVERRIDE=linux SIRVEN_TAILSCALE="$FAKE" SIRVEN_BB=none SIRVEN_TAILSCALE_AUTHKEY="$SENTINEL_KEY" TAILSCALE_AUTHKEY="$SENTINEL_KEY" \
+    assert_status 0 "$REPO_DIR/install.sh" --prefix "$root" --level observer --transport tailscale --owner example
+  assert_contains "$CAPTURED_STDOUT" "this machine is already the agent node"
+  assert_not_contains "$(calls)" "up --auth-key"
+  assert_contains "$(cat "$SHIM_LOG")" "chmod:" "children were started (else this test proves nothing)"
+  assert_not_contains "$(cat "$SHIM_LOG")" "AUTHKEY"
+  assert_key_nowhere "$root" "$SHIM_LOG"
+}
+
+# the key still gets to the join: the environment route works, and the saved key file is used when there is no variable
+test_the_held_key_reaches_the_join_and_only_the_join() {
+  local joiner="$TEST_TMP/joiner"
+  cat > "$joiner" <<SHIM
+#!/bin/sh
+# stands in for tailscale_node.sh: records whether the two variables were handed to it, never their values
+printf '%s|%s\\n' "\${SIRVEN_TAILSCALE_AUTHKEY:+sirven-named}" "\${TAILSCALE_AUTHKEY:+plain-named}" > "$TEST_TMP/handed"
+SHIM
+  chmod 755 "$joiner"
+  . "$REPO_DIR/install.sh"
+  ROOT_DIR="$REPO_DIR"
+  SIRVEN_TAILSCALE_AUTHKEY="$SENTINEL_KEY" TAILSCALE_AUTHKEY="$SENTINEL_KEY" tailscale_hold_key
+  assert_eq "" "$(env | grep AUTHKEY || true)" "nothing left in the environment after tailscale_hold_key"
+  assert_eq "$SENTINEL_KEY" "$HELD_SIRVEN_TAILSCALE_AUTHKEY"
+  assert_eq "$SENTINEL_KEY" "$HELD_TAILSCALE_AUTHKEY"
+  # the action the join step runs, with the script swapped for the stand-in
+  eval "SIRVEN_TAILSCALE_AUTHKEY=\"\${HELD_SIRVEN_TAILSCALE_AUTHKEY:-}\" TAILSCALE_AUTHKEY=\"\${HELD_TAILSCALE_AUTHKEY:-}\" sh $joiner"
+  assert_eq "sirven-named|plain-named" "$(cat "$TEST_TMP/handed")"
+  # and the exported names are not set in this shell afterwards
+  assert_eq "" "$(env | grep AUTHKEY || true)"
+}
+
+# ---- a key file with more than one name (a hard link)
+
+test_a_hard_linked_key_file_is_refused() {
+  setup_node
+  printf '%s\n' "$SENTINEL_KEY" > "$TEST_TMP/key-file"
+  chmod 600 "$TEST_TMP/key-file"
+  assert_status 0 bash "$NODE" key-file-check "$TEST_TMP/key-file"
+  ln "$TEST_TMP/key-file" "$TEST_TMP/other-name"
+  assert_status 2 bash "$NODE" key-file-check "$TEST_TMP/key-file"
+  assert_contains "$CAPTURED_STDERR" "more than one name (2 hard links)"
+  assert_status 2 bash "$NODE" join "$MARKER" agent "$TEST_TMP/key-file"
+  assert_contains "$CAPTURED_STDERR" "more than one name"
+  assert_contains "$CAPTURED_STDERR" "nothing was changed"
+  assert_status 2 bash "$NODE" check agent "$TEST_TMP/key-file"
+  assert_not_contains "$(calls)" "up --auth-key"
+  assert_no_file "$MARKER"
+  assert_key_nowhere "$STATE" "$FAKE_TS_DIR"
+  # with the other name gone, the same file is used
+  rm "$TEST_TMP/other-name"
+  assert_status 0 bash "$NODE" key-file-check "$TEST_TMP/key-file"
+  assert_status 0 bash "$NODE" join "$MARKER" agent "$TEST_TMP/key-file"
 }
 
 # ---- a key file with an access entry for another account
