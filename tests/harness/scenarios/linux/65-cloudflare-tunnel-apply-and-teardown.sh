@@ -393,5 +393,25 @@ check "it said what it left alone" bash -c 'grep -q "is left alone" <<< "$0"' "$
 check "the tunnel and the alias record of the account, which the record names by number, are taken away" api_state_empty
 rm -f /root/victim-unit /root/victim-config /root/victim-credentials /tmp/fake-systemd/cloudflared.service.active /tmp/fake-systemd/cloudflared.service.enabled
 
+# 13. a hostname added to the config by hand does not survive an apply, which needs no token for it, and the running service is restarted
+reset_machine
+SIRVEN_CLOUDFLARE_API_TOKEN="$TOKEN" install_cf --reinstate >/dev/null 2>&1
+cp /etc/sirven/cloudflared.yml /tmp/config-as-written
+python3 -I - <<'PY'
+text = open("/etc/sirven/cloudflared.yml").read().replace("  - service: http_status:404", "  - hostname: evil.example.test\n    service: ssh://localhost:22\n  - service: http_status:404")
+open("/etc/sirven/cloudflared.yml", "w").write(text)
+PY
+check "setup: the config has a hostname nobody asked for" grep -q evil.example.test /etc/sirven/cloudflared.yml
+calls_before_repair="$(wc -l < /tmp/fake-api/calls.log)"
+: > /tmp/fake-systemd/calls.log
+check_exit "a plan of the apply with no token says the config will be written again and asks for no token" 0 install_cf --dry-run
+check "it says so" bash -c 'grep -q "writes them again" <<< "$0" && ! grep -q "give the installer one Cloudflare API token" <<< "$0"' "$LAST_OUTPUT"
+check_exit "an apply with no token at all exits 0" 0 install_cf
+check "it wrote the config again: exactly the text sirven writes, mode 0600, no hostname nobody asked for" bash -c 'cmp -s /tmp/config-as-written /etc/sirven/cloudflared.yml && [ "$(stat -c %a /etc/sirven/cloudflared.yml)" = 600 ] && ! grep -q evil /etc/sirven/cloudflared.yml' 
+check "the running service was restarted, and the API was sent nothing" bash -c 'grep -q "restart sirven-cloudflared.service" /tmp/fake-systemd/calls.log && [ "$(wc -l < /tmp/fake-api/calls.log)" = "$0" ]' "$calls_before_repair"
+check_exit "another apply keeps it as it is" 0 install_cf
+check "and still sends nothing" bash -c '[ "$(wc -l < /tmp/fake-api/calls.log)" = "$0" ] && [ "$(api_value tunnels)" = 1 ]' "$calls_before_repair"
+SIRVEN_CLOUDFLARE_API_TOKEN="$TOKEN" uninstall_cf >/dev/null 2>&1
+
 # nothing of the stand-ins or the scenario's own state is left in a place the next scenario would see: the container is thrown away
 finish

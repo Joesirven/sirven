@@ -61,6 +61,8 @@ API_SCRIPT="$SELF_DIR/cloudflare_api.py"
 TOKEN=""
 TOKEN_ORIGIN=""
 TOKEN_PROBLEM=""
+CONFIG_REWRITTEN=no
+CLOUDFLARED=""
 FAILED=0
 
 refuse() {
@@ -303,25 +305,49 @@ service_active() {
   [ -n "$command" ] && "$command" is-active --quiet "$1" 2>/dev/null
 }
 
-# complete: the record, its files and the running service all agree that the tunnel is made. read only, no token.
+# complete: the record, its files and the running service all agree that the tunnel is made, and the files are exactly what sirven writes
+# (the config and the unit are compared with the text sirven would write now, so a hostname added to the config by hand, or a unit that
+# was changed, is not "kept as it is"). the paths given (--config and the like) must be the recorded ones. read only, no token.
 complete() {
-  local field
+  local field config credentials unit service hostname tunnel_id cloudflared
   [ -f "$MARKER" ] || return 1
   for field in tunnel_id record_id account_id hostname config credentials unit service; do
     [ -n "$(record_get "$field")" ] || return 1
   done
-  [ -s "$(record_get credentials)" ] && [ -s "$(record_get config)" ] && [ -s "$(record_get unit)" ] || return 1
-  service_active "$(record_get service)"
+  config="$(record_get config)"; credentials="$(record_get credentials)"; unit="$(record_get unit)"; service="$(record_get service)"
+  [ -z "$OPT_CONFIG" ] || [ "$OPT_CONFIG" = "$config" ] || return 1
+  [ -z "$OPT_CREDENTIALS" ] || [ "$OPT_CREDENTIALS" = "$credentials" ] || return 1
+  [ -z "$OPT_UNIT" ] || [ "$OPT_UNIT" = "$unit" ] || return 1
+  [ -z "$OPT_SERVICE" ] || [ "$OPT_SERVICE" = "$service" ] || return 1
+  [ -s "$credentials" ] && [ -s "$config" ] && [ -s "$unit" ] || return 1
+  hostname="$(record_get hostname)"; tunnel_id="$(record_get tunnel_id)"
+  [ "$(cat "$config")" = "$(config_text "$tunnel_id" "$credentials" "$hostname")" ] || return 1
+  cloudflared="$(cloudflared_command)"
+  [ -n "$cloudflared" ] || return 1
+  [ "$(cat "$unit")" = "$(unit_text "$cloudflared" "$config")" ] || return 1
+  service_active "$service"
 }
 
-# first_look_local HOSTNAME ACCOUNT ZONE: every reason 'up' would refuse that needs no network, found before any change. refuses (says why,
+# remote_made: the tunnel and the alias record are made in the account and recorded, and the credentials are on this machine, so what is
+# missing or different is only local (the config, the unit, the running service) and can be written again with no token and no request.
+remote_made() {
+  local field credentials
+  [ -f "$MARKER" ] || return 1
+  for field in tunnel_id record_id account_id hostname; do
+    [ -n "$(record_get "$field")" ] || return 1
+  done
+  credentials="${OPT_CREDENTIALS:-$(record_get credentials)}"
+  [ -n "$credentials" ] && [ -s "$credentials" ]
+}
+
+# first_look_local HOSTNAME ACCOUNT ZONE [no]: every reason 'up' would refuse that needs no network, found before any change. refuses (says why,
 # exit 2) or returns. this is what the installer asks before it prints the plan: nothing here is sent anywhere.
 first_look_local() {
-  local command hostname="$1" account="$2" zone="$3"
+  local command hostname="$1" account="$2" zone="$3" needs_token="${4:-yes}"
   valid_hostname "$hostname" || refuse "the hostname '$hostname' is not a plain lowercase host name with a zone in it (like agent.example.org)."
   [[ "$account" =~ ^[0-9a-f]{32}$ ]] || refuse "the account number '$account' is not 32 hexadecimal characters (dashboard, any zone, overview, the account number on the right)."
   [ -z "$zone" ] || [[ "$zone" =~ ^[0-9a-f]{32}$ ]] || refuse "the zone number '$zone' is not 32 hexadecimal characters."
-  [ -n "$TOKEN" ] || refuse "there is no Cloudflare API token. $(token_hint)"
+  [ "$needs_token" = no ] || [ -n "$TOKEN" ] || refuse "there is no Cloudflare API token. $(token_hint)"
   command="$(cloudflared_command)"
   [ -n "$command" ] || refuse "cloudflared is not installed on this machine. $(install_hint)"
   systemd_running || refuse "systemd does not run on this machine, and the tunnel service is a systemd unit. sirven starts the tunnel only under systemd. run again with --transport none, or start the tunnel yourself."
@@ -442,9 +468,16 @@ for r in json.load(sys.stdin):
 }
 
 cmd_applied() {
-  MARKER="${1:-}"
-  [ -n "$MARKER" ] || refuse "applied needs a record path."
+  # applied MARKER (the old form) or applied --marker F [--config F --credentials F --unit F --service NAME]
+  case "${1:-}" in -* | '') ;; *) set -- --marker "$@" ;; esac
+  parse_options "$@"
   complete
+}
+
+# made: the tunnel and the alias record are made and recorded, and the credentials are here (what is missing is only local)
+cmd_made() {
+  parse_options "$@"
+  remote_made
 }
 
 cmd_token_file_check() {
@@ -461,41 +494,97 @@ cmd_token_file_check() {
 
 # check: every refusal 'up' can make that needs no network. nothing is sent anywhere
 cmd_check() {
+  local needs_token=yes
   parse_options "$@"
   find_token "$OPT_TOKEN_FILE"
-  require_usable_token
   same_target "$OPT_HOSTNAME" "$OPT_ACCOUNT"
   if complete; then return 0; fi
-  first_look_local "$OPT_HOSTNAME" "$OPT_ACCOUNT" "$OPT_ZONE"
+  # a tunnel that is made needs no token to have its config and service written again
+  if remote_made; then needs_token=no; else require_usable_token; fi
+  first_look_local "$OPT_HOSTNAME" "$OPT_ACCOUNT" "$OPT_ZONE" "$needs_token"
 }
 
 # check-account: the refusals 'up' can make that need the Cloudflare API. the installer runs it after the owner has confirmed the plan
 cmd_check_account() {
   parse_options "$@"
   find_token "$OPT_TOKEN_FILE"
-  require_usable_token
   same_target "$OPT_HOSTNAME" "$OPT_ACCOUNT"
-  if complete; then return 0; fi
+  if complete || remote_made; then return 0; fi
+  require_usable_token
   first_look_local "$OPT_HOSTNAME" "$OPT_ACCOUNT" "$OPT_ZONE"
   first_look_account "$OPT_HOSTNAME" "$OPT_ZONE" "$OPT_ACCOUNT"
 }
 
+# write_config TUNNEL_ID: the config is exactly the text sirven writes (one hostname to this machine's SSH server, every other name 404),
+# written if the file is anything else, so a hostname added by hand does not survive an apply. cloudflared checks it. sets
+# CONFIG_REWRITTEN=yes when a config that was there was not that text.
+write_config() {
+  local expected current="" found
+  expected="$(config_text "$1" "$OPT_CREDENTIALS" "$OPT_HOSTNAME")"
+  [ ! -f "$OPT_CONFIG" ] || current="$(cat "$OPT_CONFIG")"
+  if [ "$current" != "$expected" ]; then
+    if [ -n "$current" ]; then
+      printf 'the config %s is not what sirven writes now (a hostname added by hand, say), so it is written again.\n' "$OPT_CONFIG"
+      CONFIG_REWRITTEN=yes
+    fi
+    printf '%s\n' "$expected" | write_file "$OPT_CONFIG" 0600 || fail "could not write $OPT_CONFIG."
+  fi
+  chmod 0600 "$OPT_CONFIG" 2>/dev/null || true
+  if ! found="$("$CLOUDFLARED" tunnel --config "$OPT_CONFIG" ingress validate 2>&1)"; then
+    fail "cloudflared does not accept the config it was just given ($OPT_CONFIG): $found"
+  fi
+}
+
+# write_service: the unit is exactly the text sirven writes, the service is enabled and runs. a running service whose config or unit was
+# just written again is restarted, because 'enable --now' does not reload one that is already running.
+write_service() {
+  local expected current="" was_active=no changed="$CONFIG_REWRITTEN"
+  expected="$(unit_text "$CLOUDFLARED" "$OPT_CONFIG")"
+  [ ! -f "$OPT_UNIT" ] || current="$(cat "$OPT_UNIT")"
+  if ! service_active "$OPT_SERVICE"; then was_active=no; else was_active=yes; fi
+  if [ "$current" != "$expected" ]; then
+    if [ -n "$current" ]; then
+      printf 'the unit %s is not what sirven writes now, so it is written again.\n' "$OPT_UNIT"
+      changed=yes
+    fi
+    printf '%s\n' "$expected" | write_file "$OPT_UNIT" 0644 || fail "could not write $OPT_UNIT."
+  fi
+  systemctl_command_run daemon-reload || fail "systemctl daemon-reload failed."
+  systemctl_command_run enable --now "$OPT_SERVICE" || fail "could not start $OPT_SERVICE. the record names the tunnel; fix the cause above and run again, or undo it with uninstall."
+  if [ "$changed" = yes ] && [ "$was_active" = yes ]; then
+    systemctl_command_run restart "$OPT_SERVICE" || fail "could not restart $OPT_SERVICE after writing its config or unit again. see: journalctl -u $OPT_SERVICE"
+  fi
+  service_active "$OPT_SERVICE" || fail "$OPT_SERVICE was started but is not running. see: journalctl -u $OPT_SERVICE"
+}
+
 cmd_up() {
-  local name tunnel_id zone zone_found record_id cloudflared target created found made_record existing
+  local name tunnel_id zone zone_found record_id target created found made_record existing
   parse_options "$@"
   for name in "$OPT_CONFIG" "$OPT_CREDENTIALS" "$OPT_UNIT" "$OPT_SERVICE" "$OPT_USER" "$OPT_HOSTNAME" "$OPT_ACCOUNT"; do
     [ -n "$name" ] || refuse "up needs --config, --credentials, --unit, --service, --user, --hostname and --account."
   done
   [ -d "$(dirname "$MARKER")" ] || refuse "the folder for the record, $(dirname "$MARKER"), is not there."
   find_token "$OPT_TOKEN_FILE"
-  require_usable_token
   same_target "$OPT_HOSTNAME" "$OPT_ACCOUNT"
+  CONFIG_REWRITTEN=no
   if complete; then
     printf 'the tunnel %s is already made and its service %s runs: kept as it is.\n' "$(record_get tunnel_name)" "$OPT_SERVICE"
     return 0
   fi
+  CLOUDFLARED="$(cloudflared_command)"
+  if remote_made; then
+    # the tunnel and the alias record are made and the credentials are here; what is missing or different is the config, the unit or the
+    # running service. they are written again, with no token and no request to the API
+    first_look_local "$OPT_HOSTNAME" "$OPT_ACCOUNT" "$OPT_ZONE" no
+    tunnel_id="$(record_get tunnel_id)"
+    record_set "config=$OPT_CONFIG" "credentials=$OPT_CREDENTIALS" "unit=$OPT_UNIT" "service=$OPT_SERVICE" || fail "could not write the record $MARKER."
+    write_config "$tunnel_id"
+    write_service
+    printf 'the tunnel %s is made; its config and its service are the ones sirven writes now (no token was needed). %s routes %s to ssh://localhost:22 (nothing else).\n' "$(record_get tunnel_name)" "$OPT_SERVICE" "$OPT_HOSTNAME"
+    return 0
+  fi
+  require_usable_token
   first_look "$OPT_HOSTNAME" "$OPT_ACCOUNT" "$OPT_ZONE"
-  cloudflared="$(cloudflared_command)"
   [ -n "$OPT_ZONE" ] && zone="$OPT_ZONE" || zone="$(record_get zone_id)"
   if [ -z "$zone" ]; then
     zone_found="$(api find-zone "$OPT_HOSTNAME")" || fail "could not find the zone of $OPT_HOSTNAME."
@@ -526,10 +615,7 @@ cmd_up() {
   fi
 
   # 3. the config: one hostname to this machine's SSH server, every other name 404
-  config_text "$tunnel_id" "$OPT_CREDENTIALS" "$OPT_HOSTNAME" | write_file "$OPT_CONFIG" 0600 || fail "could not write $OPT_CONFIG."
-  if ! found="$("$cloudflared" tunnel --config "$OPT_CONFIG" ingress validate 2>&1)"; then
-    fail "cloudflared does not accept the config it was just given ($OPT_CONFIG): $found"
-  fi
+  write_config "$tunnel_id"
 
   # 4. the alias record, only after checking the hostname is free or ours
   target="$tunnel_id.cfargotunnel.com"
@@ -552,10 +638,7 @@ print(mine[0] if mine else ("other" if rows else ""))' "$target")"
   fi
 
   # 5. the service
-  unit_text "$cloudflared" "$OPT_CONFIG" | write_file "$OPT_UNIT" 0644 || fail "could not write $OPT_UNIT."
-  systemctl_command_run daemon-reload || fail "systemctl daemon-reload failed."
-  systemctl_command_run enable --now "$OPT_SERVICE" || fail "could not start $OPT_SERVICE. the record names the tunnel; fix the cause above and run again, or undo it with uninstall."
-  service_active "$OPT_SERVICE" || fail "$OPT_SERVICE was started but is not running. see: journalctl -u $OPT_SERVICE"
+  write_service
   printf 'the tunnel %s runs as %s and routes %s to ssh://localhost:22 (nothing else). recorded in %s.\n' "$name" "$OPT_SERVICE" "$OPT_HOSTNAME" "$MARKER"
 }
 
@@ -654,9 +737,10 @@ cmd_down() {
 case "${1:-}" in
   up) shift; cmd_up "$@" ;;
   down) shift; cmd_down "$@" ;;
+  made) shift; cmd_made "$@" ;;
   check) shift; cmd_check "$@" ;;
   check-account) shift; cmd_check_account "$@" ;;
   applied) shift; cmd_applied "$@" ;;
   token-file-check) shift; cmd_token_file_check "$@" ;;
-  *) printf 'usage: cloudflare_tunnel.sh up OPTIONS | down OPTIONS | check OPTIONS | check-account OPTIONS | applied MARKER | token-file-check FILE\n' >&2; exit 64 ;;
+  *) printf 'usage: cloudflare_tunnel.sh up OPTIONS | down OPTIONS | check OPTIONS | check-account OPTIONS | applied OPTIONS | made OPTIONS | token-file-check FILE\n' >&2; exit 64 ;;
 esac

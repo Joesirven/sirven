@@ -142,6 +142,77 @@ test_the_account_keeps_a_tunnel_managed_from_this_machine() {
   assert_contains "$(cat "$API_DIR/state.json")" '"config_src": "local"'
 }
 
+# a re-apply compares the config with the text sirven writes and writes it again: a hostname added by hand does not survive it, and the
+# running service is restarted so it stops serving it. the tunnel and the alias record are made, so it needs no token and sends no request
+test_a_re_apply_writes_a_config_edited_by_hand_again_without_a_token() {
+  setup_tunnel
+  assert_status 0 up
+  local expected calls
+  expected="$(cat "$CONFIG")"
+  calls="$(api_calls | wc -l | tr -d ' ')"
+  : > "$FAKE_SYSTEMD_DIR/calls.log"
+  python3 -I - "$CONFIG" "$HOST_NAME" <<'PY'
+import sys
+path, host = sys.argv[1:3]
+text = open(path).read().replace("  - service: http_status:404", "  - hostname: evil.example.test\n    service: ssh://localhost:22\n  - service: http_status:404")
+open(path, "w").write(text)
+PY
+  assert_contains "$(cat "$CONFIG")" "evil.example.test"
+  assert_status 1 bash "$HELPER" applied "$MARKER"
+  TOKEN_FOR_RUN="" assert_status 0 up
+  assert_contains "$CAPTURED_STDOUT" "is not what sirven writes now"
+  assert_not_contains "$CAPTURED_STDOUT" "kept as it is"
+  assert_eq "$expected" "$(cat "$CONFIG")" "the config is the text sirven writes"
+  assert_not_contains "$(cat "$CONFIG")" "evil.example.test"
+  assert_eq "-rw-------" "$(file_mode "$CONFIG")"
+  assert_contains "$(cat "$FAKE_SYSTEMD_DIR/calls.log")" "systemctl restart sirven-cloudflared.service" "the running service reads the new config"
+  assert_eq "$calls" "$(api_calls | wc -l | tr -d ' ')" "no request to the API"
+  assert_status 0 bash "$HELPER" applied "$MARKER"
+  # and now it is as it was: a second apply keeps it
+  TOKEN_FOR_RUN="" assert_status 0 up
+  assert_contains "$CAPTURED_STDOUT" "kept as it is"
+}
+
+test_a_re_apply_writes_a_unit_changed_by_hand_again_and_starts_a_stopped_service() {
+  setup_tunnel
+  assert_status 0 up
+  local expected
+  expected="$(cat "$UNIT")"
+  printf '%s\nExecStartPre=/bin/true\n' "$expected" > "$UNIT"
+  : > "$FAKE_SYSTEMD_DIR/calls.log"
+  TOKEN_FOR_RUN="" assert_status 0 up
+  assert_contains "$CAPTURED_STDOUT" "the unit $UNIT is not what sirven writes now"
+  assert_eq "$expected" "$(cat "$UNIT")"
+  assert_contains "$(cat "$FAKE_SYSTEMD_DIR/calls.log")" "systemctl restart sirven-cloudflared.service"
+  # a stopped service is started, not restarted
+  rm "$FAKE_SYSTEMD_DIR/sirven-cloudflared.service.active"
+  : > "$FAKE_SYSTEMD_DIR/calls.log"
+  TOKEN_FOR_RUN="" assert_status 0 up
+  assert_file_exists "$FAKE_SYSTEMD_DIR/sirven-cloudflared.service.active"
+  assert_not_contains "$(cat "$FAKE_SYSTEMD_DIR/calls.log")" "restart"
+  # the credentials are gone: the tunnel cannot be run, a new one is needed, and that needs the token
+  rm "$CREDENTIALS"
+  TOKEN_FOR_RUN="" assert_status 2 up
+  assert_contains "$CAPTURED_STDERR" "there is no Cloudflare API token"
+  assert_status 2 bash "$HELPER" check --marker "$MARKER" --hostname "$HOST_NAME" --account "$ACCOUNT" --config "$CONFIG" --credentials "$CREDENTIALS" --unit "$UNIT" --service sirven-cloudflared.service
+  assert_contains "$CAPTURED_STDERR" "there is no Cloudflare API token"
+}
+
+# what is made in the account needs no token to be made again locally: the first look says so, and asks the API nothing
+test_check_after_a_local_difference_needs_no_token_and_no_request() {
+  setup_tunnel
+  assert_status 0 up
+  local calls
+  calls="$(api_calls | wc -l | tr -d ' ')"
+  printf 'tunnel: x\n' > "$CONFIG"
+  assert_status 0 bash "$HELPER" made --marker "$MARKER" --credentials "$CREDENTIALS"
+  assert_status 0 bash "$HELPER" check --marker "$MARKER" --hostname "$HOST_NAME" --account "$ACCOUNT"
+  assert_status 0 bash "$HELPER" check-account --marker "$MARKER" --hostname "$HOST_NAME" --account "$ACCOUNT"
+  assert_eq "$calls" "$(api_calls | wc -l | tr -d ' ')"
+  rm "$MARKER"
+  assert_status 1 bash "$HELPER" made --marker "$MARKER" --credentials "$CREDENTIALS"
+}
+
 test_a_second_up_needs_no_token_and_changes_nothing() {
   setup_tunnel
   assert_status 0 up

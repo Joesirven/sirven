@@ -96,7 +96,15 @@ cloudflare_tunnel_script() {
 # cloudflare_applied: this machine's tunnel is made and its service runs (the record, its files and the service agree). read only,
 # needs no token.
 cloudflare_applied() {
-  bash "$ROOT_DIR/lib/cloudflare_tunnel.sh" applied "${PREFIX}$(cloudflare_marker_file)" >/dev/null 2>&1
+  bash "$ROOT_DIR/lib/cloudflare_tunnel.sh" applied --marker "${PREFIX}$(cloudflare_marker_file)" --config "${PREFIX}$(cloudflare_config_file)" \
+    --credentials "${PREFIX}$(cloudflare_credentials_file)" --unit "${PREFIX}$(cloudflare_unit_file)" --service "$CLOUDFLARE_SERVICE" >/dev/null 2>&1
+}
+
+# cloudflare_made_remote: the tunnel and the alias record are made and recorded and the credentials are here, but the config, the unit or
+# the running service is not exactly what this installer writes (cloudflare_applied is false). what is different is only local: a re-apply
+# writes it again with no token and no request to the API. read only.
+cloudflare_made_remote() {
+  bash "$ROOT_DIR/lib/cloudflare_tunnel.sh" made --marker "${PREFIX}$(cloudflare_marker_file)" --credentials "${PREFIX}$(cloudflare_credentials_file)" >/dev/null 2>&1
 }
 
 # cloudflare_record_there: the record of what the tunnel step made is there (a file, or anything under that name)
@@ -177,7 +185,7 @@ cloudflare_refuse_before_apply() {
     printf 'you can: run again with --cloudflare-account NUMBER (the 32 character account number on the right of the Cloudflare dashboard overview of any zone), or run again with --transport none.\n' >&2
     exit 2
   fi
-  if ! cloudflare_token_available; then
+  if ! cloudflare_made_remote && ! cloudflare_token_available; then
     token_file_status=0
     bash "$ROOT_DIR/lib/cloudflare_tunnel.sh" token-file-check "$(cloudflare_token_file)" >/dev/null || token_file_status=$?
     if [ "$token_file_status" -eq 2 ]; then
@@ -228,6 +236,9 @@ plan_cloudflare() {
     if [ -e "${PREFIX}$(cloudflare_token_file)" ]; then
       plan_note "an API token is still saved at $(cloudflare_token_file) and is not needed now: delete it, and hand it over again when you take the tunnel away."
     fi
+  elif cloudflare_made_remote; then
+    plan_note "this machine already has its tunnel in your Cloudflare account, recorded in $(cloudflare_marker_file), but its config, its unit or its running service is not exactly what this installer writes (a hostname added to the config by hand, a changed unit, a stopped service). this apply writes them again and restarts the service. no API token is needed, no request goes to Cloudflare, and nothing in your account changes."
+    cloudflare_forget_held_token
   else
     plan_owner "give the installer one Cloudflare API token, once" \
       "Cloudflare dashboard, My Profile, API Tokens: create a token with the permissions Account, Cloudflare Tunnel, Edit and Zone, domain name records, Edit (and Zone, Zone, Read, unless you give the zone number in SIRVEN_CLOUDFLARE_ZONE_ID), limited to your one account and the one zone of $hostname. never a token that can do anything else.

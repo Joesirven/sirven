@@ -21,6 +21,7 @@ case "$1" in
     : > "$state/$unit.enabled"
     [ "$now" = no ] || : > "$state/$unit.active"
     ;;
+  restart) [ "${FAKE_SYSTEMCTL_START_FAILS:-}" != yes ] || { echo "fake: Job for $2 failed" >&2; exit 1; }; : > "$state/$2.active" ;;
   stop) [ "${FAKE_SYSTEMCTL_STOP_FAILS:-}" != yes ] || { echo "fake: cannot stop $2" >&2; exit 1; }; rm -f "$state/$2.active" ;;
   disable) rm -f "$state/$2.enabled" ;;
   is-active) shift; [ "$1" != --quiet ] || shift; [ -e "$state/$1.active" ]; exit $? ;;
