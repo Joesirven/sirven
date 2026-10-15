@@ -110,3 +110,10 @@ world_unchanged_if() {
   shift
   if eval "$condition"; then world_unchanged "$@"; else fail "$1: not counted, because this is false: $condition"; fi
 }
+
+# argv_has_no_key: true when no running process has the text in $KEY on its command line. the key is handed to awk through the
+# environment, never as an argument: a "ps | grep -F -- $KEY" would find grep's own command line, which holds the key, and so could
+# never pass. (awk's own command line holds only the program text.) the caller exports KEY; export -f to use it inside bash -c.
+argv_has_no_key() {
+  ps -eo args | K="$KEY" awk 'index($0, ENVIRON["K"]) { f = 1 } END { exit f }'
+}

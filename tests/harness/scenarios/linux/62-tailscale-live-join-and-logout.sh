@@ -27,7 +27,7 @@ import json, sys
 s = json.load(sys.stdin)
 me = s.get("Self") or {}
 print("%s|%s|%s" % (s.get("BackendState"), ",".join(me.get("Tags") or []), me.get("HostName") or ""))'; }
-export -f node_status
+export -f node_status argv_has_no_key
 
 # our own tailscaled, no tun device and no privileges: userspace networking, state in a file of this container
 mkdir -p /var/lib/tailscale /var/run/tailscale
@@ -67,7 +67,7 @@ check "the node has a tailnet address" bash -c 'tailscale ip -4 | grep -q "^100\
 check "the record names the node" bash -c '[ "$(stat -c %a:%U /var/lib/sirven/tailscale-node.json)" = 600:root ] && grep -q "\"tag\": \"tag:agent\"" /var/lib/sirven/tailscale-node.json'
 check "the key is in no output, no file, and not on the command line of any process" bash -c '
   ! grep -qF -- "$KEY" <<< "$0" && ! grep -rlF -- "$KEY" /etc /var /root /home /usr/local 2>/dev/null | grep -q . &&
-  ! ps -eo args | grep -qF -- "$KEY"' "$out"
+  argv_has_no_key' "$out"
 check "the audit log has no key" bash -c '! grep -qF -- "$KEY" /var/log/sirven/audit.jsonl'
 
 SIRVEN_TAILSCALE_AUTHKEY="$KEY" check_exit "a second apply exits 0" 0 install_ts

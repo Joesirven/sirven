@@ -11,7 +11,8 @@ ENGINE="${SIRVEN_HARNESS_ENGINE:-docker}"
 image="sirven-harness-linux:$(shasum "$REPO_DIR/tests/harness/Dockerfile.linux" | cut -c1-12)"
 "$ENGINE" image inspect "$image" >/dev/null 2>&1 || "$ENGINE" build -q -t "$image" -f "$REPO_DIR/tests/harness/Dockerfile.linux" "$REPO_DIR/tests/harness" >/dev/null || exit 2
 failed=0
-if [ "$#" -gt 0 ]; then scripts=("$@"); else scripts=(t[0-9]-*.sh); fi
+# the attack scripts are found next to this file, whatever the current folder is
+if [ "$#" -gt 0 ]; then scripts=("$@"); else scripts=(); for found in "$HERE"/t[0-9]-*.sh; do scripts+=("$(basename "$found")"); done; fi
 for script in "${scripts[@]}"; do
   printf '\n##### %s\n' "$script"
   "$ENGINE" run --rm --network none --memory 256m --pids-limit 256 --cap-drop NET_RAW -v "$REPO_DIR":/src:ro "$image" \

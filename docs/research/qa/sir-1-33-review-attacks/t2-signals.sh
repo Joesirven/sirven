@@ -13,6 +13,7 @@ for sig in TERM INT HUP; do
   sleep 1
   left="$(ls /var/lib/sirven/.tailscale-key.* 2>/dev/null | tr '\n' ' ')"
   echo "$sig: private copy left on disk after the script was signalled: [${left}]"
+  check "$sig: no copy of the key is left after the script is signalled" test -z "$left"
   pkill -f 'sleep 30' 2>/dev/null
   rm -f /var/lib/sirven/.tailscale-key.*
 done
