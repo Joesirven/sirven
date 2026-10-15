@@ -2,7 +2,8 @@
 # audit log: the directory, the empty log, the format it is written in, and a small writer.
 #
 # the log lives in a directory owned by the owner. the agent has no access to it at all, so
-# from the agent's point of view it is append only through the wrapper and nothing else.
+# today only the package's own writer below appends to it. the forced-command wrapper that
+# would add sessions and commands is planned, not built.
 #
 # the writer is for the package's own commands. when install.sh, uninstall.sh, or a grant
 # rollback applies a plan for real (never in a dry run), every numbered step writes a step

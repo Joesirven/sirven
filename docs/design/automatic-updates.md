@@ -11,7 +11,7 @@ file outside `docs/design/`. It ends with the decisions only Jose can make.
   release's `install.sh`. `bootstrap/release.sh` writes the pin and prints, but never runs, the upload.
   `docs/BOOTSTRAP.md` is the maintainer's procedure. Today the pin is `v0.2.0`.
 - **Kept copy.** A real install keeps the package at `/var/lib/sirven/package` with a marker file
-  named `PINNED-COPY` (`tag=`, `sha256=`; `lib/layout.sh:117`, `layout_stage_package`). The state
+  named `PINNED-COPY` (`tag=`, `sha256=`; `lib/layout.sh:116`, `layout_stage_package`). The state
   directory around it is mode 0700 and owned by root (`lib/layout.sh:296-297`). A newer release replaces
   the copy by building `package.new` beside it, removing the old copy, then moving the new one into place
   (`layout_keep_package`, `lib/layout.sh:272-276`). Root commands
@@ -24,7 +24,7 @@ file outside `docs/design/`. It ends with the decisions only Jose can make.
   `--yes` it applies nothing and returns status 3. The kill switch passes its own typed word instead.
 - **No update command, no signing key.** `bin/sirven` has `grant`, `runtime`, `awake`, `phone`, `add`
   and `remove` only (usage, `bin/sirven:247-262`), and nothing in the repository pins a signing key
-  (a search for `ssh-keygen` and `allowed_signers` finds no use). A machine installed from `v0.2.0` therefore
+  (a search of the product code for `ssh-keygen` and `allowed_signers` finds no use; harness scenarios 30, 37 and 39 call `ssh-keygen` only to make test keys). A machine installed from `v0.2.0` therefore
   has neither the command nor the key; see the limits in section 3.
 - **Mac apply is off.** A Mac does not apply an install by default (`SIRVEN_MACOS_REAL_APPLY=1` is the
   owner's switch; `docs/BOOTSTRAP.md`, last section). The command line on a Mac is plan-only today.
@@ -46,7 +46,9 @@ are separate opt-ins.
 1. **Level 1, check only** (on by default, but only when someone asks; see the trigger below). The
    machine reads a small signed manifest and says whether a newer verified release exists: a line in
    `sirven grant inspect` (the existing read-only command, `bin/sirven:250`; a new `sirven status`
-   command is not needed), a line in install and uninstall output, an item in the menu bar. Nothing is
+   command is not needed), a line in install and uninstall output, an item in the menu bar. Only
+   `sirven update --check` and the menu bar app fetch the manifest; `grant inspect` and install and
+   uninstall output show only the result cached locally by the last check, and never fetch. Nothing is
    downloaded beyond the manifest and nothing on the machine changes, so no consent is needed.
 2. **Level 2, download and stage** (opt-in). The new archive is downloaded and verified and the update
    plan is computed and shown, but not applied. The owner applies it with one command that goes through
@@ -185,7 +187,7 @@ not have to infer it from a diff.
   that line becomes "remove any older `package.previous`, rename `package` to `package.previous`, move
   `package.new` into place", with a failure after the rename putting the old copy back. And uninstall
   removes only `package` (`layout_remove_package_copy`, `lib/layout.sh:324-325`) and removes the state
-  directory only when it is empty (`layout_remove_directory`, `lib/layout.sh:300-307`), so without a
+  directory only when it is empty (`layout_remove_directory`, `lib/layout.sh:62-68`), so without a
   matching undo step a leftover `package.previous` would keep the state directory on disk after
   uninstall. The install record gets a step for it, undone the same way. The existing
   rule that the kept copy must always be able to undo the install record (`docs/BOOTSTRAP.md`, "The copy
@@ -247,7 +249,8 @@ Ship level 1 for the command line, and a pointer for the app. No machine change,
    those two files, and print "up to date" or "vX is available; to apply it: sudo
    /usr/local/sbin/sirven update". Read-only, no root, no confirmation needed. It is new; it does not
    exist today (section 1).
-4. `sirven grant inspect` and install output show the line. The menu bar gets an "update available"
+4. `sirven grant inspect` and install output show the line from the result the last check cached
+   locally (they never fetch). The menu bar gets an "update available"
    item that runs the same check and opens the download page; the app does not download or install
    anything itself.
 5. Tests: a fixed signed manifest in `tests/fixtures`, plus failure cases (bad signature, expired,
@@ -303,5 +306,5 @@ No code was run for this note. These were not checked and should be before any o
 - Whether `ssh-keygen -Y sign` can use a hardware security key for Ed25519 signing on Jose's machine
   (the key type that supports it is a security-key key type, not a plain Ed25519 file; the note's claim
   is untested).
-- The exact step kinds in the install record (section 4); `lib/plan.sh:8-10` names two, `run` and `system`.
+- The exact step kinds in the install record (section 4); the header at `lib/plan.sh:8-17` names seven kinds (`run`, `system`, `owner`, `planonly`, `section`, `note`, `adopted`), of which `run`, `system`, `owner` and `planonly` are steps, and `plan_step` accepts only `run` and `system`.
 - That `grant inspect` is a sufficient health check for a rolled-forward copy (section 6).

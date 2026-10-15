@@ -31,8 +31,8 @@ in `docs/SCOPE.md` and `docs/PERMISSIONS.md`. Some features on screen (Cloudflar
 friend invite, completed setup and revocation) are designed but not all are built on day one;
 `docs/SCOPE.md` says which. The phone channel relies on an existing remote client; this
 package does not build a messaging service. Setup is a compressed illustration, not a claim
-that runtime login or administrator approval is unnecessary. Audit copy describes submitted
-sessions and commands, not every system call. The video is not published anywhere until
+that runtime login or administrator approval is unnecessary. Audit copy describes install and grant
+changes only; session and command logging is planned, not built yet. The video is not published anywhere until
 Jose reviews it.
 
 Keep `Concept preview` visible in secondary text, 28px, at x=120, y=64 throughout beats

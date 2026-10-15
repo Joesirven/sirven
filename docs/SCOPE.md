@@ -18,12 +18,12 @@ Updated 2026-10-15: the repository name, the Tailscale row (W6), the `--with-bb`
 An open-source onboarding package that lets an owner point their agent runtime (Claude Code,
 Codex, or Pi) at a macOS or Linux machine and get secure agent access in one sitting. The owner
 texts their agent from a phone, the agent starts work on the owner's machine, and that access is
-scoped, logged, and revocable. "The shadcn of agent access": you copy in a small, readable set of
+scoped, revocable, and (install and grant changes only, for now) logged. "The shadcn of agent access": you copy in a small, readable set of
 scripts and data files that you own and can change. It is not a hosted service.
 
 The defaults are the product. A fresh install is conservative: a dedicated service user with no
-administrator rights, access granted per path, every action written to an audit log, and one
-command that revokes everything.
+administrator rights, access granted per path, install and grant changes written to an audit log (session and
+command logging is planned, not built yet), and one command that revokes everything.
 
 ## Hard constraints
 
@@ -64,7 +64,7 @@ Each workstream lists what it delivers, what it needs first, and its honest stat
 | W1 | Installer core | `install.sh`: operating system detection, preflight checks, at most two setup questions with visible defaults (`--yes` and `SIRVEN_*` for no questions), a plan-then-apply engine, `--dry-run`, idempotent re-runs, `--prefix` for a fake root | none | **Build** |
 | W2 | Service user | Create or reuse `agent` (Linux `useradd`, macOS `sysadminctl`/`dscl`), no administrator group, locked password, SSH key only | W1 | **Build**, verified by dry run and fake-root tests; real creation on Linux as root (verified in the harness container); macOS real creation is built but switched off by default |
 | W3 | Permission model | Levels as data (`levels/*.json` or similar), grant schema, a compiler from grants to access control list commands | none | **Design doc plus reference data and compiler** |
-| W4 | Audit log | Log format (JSON lines), location owned by the owner, append-only from the agent's point of view, session start and end, every command via a forced-command wrapper | W2, W3 | **Format designed; wrapper built if time allows**, otherwise designed |
+| W4 | Audit log | Log format (JSON lines), location owned by the owner, append-only from the agent's point of view, session start and end, every command via a forced-command wrapper | W2, W3 | **Format designed and written for install and grant changes; the wrapper is designed, not built** |
 | W5 | Kill switch | `revoke --all`: remove authorized keys, end sessions, lock the user, remove tunnel access, write a final audit entry | W2, W4, W6 | **Built on Linux** (applies in a container and on a real machine as root, verified by the harness in a container); plan output on macOS |
 | W6 | Transport: Tailscale | Install check, `tailscale up` with an auth key after one interactive login, tagged device, a policy snippet that lets only the owner's devices reach the agent port | W1 | **Built for Linux containers**: the plan, the join as `tag:agent`, and the logout on revoke and uninstall (see the alpha cut table). Never run against a real tailnet in tests; the live join needs a test key and has not run yet |
 | W7 | Transport: Cloudflare Tunnel | `cloudflared` tunnel plus Cloudflare Access service token in front of SSH | W1 | **Documented second path**, plan output only |

@@ -71,7 +71,7 @@ every field, its meaning, and what enforces it today. "rule n" points at the lis
 | `expiry.friend_invite.default_level` | the level an invite gets when none is named | rule 5: observer only |
 | `expiry.friend_invite.required` | an invite must expire | rule 4: always true |
 | `expiry.friend_invite.default_days`, `.maximum_days` | the expiry an invite gets, and the most it may ask for | rule 4: above zero, default no more than maximum |
-| `audit.session_start_and_end`, `.every_command` | what the forced-command wrapper writes | rule 6: always true. the wrapper is built after alpha |
+| `audit.session_start_and_end`, `.every_command` | what the forced-command wrapper writes | always true in the data and checked by `lib/grant_compiler.py`; not one of the numbered rules. the wrapper is planned, not built |
 | `audit.file_changes` | whether file changes are captured | `false`: needs kernel-level audit, designed, not built |
 | `audit.agent_can_read_log`, `.agent_can_write_log` | whether the agent reaches its own log | rule 6: always false |
 | `audit.retention_days` | how long entries are kept | not enforced yet; nothing rotates the log |
@@ -313,8 +313,9 @@ the kill switch reads it to know what to remove.
   profile, the agent cannot build a deep chain at all: its folder creation stops at depth 4,090 with Errno 36
   (ENAMETOOLONG), at about 8,189 bytes of absolute path. unconfined, the same chain reaches 12,000 levels. the
   harness scenarios 67 (revoke) and 68 (uninstall) keep the default profile and check that, on the deepest chain
-  the confined agent can build, every access list entry is removed, the account is locked, and no process is left.
-  both pass on ba-sing-se: revoke and uninstall exit 0, zero access list entries left. not yet verified: a tree
+  the confined agent can build, every access list entry is removed and no process is left. revoke (scenario 67) also locks the account;
+  uninstall (scenario 68) removes the service user. the SIR-83 commit message records both passing on the server
+  ba-sing-se (zero access list entries left); not re-run from this Mac. not yet verified: a tree
   built with AppArmor lifted, then revoked under the default profile. the attempt to carry such a tree between two
   containers failed (a committed image kept only about 1,996 levels and lost the grant), so that case is open.
 
