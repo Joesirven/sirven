@@ -16,11 +16,24 @@ fi
 recipe_sum="$(shasum "$HARNESS_DIR/Dockerfile.linux" | cut -c1-12)"
 IMAGE="sirven-harness-linux:$recipe_sum"
 "$ENGINE" image inspect "$IMAGE" >/dev/null 2>&1 || "$ENGINE" build -q -t "$IMAGE" -f "$HARNESS_DIR/Dockerfile.linux" "$HARNESS_DIR" >/dev/null || exit 2
+# several runs may go at once on one host (see run-linux.sh): this run's container and work folder carry its run identifier, and only
+# they are removed. stop it with kill -TERM on the process number printed at the start, never pkill -f.
+run_id="$(date +%Y%m%d%H%M%S)-$$"
+printf 'run %s, process %s: to stop only this run, kill -TERM %s\n' "$run_id" "$$" "$$" >&2
 work="$(mktemp -d "${TMPDIR:-/tmp}/sirven-ro-bind.XXXXXX")"
-trap 'rm -rf "$work"' EXIT
+run_pid=""
+cleanup() {
+  [ -z "$run_pid" ] || kill "$run_pid" 2>/dev/null
+  "$ENGINE" ps -aq --filter "label=sirven-harness=$run_id" | xargs -r "$ENGINE" rm -f >/dev/null 2>&1
+  rm -rf "$work"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
 # SIRVEN_PACKAGE_DIR: the package to test (default: this one)
 mkdir -p "$work/mnt" && cp -r "${SIRVEN_PACKAGE_DIR:-$REPO_DIR}" "$work/mnt/pkg" && chmod -R a+rwX "$work/mnt"
-"$ENGINE" run --rm --label sirven-harness-ro-bind=1 --network none --memory 256m --memory-swap 256m --pids-limit 256 --cpus 1 --cap-drop NET_RAW \
+"$ENGINE" run --rm --name "sirven-harness-ro-bind-$run_id" --label "sirven-harness=$run_id" --network none --memory 256m --memory-swap 256m --pids-limit 256 --cpus 1 --cap-drop NET_RAW \
   -v "$work/mnt":/rw -v "$work/mnt":/ro:ro "$IMAGE" bash -c '
   useradd -m agent
   echo "mounts: $(grep -E " /(rw|ro) " /proc/mounts | awk "{print \$2, \$4}" | tr "\n" ";")"
@@ -29,4 +42,9 @@ mkdir -p "$work/mnt" && cp -r "${SIRVEN_PACKAGE_DIR:-$REPO_DIR}" "$work/mnt/pkg"
   if [ -e /tmp/ROOT-RAN-ROBIND ]; then echo "FINDING: root ran code the agent edited, trusting a read-only mount"; exit 1; fi
   grep -q "refusing to run as root" /tmp/o && echo "ok: the gate refused, and the agent code did not run" && exit 0
   echo "the agent code did not run, but the gate did not refuse either"; exit 1
-' < /dev/null
+' < /dev/null &
+run_pid=$!
+wait "$run_pid"
+status=$?
+run_pid=""
+exit "$status"
