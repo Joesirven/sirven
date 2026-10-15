@@ -14,8 +14,11 @@
 # main) is move both variables into two variables that are not exported and unset the originals, so no step before the join,
 # nor any later one, starts a process that inherits the key. only the two processes that need it are handed it, by the
 # environment of that one command (the join step, and the first look that checks the join would be accepted); the join then
-# unsets it at once and gives tailscale a private file. what unset cannot do is scrub the block of the environment the
-# installer was started with: root can read it in /proc/<installer process number>/environ for as long as the installer runs.
+# unsets it at once and gives tailscale a private file. what unset cannot do is scrub the block of the environment a process
+# was started with: root can read it in /proc/<process number>/environ for as long as the process runs, for the installer and
+# for those two short-lived processes (the first look and the join). the root gate's own helpers (its python3 check) and, with the
+# one-line bootstrap, the download, checksum and unpack tools start before the installer's first line, so they also start with the
+# variables the caller exported.
 # the key file is the only route that never puts the key in an environment, which is why the plan names it first.
 # reads: PREFIX, PACKAGE, CONFIG_DIR, STATE_DIR, SERVICE_USER, ADOPT_TAILSCALE, OPERATING_SYSTEM
 

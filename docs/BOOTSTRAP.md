@@ -51,9 +51,10 @@ nothing. Read the key into the variable with `read -rs SIRVEN_TAILSCALE_AUTHKEY;
 in the process list. The installer takes both variables out of its own environment as the first thing it does, keeps
 the key in variables that are not exported, and hands it only to the join step (and to the first look that checks the
 join would be accepted); no other step starts a process that has it, whether or not a join runs. One thing this cannot do:
-the block of the environment the installer was started with stays readable by root in
-`/proc/<installer process number>/environ` for as long as the installer runs, and unsetting a variable does not scrub
-it. The key file is the only route that never puts the key in an environment, so use the file.
+the block of the environment a process was started with stays readable by root in
+`/proc/<process number>/environ` for as long as that process runs, and unsetting a variable does not scrub it. That
+covers the installer, the two short-lived processes it hands the key to, the root check that runs before the installer's
+first line, and the download, checksum and unpack tools of this script. The key file is the only route that never puts the key in an environment, so use the file.
 
 ## Where the pin lives
 

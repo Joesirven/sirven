@@ -569,6 +569,16 @@ test_no_step_before_the_join_starts_a_child_that_inherits_the_key() {
   assert_key_nowhere "$root" "$SHIM_LOG"
 }
 
+# no join is planned at all with --transport none (the other transport, cloudflare, is plan only and applies nothing)
+test_with_no_transport_a_key_in_the_environment_reaches_no_child() {
+  local root="$TEST_TMP/root"
+  shim_commands_that_record_their_environment
+  PATH="$SHIM_BIN:$PATH" SIRVEN_TAILSCALE_AUTHKEY="$SENTINEL_KEY" TAILSCALE_AUTHKEY="$SENTINEL_KEY" \
+    assert_status 0 install_sh --prefix "$root" --level observer --transport none
+  assert_contains "$(cat "$SHIM_LOG")" "mkdir:" "children were started (else this test proves nothing)"
+  assert_not_contains "$(cat "$SHIM_LOG")" "AUTHKEY" "the environment of every child"
+}
+
 test_when_the_machine_is_already_the_agent_node_no_later_child_sees_the_key() {
   setup_node
   local root="$TEST_TMP/root"
