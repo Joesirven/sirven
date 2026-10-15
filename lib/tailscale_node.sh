@@ -238,7 +238,7 @@ node_prepare() {
       NODE_KEY="$(head -n 1 "$key_file")"; NODE_ORIGIN="$key_file"
     fi
   fi
-  [ -n "$NODE_KEY" ] || refuse "there is no Tailscale auth key. put one in the environment as SIRVEN_TAILSCALE_AUTHKEY (sudo --preserve-env=SIRVEN_TAILSCALE_AUTHKEY ...), or save it as ${key_file:-the key file}, owned by root, mode 0600. make it in the Tailscale admin console, settings, keys: tagged $TAILSCALE_NODE_TAG, pre-approved."
+  [ -n "$NODE_KEY" ] || refuse "there is no Tailscale auth key. save it as ${key_file:-the key file}, owned by root, mode 0600 (the safer way), or put it in the environment as SIRVEN_TAILSCALE_AUTHKEY (sudo --preserve-env=SIRVEN_TAILSCALE_AUTHKEY ..., which works only if the sudo policy allows it). make it in the Tailscale admin console, settings, keys: tagged $TAILSCALE_NODE_TAG, pre-approved."
   unset SIRVEN_TAILSCALE_AUTHKEY TAILSCALE_AUTHKEY
   case "$NODE_KEY" in *[!A-Za-z0-9_-]*) refuse "the auth key in $NODE_ORIGIN has characters a Tailscale key never has (a carriage return from Windows line ends, for one); it is not used." ;; esac
 
