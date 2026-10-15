@@ -652,17 +652,24 @@ SHIM
   ( eval "${PLAN_ACTION[join_index]}" )
   assert_eq "sirven-named|plain-named" "$(cat "$TEST_TMP/handed")" "the join is handed both held names"
 
-  # and no other step, before or after the join, names the key's variables anywhere in what it runs or checks
+  # and no other step, before or after the join, names the key's variables anywhere in what it runs or checks, carries the key's
+  # value, or calls the join's helper
   index=0
   while [ "$index" -lt "$PLAN_COUNT" ]; do
     if [ "$index" -ne "$join_index" ]; then
       for text in "${PLAN_ACTION[index]}" "${PLAN_CHECK[index]}" "${PLAN_UNDO_ACTION[index]}" "${PLAN_UNDO_CHECK[index]}"; do
         assert_not_contains "$text" "AUTHKEY" "step '${PLAN_TITLE[index]}' names the key's variables"
         assert_not_contains "$text" "HELD_" "step '${PLAN_TITLE[index]}' names the held key"
+        assert_not_contains "$text" "$SENTINEL_KEY" "step '${PLAN_TITLE[index]}' carries the key"
+        assert_not_contains "$text" "tailscale_node_with_key" "step '${PLAN_TITLE[index]}' calls the join's helper"
       done
     fi
     index=$((index + 1))
   done
+  # the join's own check and undo text do not carry the key either (its action names the held copies on purpose)
+  assert_not_contains "${PLAN_CHECK[join_index]}" "$SENTINEL_KEY" "the join's check carries the key"
+  assert_not_contains "${PLAN_UNDO_ACTION[join_index]}" "$SENTINEL_KEY" "the join's undo carries the key"
+  assert_not_contains "${PLAN_UNDO_CHECK[join_index]}" "$SENTINEL_KEY" "the join's undo check carries the key"
   # and the exported names are not set in this shell afterwards
   assert_eq "" "$(env | grep AUTHKEY || true)"
 }

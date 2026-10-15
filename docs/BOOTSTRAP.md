@@ -53,14 +53,13 @@ the key in variables that are not exported, and hands it only to the join step (
 join would be accepted); no other step starts a process that has it, whether or not a join runs. One thing this cannot do:
 the block of the environment a process was started with stays readable by root in
 `/proc/<process number>/environ` for as long as that process runs, and unsetting a variable does not scrub it. That
-covers the installer, the two short-lived processes it hands the key to, and some processes that start before the installer's
-first step runs: the `dirname` that finds the installer's folder (on every run), the root check's `uname` (when run as root, on
-any system) and, on Linux as root, its `python3` check, and the download, checksum and unpack tools of this script. Each starts
-with the variables the caller exported. The key file avoids all of this: the key is never in any environment, so use the file.
+covers the installer and the two short-lived processes it hands the key to. A few short helper commands (such as uname,
+dirname, mktemp, mkdir, rm) run before main() on some runs and inherit the caller's environment; give the key through the
+root-owned key file to avoid this.
 
 Warning: do not trace the installer while a key is in your environment. Running it as `bash -x install.sh ...` (or with
-`set -x`) prints the key in plain text on the lines that hold it. In the dry run and the fake-root run I counted, that was two
-trace lines. Tracing is opt-in debugging. Unset the key first, or use the key file, which the installer never prints.
+`set -x`) prints the key in plain text on several lines that hold it. Tracing is opt-in debugging. Unset the key first, or use the
+key file, which the installer never prints.
 
 ## Where the pin lives
 
