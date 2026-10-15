@@ -42,18 +42,10 @@ setup_tunnel() {
   mkdir -p "$FAKE_CF_DIR" "$FAKE_SYSTEMD_DIR"
 }
 
-tunnel_options() {
-  printf '%s\n' --marker "$MARKER" --config "$CONFIG" --credentials "$CREDENTIALS" --unit "$UNIT" --service sirven-cloudflared.service \
-    --user agent --hostname "${1:-$HOST_NAME}" --account "$ACCOUNT"
-}
-
 # up and down with the token in the environment of that one command, as the installer hands it over
 up() {
-  local arguments=()
-  while IFS= read -r line; do arguments[${#arguments[@]}]="$line"; done <<END
-$(tunnel_options "$@")
-END
-  SIRVEN_CLOUDFLARE_API_TOKEN="${TOKEN_FOR_RUN-$SENTINEL_TOKEN}" bash "$HELPER" up "${arguments[@]}"
+  SIRVEN_CLOUDFLARE_API_TOKEN="${TOKEN_FOR_RUN-$SENTINEL_TOKEN}" bash "$HELPER" up --marker "$MARKER" --config "$CONFIG" \
+    --credentials "$CREDENTIALS" --unit "$UNIT" --service sirven-cloudflared.service --user agent --hostname "${1:-$HOST_NAME}" --account "$ACCOUNT"
 }
 
 down() {
