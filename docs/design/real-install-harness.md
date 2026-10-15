@@ -108,7 +108,8 @@ Linux container (built):
 
 - Start: `bash tests/harness/run-linux.sh [filter]`. The image tag is the checksum of `Dockerfile.linux`, so a changed recipe rebuilds and an unchanged one reuses. One fresh container per scenario.
 - Isolation: repository mounted read only at `/src` and nothing else from the host; `--network none`; no `--privileged`; default capabilities only (useradd and setfacl need chown, setuid and similar); `--memory 256m --pids-limit 256`; the Docker socket is never mounted. Scenario paths such as `/srv/app` are inside the container, because lists on a folder shared from the Mac are a different file system and prove nothing.
-- Teardown: `--rm`, plus an exit trap that removes any container carrying the run's label, so an interrupted run leaves none. A leak check is `docker ps -a --filter label=sirven-harness`.
+- Teardown: `--rm`, plus an exit trap that removes any container carrying the run's identifier label, so an interrupted run leaves none. A leak check is `docker ps -a --filter label=sirven-harness=<run identifier>`, with the identifier the run printed at its start. The bare key `label=sirven-harness` matches every run and is never used to remove anything.
+- Several runs at once on one host are safe (SIR-84). Each run's containers, networks and temporary files carry that run's identifier, and the cleanup removes only those. Each scenario's container is also named `sirven-harness-<run identifier>-<scenario>`. Stop one run with `kill -TERM <process number>`, using the process number the run printed at its start. A stop removes that run's containers at once, and the other runs continue. Never use `pkill -f run-linux.sh` (it matches every run's command line), and never remove containers by the bare label. The shared image is never removed by any run.
 - No engine running: exit 77 with a skip message, never a false pass.
 - Not part of `make test`: that target stays free of Docker.
 
@@ -138,8 +139,8 @@ folder and has its own runner: `bash tests/harness/run-ro-bind.sh`.
 
 Docker Desktop on Omashu may not start (task SIR-76). The same scenarios run on the server ba-sing-se over SSH, one container at a
 time and capped: `--memory 256m --memory-swap 256m --pids-limit 256 --cpus 1 --network none --cap-drop NET_RAW`, with available
-memory checked before every run (stop below 800 MB), existing containers never touched, and every container and image the run
-made removed afterwards. Scenario 27 asks for 3 GB and is skipped there. Scenarios 17, 22 and 26 carry the header `# harness-apparmor: unconfined`: on ba-sing-se the default AppArmor profile fails their deep chains with ENAMETOOLONG (errno 36), so those three containers run with `--security-opt apparmor=unconfined`. Nothing else about them changes (no host folder, no network, the same caps and memory cap). Docker Desktop on Omashu has no AppArmor and runs them as before. The image now also holds `openssh-server`,
+memory checked before every run (stop below 800 MB), existing containers never touched, and every container and network the run
+made removed afterwards. Images are shared by every run and are never removed. Scenario 27 asks for 3 GB and is skipped there. Scenarios 17, 22 and 26 carry the header `# harness-apparmor: unconfined`: on ba-sing-se the default AppArmor profile fails their deep chains with ENAMETOOLONG (errno 36), so those three containers run with `--security-opt apparmor=unconfined`. Nothing else about them changes (no host folder, no network, the same caps and memory cap). Docker Desktop on Omashu has no AppArmor and runs them as before. The image now also holds `openssh-server`,
 `openssh-client`, `cron` and `at`, so key logins, cron jobs and at jobs are real; systemd is not there, so scenario 36 uses stand-ins
 for `systemctl` and `loginctl`.
 
