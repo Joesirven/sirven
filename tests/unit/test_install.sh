@@ -82,11 +82,13 @@ test_apply_on_fake_root_then_rerun_is_idempotent() {
   assert_not_contains "$CAPTURED_STDOUT" "(to do"
 }
 
-test_tailscale_apply_says_not_yet_and_changes_nothing() {
-  assert_status 3 install_sh --prefix "$TEST_TMP/root" --level builder --path /srv/app --transport tailscale
-  assert_contains "$CAPTURED_STDERR" "not yet"
-  assert_contains "$CAPTURED_STDERR" "join the tailnet"
-  assert_no_file "$TEST_TMP/root"
+test_tailscale_apply_on_a_fake_root_records_the_join_and_the_logout() {
+  assert_status 0 install_sh --prefix "$TEST_TMP/root" --level builder --path /srv/app --transport tailscale
+  assert_contains "$CAPTURED_STDOUT" "join the tailnet as a tagged device with that key"
+  assert_not_contains "$CAPTURED_STDERR" "not yet"
+  assert_contains "$(cat "$TEST_TMP/root/var/lib/sirven/simulated-system-commands.log")" "tailscale_node.sh join"
+  assert_contains "$(cat "$TEST_TMP/root/var/lib/sirven/install-record.tsv")" "tailscale_node.sh leave"
+  assert_no_file "$TEST_TMP/root/var/lib/sirven/tailscale-node.json"
 }
 
 test_cloudflare_apply_says_not_yet() {

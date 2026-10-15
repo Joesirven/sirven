@@ -13,6 +13,7 @@
 HARNESS_FAILED=0
 HARNESS_PASSED=0
 HARNESS_KNOWN=0
+HARNESS_SKIPPED=0
 SRC="${SRC:-/src}"
 # the container is a real machine to the installer, so every apply asks for the owner's consent (README): the scenarios give it
 # through SIRVEN_YES, the same as running with --yes. the real host scenarios (lib/real_host.sh) take it away to test the question.
@@ -39,6 +40,12 @@ check_exit() {
   if [ "$status" -eq "$wanted" ]; then pass "$name (exit $status)"; else fail "$name: wanted exit $wanted, got $status" "$(printf '%s\n' "$LAST_OUTPUT" | tail -15)"; fi
 }
 
+# skip NAME REASON: an assertion that cannot run here (a missing credential, say). it reports as "skipped", does not
+# fail the run, and is counted, so a run that skipped what mattered says so on its last line.
+skip() {
+  HARNESS_SKIPPED=$((HARNESS_SKIPPED + 1)); printf 'skipped %s: %s\n' "$1" "$2"
+}
+
 # known_defect NAME TASK COMMAND...: the assertion the product should meet once TASK lands.
 known_defect() {
   local name="$1" task="$2" out
@@ -51,7 +58,7 @@ known_defect() {
 }
 
 finish() {
-  printf '%s passed, %s failed, %s known defects\n' "$HARNESS_PASSED" "$HARNESS_FAILED" "$HARNESS_KNOWN"
+  printf '%s passed, %s failed, %s known defects, %s skipped\n' "$HARNESS_PASSED" "$HARNESS_FAILED" "$HARNESS_KNOWN" "$HARNESS_SKIPPED"
   [ "$HARNESS_FAILED" -eq 0 ]
 }
 
@@ -105,4 +112,11 @@ world_unchanged_if() {
   local condition="$1"
   shift
   if eval "$condition"; then world_unchanged "$@"; else fail "$1: not counted, because this is false: $condition"; fi
+}
+
+# argv_has_no_key: true when no running process has the text in $KEY on its command line. the key is handed to awk through the
+# environment, never as an argument: a "ps | grep -F -- $KEY" would find grep's own command line, which holds the key, and so could
+# never pass. (awk's own command line holds only the program text.) the caller exports KEY; export -f to use it inside bash -c.
+argv_has_no_key() {
+  ps -eo args | K="$KEY" awk 'index($0, ENVIRON["K"]) { f = 1 } END { exit f }'
 }

@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# a fake tailscale that really joins and logs out, for the tests of lib/tailscale_node.sh. its state is the
+# folder FAKE_TS_DIR: the login state, this node's tags and id, and a log of every call (never a key).
+#
+#   FAKE_TS_KEY           the one auth key it accepts. any other key: "invalid key", exit 1
+#   FAKE_TS_ECHO_KEY=yes  the failure message repeats the key, to prove the installer blanks it out
+#   FAKE_TS_UNTAGGED=yes  the node joins without the tag it asked for (a key that is not tagged)
+#   FAKE_TS_NO_ID=yes     the node joins but its status carries no node number
+#   FAKE_TS_OLD=yes       'up --help' has no mention of reading a key from a file
+#   FAKE_TS_LOGOUT_FAILS=yes  logout does nothing
+#   FAKE_TS_STOPPED=yes   every call fails as if tailscaled were not running
+# another device in the tailnet carries tag:agent too, so reading the whole output instead of this machine's own entry
+# would get the wrong answer.
+
+dir="${FAKE_TS_DIR:?FAKE_TS_DIR is not set}"
+mkdir -p "$dir"
+printf 'tailscale %s\n' "$*" >> "$dir/calls.log"
+[ -f "$dir/state" ] || printf 'NeedsLogin\n' > "$dir/state"
+
+if [ "${FAKE_TS_STOPPED:-}" = yes ]; then
+  printf 'failed to connect to local tailscaled; it does not appear to be running\n' >&2
+  exit 1
+fi
+
+peer='"Peer": {"nodekey:peer": {"HostName": "example-server", "Tags": ["tag:agent"], "Online": true}}'
+
+status_json() {
+  local state tags="" id=""
+  state="$(cat "$dir/state")"
+  if [ "$state" != NeedsLogin ]; then
+    id="$(cat "$dir/id")"
+    [ ! -f "$dir/tags" ] || tags="$(cat "$dir/tags")"
+  fi
+  printf '{"BackendState": "%s", "Self": {"%s": "%s", "HostName": "%s", "Tags": [%s]}, %s}\n' "$state" "I""D" "$id" "$(cat "$dir/name" 2>/dev/null)" "$tags" "$peer"
+}
+
+case "$1" in
+  version) printf '1.80.0\n  tailscale commit: example\n' ;;
+  status) status_json ;;
+  up)
+    shift
+    if [ "${1:-}" = --help ]; then
+      if [ "${FAKE_TS_OLD:-}" = yes ]; then printf 'usage: tailscale up [flags]\n  --auth-key value\n    node authorization key\n' >&2
+      else printf 'usage: tailscale up [flags]\n  --auth-key value\n    node authorization key; if it begins with "file:", then it is a path to a file containing the authkey\n' >&2
+      fi
+      exit 0
+    fi
+    key="" tag="" name=""
+    for argument in "$@"; do
+      case "$argument" in
+        --auth-key=file:*) path="${argument#--auth-key=file:}"; key="$(head -n 1 "$path")"; ls -ln "$path" | cut -c1-10 > "$dir/keyfile-mode" ;;
+        --auth-key=*) printf 'fake tailscale: the key was on the command line\n' > "$dir/key-on-argv" ;;
+        --advertise-tags=*) tag="${argument#--advertise-tags=}" ;;
+        --hostname=*) name="${argument#--hostname=}" ;;
+      esac
+    done
+    printf '%s\n' "$*" > "$dir/up-arguments"
+    if [ -z "${FAKE_TS_KEY:-}" ] || [ "$key" != "$FAKE_TS_KEY" ]; then
+      if [ "${FAKE_TS_ECHO_KEY:-}" = yes ]; then printf 'backend error: invalid key: %s\n' "$key" >&2
+      else printf 'backend error: invalid key\n' >&2
+      fi
+      exit 1
+    fi
+    printf 'Running\n' > "$dir/state"
+    if [ "${FAKE_TS_NO_ID:-}" = yes ]; then : > "$dir/id"; else printf 'nodeid-%s\n' "$$" > "$dir/id"; fi
+    printf '%s\n' "$name" > "$dir/name"
+    if [ "${FAKE_TS_UNTAGGED:-}" = yes ]; then : > "$dir/tags"; else printf '"%s"\n' "$tag" > "$dir/tags"; fi
+    ;;
+  logout)
+    [ "${FAKE_TS_LOGOUT_FAILS:-}" = yes ] || printf 'NeedsLogin\n' > "$dir/state"
+    ;;
+  *) printf 'fake tailscale: unknown call %s\n' "$*" >&2; exit 9 ;;
+esac

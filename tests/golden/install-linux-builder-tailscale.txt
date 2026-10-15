@@ -84,19 +84,20 @@ transport: tailscale
        # write <prefix>/etc/sirven/tailscale-policy-snippet.hujson (mode 0644): tag:agent, reachable only from your login, only on port 22
    30. paste the policy snippet into your tailnet policy (owner, by hand)
        tailscale admin console, access controls: merge /etc/sirven/tailscale-policy-snippet.hujson and put your login in place of you@example.com.
-   31. make one tagged auth key, once, in the browser (owner, by hand)
-       tailscale admin console, settings, keys: generate an auth key with tag:agent, pre-approved, not reusable.
-       save it as /etc/sirven/tailscale-auth-key, owned by root, mode 0600. this is the only interactive step.
-   32. join the tailnet as a tagged device with that key (plan only)
-       $ tailscale up --auth-key=file:<prefix>/etc/sirven/tailscale-auth-key --advertise-tags=tag:agent
-       not yet: tailscale apply is plan output in the alpha cut; it is never run against a real tailnet yet
-   33. remove the used auth key from disk (plan only)
+   31. give the installer one tagged auth key, once (owner, by hand)
+       tailscale admin console, settings, keys: generate an auth key with tag:agent, pre-approved. ephemeral is the better choice: the node then leaves the tailnet by itself when it logs out.
+       hand it over one of two ways, and it is the only interactive step:
+         in the environment: sudo --preserve-env=SIRVEN_TAILSCALE_AUTHKEY, with the variable set in your shell (SIRVEN_TAILSCALE_AUTHKEY, or TAILSCALE_AUTHKEY)
+         or in a file: save it as /etc/sirven/tailscale-auth-key, owned by root, mode 0600; it is removed after the join.
+   32. join the tailnet as a tagged device with that key (to do, recorded not run under --prefix)
+       # runs lib/tailscale_node.sh join; the key comes from the environment or from <prefix>/etc/sirven/tailscale-auth-key and is never put on a command line.
+       # it records the node in /var/lib/sirven/tailscale-node.json, and refuses with nothing changed if there is no key, no tailscale, or a login that is not ours.
+       $ tailscale up --auth-key=file:<a private copy of the key> --advertise-tags=tag:agent --hostname=agent-<this machine's name> --ssh=false --accept-dns=false --accept-routes=false --reset --timeout=60s
+   33. remove the used auth key from disk, if one was saved (already done)
        $ rm -f <prefix>/etc/sirven/tailscale-auth-key
-       not yet: tailscale apply is plan output in the alpha cut; it is never run against a real tailnet yet
      note: the agent client connects with: ssh agent@<this machine's tailnet name>. tailscale ssh stays off; the machine's own SSH server and keys are used.
 
-summary: 33 steps. 28 to do, 0 already done, 3 by the owner, 2 plan only.
+summary: 33 steps. 29 to do, 1 already done, 3 by the owner, 0 plan only.
 dry run: nothing was changed. run the same command without --dry-run to apply this plan.
-applying would stop before any change: the plan has plan-only steps the alpha cut does not apply yet.
 to cut the agent off later: sudo /usr/local/sbin/sirven revoke --all --dry-run to read the plan; to remove everything: sudo /usr/local/sbin/sirven uninstall --dry-run
 exit status: 0

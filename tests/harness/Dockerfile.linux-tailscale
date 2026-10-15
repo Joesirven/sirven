@@ -1,0 +1,22 @@
+# the disposable machine for the live Tailscale scenario: the same bare Debian as Dockerfile.linux, plus the real
+# tailscale and tailscaled from Tailscale's own static release, checked against a pinned checksum (the checksums are
+# the ones Tailscale publishes next to each file; bump the version and both on purpose). a separate image, so a change
+# here never rebuilds the image the other scenarios share.
+FROM debian:12-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587
+ARG TARGETARCH
+ARG TAILSCALE_VERSION=1.104.1
+ARG TAILSCALE_SHA256_AMD64=108d1d96ecf410d305571e173516f27038f870919a9b89c914a167c6d33a4528
+ARG TAILSCALE_SHA256_ARM64=f60294374967f3dfd8cf57bbbd474d6cfce32d123e3a8ddeab82a87940daa806
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends bash python3 acl passwd procps util-linux coreutils findutils diffutils openssh-server openssh-client cron at ca-certificates curl \
+ && rm -rf /var/lib/apt/lists/* \
+ && case "$TARGETARCH" in amd64) sum="$TAILSCALE_SHA256_AMD64" ;; arm64) sum="$TAILSCALE_SHA256_ARM64" ;; *) echo "no pinned tailscale for $TARGETARCH" >&2; exit 1 ;; esac \
+ && mkdir /tmp/tailscale-download && cd /tmp/tailscale-download \
+ && curl -fsSL -o tailscale.tgz "https://pkgs.tailscale.com/stable/tailscale_${TAILSCALE_VERSION}_${TARGETARCH}.tgz" \
+ && echo "$sum  tailscale.tgz" | sha256sum -c - \
+ && tar -xzf tailscale.tgz \
+ && install -o root -g root -m 755 "tailscale_${TAILSCALE_VERSION}_${TARGETARCH}/tailscale" /usr/local/bin/tailscale \
+ && install -o root -g root -m 755 "tailscale_${TAILSCALE_VERSION}_${TARGETARCH}/tailscaled" /usr/local/sbin/tailscaled \
+ && cd / && rm -rf /tmp/tailscale-download \
+ && apt-get purge -y curl && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
+WORKDIR /work

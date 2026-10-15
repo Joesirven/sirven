@@ -218,6 +218,8 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then sirven_gate uninstall.sh uninstall "$@";
 . "$ROOT_DIR/lib/audit.sh"
 # shellcheck source=lib/lock.sh
 . "$ROOT_DIR/lib/lock.sh"
+# shellcheck source=lib/tailscale.sh
+. "$ROOT_DIR/lib/tailscale.sh"
 
 usage() {
   cat <<END
@@ -343,9 +345,37 @@ read_record() {
   done < "$RECORD_FILE"
 }
 
+# plan_uninstall_tailscale_leftovers: log out a node the join left behind, whether or not the install record has an undo line for it.
+# a join that logs in but does not reach Running writes its record file and then fails, and a failed step is never added to the
+# install record, so the record can be silent about a node that is logged in. the record file of the join is the evidence, and
+# the script logs out only the node it names, and only while this machine's login is still that node.
+# it comes first in the plan, so it is undone first, like the last thing applied.
+plan_uninstall_tailscale_leftovers() {
+  local marker state_dir index script
+  marker="$(rooted "$(tailscale_marker_file)")"
+  state_dir="$(rooted "$STATE_DIR")"
+  # nothing to do unless the join's record or a stale copy of its key is there
+  if [ ! -e "$marker" ] && [ ! -L "$marker" ] && ! compgen -G "$state_dir/.tailscale-key.*" >/dev/null; then
+    return 0
+  fi
+  # the install record already undoes it: that line logs out, and one logout is enough
+  index=0
+  while [ "$index" -lt "$RECORD_COUNT" ]; do
+    case "${RECORD_UNDO_ACTION[index]}" in *tailscale_node.sh\ leave*) return 0 ;; esac
+    index=$((index + 1))
+  done
+  script="$(printf '%q' "$ROOT_DIR/lib/tailscale_node.sh")"
+  plan_section "undo: tailscale join left behind"
+  plan_step system "log this machine out of the tailnet: the node a join left behind, and only it" \
+    "[ ! -e $marker ] && ! compgen -G \"$state_dir/.tailscale-key.*\" >/dev/null" \
+    "bash $script leave $marker" \
+    "tailscale logout   # via lib/tailscale_node.sh leave, only when this machine's login is still the node recorded in $(tailscale_marker_file); also removes any copy of the auth key a killed join left"
+}
+
 build_uninstall_plan() {
   local index=$((RECORD_COUNT - 1)) section last="" record
   record="$(rooted "$(layout_record_file)")"
+  plan_uninstall_tailscale_leftovers
   while [ "$index" -ge 0 ]; do
     section="${RECORD_SECTION[index]}"
     if [ "$section" != "$last" ]; then

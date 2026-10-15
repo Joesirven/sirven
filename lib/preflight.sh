@@ -203,7 +203,13 @@ PREFLIGHT_SSH_COMMAND="${PREFLIGHT_SSH_COMMAND:-ssh}"
     macos) preflight_commands "$strict" dscl createhomedir uuidgen find chown pkill ls ;;
   esac
   case "$transport" in
-    tailscale) preflight_tool "$strict" tailscale "$PREFLIGHT_MINIMUM_TAILSCALE" version ;;
+    tailscale)
+      if command -v tailscale >/dev/null 2>&1; then
+        preflight_tool "$strict" tailscale "$PREFLIGHT_MINIMUM_TAILSCALE" version
+      else
+        _preflight_problem "$strict" "tailscale $PREFLIGHT_MINIMUM_TAILSCALE or newer is not installed. install it from https://tailscale.com/download (on Debian or Ubuntu, add the Tailscale package repository from that page and run: apt install tailscale), or run with --transport none"
+      fi
+      ;;
     cloudflare) preflight_tool "$strict" cloudflared "$PREFLIGHT_MINIMUM_CLOUDFLARED" --version ;;
   esac
   preflight_ssh_server "$strict"

@@ -117,7 +117,7 @@ test_a_personal_tailscale_login_is_refused_with_what_to_do() {
 test_a_logged_out_tailscale_is_kept_and_the_join_stays() {
   SIRVEN_PATH=none FAKE_TAILSCALE_STATE=logged-out assert_status 0 install_sh --dry-run --prefix "$TEST_TMP/root" --level observer --transport tailscale
   assert_contains "$CAPTURED_STDOUT" "adopted: Tailscale 1.76.1, installed and not logged in. the install is kept, never reinstalled. there is no login to adopt"
-  assert_contains "$CAPTURED_STDOUT" "join the tailnet as a tagged device with that key (plan only)"
+  assert_contains "$CAPTURED_STDOUT" "join the tailnet as a tagged device with that key (to do, recorded not run under --prefix)"
 }
 
 test_a_stopped_agent_node_stays_stopped() {
