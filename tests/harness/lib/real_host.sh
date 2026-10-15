@@ -5,6 +5,8 @@
 # engine that sets it (podman does, docker does not) the scenario fails loudly instead of testing the wrong path.
 # sourced after world.sh. a throwaway container only: this deletes files at the root of the machine.
 rm -f /.dockerenv /run/.containerenv
+# these scenarios test the question itself, so the consent world.sh gives every other scenario is taken away.
+unset SIRVEN_YES
 if (. "$SRC/lib/common.sh"; in_container); then
   printf 'not ok  the installer still sees a container; process 1 has container= set, so this engine cannot simulate a real host\n'
   exit 1

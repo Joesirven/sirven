@@ -14,6 +14,9 @@ HARNESS_FAILED=0
 HARNESS_PASSED=0
 HARNESS_KNOWN=0
 SRC="${SRC:-/src}"
+# the container is a real machine to the installer, so every apply asks for the owner's consent (README): the scenarios give it
+# through SIRVEN_YES, the same as running with --yes. the real host scenarios (lib/real_host.sh) take it away to test the question.
+export SIRVEN_YES=1
 
 pass() { HARNESS_PASSED=$((HARNESS_PASSED + 1)); printf 'ok      %s\n' "$1"; }
 fail() {
