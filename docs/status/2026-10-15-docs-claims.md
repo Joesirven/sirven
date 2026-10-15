@@ -1,6 +1,6 @@
 # Docs claims audit, 2026-10-15
 
-Checked against origin/main at commit 1cc13bb, on the branch docs-truth-pass-2026-10-15 cut from origin/main. Successor to `docs/status/2026-10-14-docs-claims.md` (checked against 713659b, before the Linux apply, the macOS apply switch, the kill switch apply on Linux, the Tailscale transport, and release v0.2.0).
+Checked against origin/main at commit 1cc13bb (plain dry-run rows rechecked after the SIR-92 merge, see C3), on the branch docs-truth-pass-2026-10-15 cut from origin/main. Successor to `docs/status/2026-10-14-docs-claims.md` (checked against 713659b, before the Linux apply, the macOS apply switch, the kill switch apply on Linux, the Tailscale transport, and release v0.2.0).
 
 Part of the bb task SIR-40 (W13: Docs, demo, video).
 
@@ -20,7 +20,7 @@ Terms used below: npm is the Node package manager. gh is the GitHub command line
 
 ## Findings fixed on this branch
 
-1. **Plain dry run refuses on a Tailscale machine** (README.md:35; the new paragraph is README.md:40 on the branch). On this Mac, `bash install.sh --dry-run` exits 2 and prints no plan, because the machine is logged in to Tailscale without `tag:agent`. Fixed: the Quick start now says so and names `--transport none` and `--prefix` as the ways to read the plan.
+1. **Plain dry run exits 2 on a Tailscale machine** (README.md:35; the new paragraph is README.md:40 on the branch). On this Mac, at the 1cc13bb baseline, `bash install.sh --dry-run` exited 2 and printed no plan, because the machine is logged in to Tailscale without `tag:agent`. After the SIR-92 merge a plain dry run prints the whole plan with the conflict as a blocked step and still exits 2. Fixed: the Quick start says so and names `--transport none` and `--prefix` as the ways to get exit 0.
 2. **"Nothing else on the machine changes"** (docs/WALKTHROUGH.md:67). False: the plan also creates the state and policy folders, the audit folder, the kept copy of the package, the launcher `/usr/local/sbin/sirven`, and (with the default transport) joins the tailnet. Fixed with the real list.
 3. **`--with-bb` "has nothing left to install"** (docs/WALKTHROUGH.md:14). Ambiguous. The help says it adds a note to the plan, plan only for now. Fixed to say that.
 4. **Mac apply "stops before any change"** (docs/WALKTHROUGH.md:48). True by default, not without the owner's switch. Fixed to name `SIRVEN_MACOS_REAL_APPLY=1` and the root requirement.
@@ -50,9 +50,9 @@ Terms used below: npm is the Node package manager. gh is the GitHub command line
 | R3 | Nothing granted by default; system folders, home folder, credential folders refused | :25 | TRUE, WITH A QUALIFICATION | `paths.default_grants` empty, `deny_exact` lists /home and /Users, `deny_within` lists /etc and /usr, `deny_components` lists .ssh, in every level file. No refusal was run. |
 | R4 | `sirven grant inspect` shows what is in force; `grant rollback` reverses the last change | :26 | TRUE | `grant inspect --prefix` exits 0 (C1). `grant rollback --dry-run` exits 1 with "no audit log ... no grant change to roll back" on a fake root with no install (C1). |
 | R5 | `sudo /usr/local/sbin/sirven revoke --all` cuts the agent off and keeps the records | :26 | TRUE on Linux as root; plan output on macOS | lib/kill_switch.sh:443 (`plan_kill_switch_linux`) applies the steps. The macOS plan is `plan_kill_switch_macos` (:426), applied only as plan output (`revoke --all --dry-run` exits 0; applying on macOS is refused, install.sh:552). Linux apply has harness scenarios 03, 36, 44, 60 (names only, not re-run in this pass). |
-| R6 | Installer prints its full plan first; `--dry-run` changes nothing | :27 | TRUE, WITH A QUALIFICATION | `--dry-run --prefix ... --yes` prints the plan, exit 0 (C2). Plain `--dry-run` on this Mac refuses, exit 2, before any plan (C3). Fixed in the Quick start. |
+| R6 | Installer prints its full plan first; `--dry-run` changes nothing | :27 | TRUE, WITH A QUALIFICATION | `--dry-run --prefix ... --yes` prints the plan, exit 0 (C2). At the 1cc13bb baseline, plain `--dry-run` on this Mac refused, exit 2, before any plan (C3); after SIR-92 it prints the whole plan with the conflict as a blocked step and still exits 2. Fixed in the Quick start. |
 | R7 | Adopts what it finds (Tailscale, bb, an earlier run) and does not replace it | :28 | TRUE | install.sh --help (I2); lib/adopt.sh. Adopt tests in the make test run (see gates). |
-| R8 | Quick start: `bash install.sh --dry-run` "read the plan first; this changes nothing" | :35 | FALSE on this Mac (fixed) | Exit 2 on this Mac (C3). The plan prints with `--transport none` (C4) and with `--prefix` (C2). |
+| R8 | Quick start: `bash install.sh --dry-run` "read the plan first; this changes nothing" | :35 | TRUE FOR THE PLAN, EXIT 2 WITH A CONFLICT (fixed) | At the 1cc13bb baseline this was FALSE on this Mac: exit 2 and no plan (C3). After SIR-92 the plan prints and the exit is still 2 with a conflict; exit 0 with `--transport none` (C4) or `--prefix` (C2). |
 | R9 | `sudo bash install.sh` asks two questions: level and folder | :36 | TRUE | install.sh --help (I1); lib/questions.sh:4-5, prompt format `N/2 access level [default]`. |
 | R10 | `bash bin/sirven grant inspect` | :37 | TRUE | Exit 0 with a fake root (C1). |
 | R11 | Applying the plan to a real Linux machine: root, a plan printed, a typed yes; no terminal means nothing applied, exit 3, unless `--yes` | :45-46 | TRUE | lib/plan.sh:460-474 (typed yes, no-terminal refusal returns 3); install.sh:552 (`DIE_STATUS=3`). |
@@ -90,7 +90,7 @@ Terms used below: npm is the Node package manager. gh is the GitHub command line
 | W4 | An earlier run's grant, policy copy, audit log, and install record are kept | :15 | TRUE (by tests) | Adopt tests (make test). |
 | W5 | Conflicts stop the run before any change, and say what to do | :17-22 | TRUE | The Tailscale conflict text (C3, `--dry-run` on this Mac) matches :19. |
 | W6 | A plain re-run keeps the earlier level and path; a different one is a grant change | :24 | TRUE (by tests) | Adopt tests. |
-| W7 | With `--yes` nothing is asked: observer, no path; `--dry-run` changes nothing | :46-51, :63 | TRUE, WITH A QUALIFICATION | `--yes` prints "using defaults (--yes): level observer, paths none" (C2, the prefix run). A plain `--dry-run` can refuse on a conflicting machine, see R6. |
+| W7 | With `--yes` nothing is asked: observer, no path; `--dry-run` changes nothing | :46-51, :63 | TRUE, WITH A QUALIFICATION | `--yes` prints "using defaults (--yes): level observer, paths none" (C2, the prefix run). A plain `--dry-run` on a conflicting machine prints the plan and exits 2, see R6. |
 | W8 | A Mac without developer tools: stop and ask for `xcode-select --install` | :48 | TRUE (by code) | The placeholder check (lib/preflight.sh). Not run here: developer tools are present on this Mac. |
 | W9 | Applying an install to a Mac is not verified; a real run stops before any change | :48 | TRUE, WITH A QUALIFICATION (fixed) | lib/plan.sh:367-373: the owner's switch `SIRVEN_MACOS_REAL_APPLY=1` as root lifts the refusal. |
 | W10 | The one-line command installs a pinned release, checked against its checksum | :50 | TRUE | The served script equals the repository copy (C9, cmp exit 0). The pinned checksum matches the release asset (C8). The command itself was not run, because it installs. |
@@ -271,7 +271,7 @@ Terms used below: npm is the Node package manager. gh is the GitHub command line
 | I6 | `--yes` asks nothing and uses the defaults (observer, no path) | TRUE | C2 ("using defaults (--yes): level observer, paths none"). |
 | I7 | A real machine is changed only when run as root, with a typed yes | TRUE | lib/plan.sh:460-474. |
 | I8 | `--with-bb` adds a plan note only, for now | TRUE | Help text; the plan shows the note. |
-| I9 | Examples: `./install.sh --dry-run`, `sudo /usr/local/sbin/sirven revoke --all --dry-run` | TRUE | `revoke --all --dry-run --prefix` exits 0 (C4). The plain `--dry-run` example is subject to R6. |
+| I9 | Examples: `./install.sh --dry-run`, `sudo /usr/local/sbin/sirven revoke --all --dry-run` | TRUE | `revoke --all --dry-run --prefix` exits 0 (C4). The plain `--dry-run` example exits 2 with a conflict, see R6. |
 
 ## uninstall.sh --help
 
@@ -310,7 +310,7 @@ Commands ran from the worktree on branch docs-truth-pass-2026-10-15 unless noted
 |---|---|---|---|
 | C1 | `bin/sirven grant inspect --prefix P`; `bin/sirven grant rollback --dry-run --prefix P` | 0; 1 | Fake root with no install: "no audit log ... no grant change to roll back" |
 | C2 | `bash install.sh --dry-run --prefix P --yes` | 0 | 22 steps; 17 to do, 4 by the owner, 1 plan only |
-| C3 | `bash install.sh --dry-run` (plain) | 2 | Refused: Tailscale login without tag:agent; the message names the two ways out |
+| C3 | `bash install.sh --dry-run` (plain) | 2 | Baseline (1cc13bb): refused before any plan, Tailscale login without tag:agent, the message names the two ways out. After SIR-92 (rechecked on the integration branch, 2026-10-15): the whole plan prints with the conflict as a blocked step, exit 2 |
 | C4 | `bash install.sh revoke --all --dry-run --prefix P`; `bash install.sh revoke --all --dry-run`; `bash install.sh --dry-run --transport none`; `bash install.sh --dry-run --level builder --path /srv/app --prefix P`; `SIRVEN_LEVEL=builder SIRVEN_PATH=/srv/app bash install.sh --yes --dry-run --prefix P`; `bash uninstall.sh --dry-run --prefix P`; `bash uninstall.sh --dry-run` | 0 each | Plain revoke dry run prints "applying would be refused on this machine" for macOS |
 | C5 | `bin/sirven awake --help`; `make -n keep-awake` | 1 (earlier pass, "not built yet"); 0 | |
 | C6 | `bin/sirven phone --help`; `bin/sirven phone detect`; `bin/sirven runtime --help` | 0; 1 ("no iPhone is plugged in over USB"); 0 | |

@@ -47,7 +47,7 @@ cd sirven
 
 Or from npm: `npm install -g @joesirven/sirven`, then run the `install.sh` inside the global package folder.
 
-On a Mac without the command line developer tools, the installer stops with a message asking you to run `xcode-select --install` first: the python3 that macOS ships is a placeholder until they are installed. Install them, wait for that to finish, and run the installer again. Applying an install to a Mac is not verified yet: a real run stops before any change, unless the owner's real install check is switched on with `SIRVEN_MACOS_REAL_APPLY=1` as root. On a Mac with the developer tools, a `--dry-run` shows the plan unless the Mac is logged in to Tailscale without `tag:agent`; see the README quick start for the two ways around that.
+On a Mac without the command line developer tools, the installer stops with a message asking you to run `xcode-select --install` first: the python3 that macOS ships is a placeholder until they are installed. Install them, wait for that to finish, and run the installer again. Applying an install to a Mac is not verified yet: a real run stops before any change, unless the owner's real install check is switched on with `SIRVEN_MACOS_REAL_APPLY=1` as root. On a Mac with the developer tools, a `--dry-run` always shows the plan; with a conflict (for example a Tailscale login without `tag:agent`) its exit status is 2, and the README quick start names the two ways to get 0.
 
 The one-line command at `https://cli.sirven.xyz` installs a pinned release instead, checked against its checksum before anything runs. See [BOOTSTRAP.md](BOOTSTRAP.md).
 
