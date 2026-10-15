@@ -455,8 +455,10 @@ revoke <invite>
   granted folder and everything inside it, never following a link, and the install first refuses a
   tree where that account already has an entry, and a granted path that is a link. the service user
   is made by the install, so it holds no entry anywhere before the grant, and the sweep restores
-  every list exactly. `revoke` (the kill switch) still uses the subtraction and has the remainder
-  problem described here; that is for the kill switch's owner to move to the sweep.
+  every list exactly. `revoke` (the kill switch) builds its access control step from the same sweep, so
+  revoke and uninstall agree and both leave no entry that names the service user. macos revoke is still plan
+  output until a run on a real Mac verifies it; the sweep commands themselves are tested on a real Mac inside
+  a scratch folder.
 - the grant, the check and the undo are all descriptor based, so no path is followed after the start
   folder is opened. who could race a first install: no agent process exists yet, and the folder owner or a
   collaborator who can write in the tree could plant a link, but the grant does not follow it, so they gain

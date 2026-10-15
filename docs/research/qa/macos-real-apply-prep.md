@@ -52,10 +52,10 @@ The service user is made by the install, so it holds no entry anywhere before th
 above enforce it). Every entry that names it was added by the grant, so removing all of them puts every
 list back exactly. Mode bits are never touched: a macos list lives beside them.
 
-**For the owner of the kill switch (not changed here):** `revoke_macos` in `lib/grant_compiler.py` and
-`install.sh revoke` still use the subtraction, so revoke has problems 2 and 3. The fix is to use
-`macos_sweep_removal` for revoke too. The golden files `revoke-fragment-macos-builder.txt` and
-`revoke-macos-cloudflare.txt` are unchanged by this branch.
+**Revoke now agrees:** `revoke_macos` in `lib/grant_compiler.py` builds its lines with `macos_sweep_removal`, the same
+function the undo of a grant and uninstall use, so revoke has neither problem 2 nor problem 3. The golden files
+`revoke-fragment-macos-builder.txt` and `revoke-macos-cloudflare.txt` changed with it. The kill switch on macos is
+still plan output; a real revoke run on a Mac (root, the service user, the lock and the keys) is not verified.
 
 ### Switching real apply on
 
@@ -66,7 +66,9 @@ sudo env SIRVEN_MACOS_REAL_APPLY=1 bash install.sh --level observer --path /some
 `sudo` drops the variable without `env`, so `SIRVEN_MACOS_REAL_APPLY=1 sudo ...` would leave it off and be
 refused. Only the exact value `1` counts. The refusal text says all this. `uninstall.sh` and
 `sirven grant rollback` call the same function. Rollback on macos stays refused (its removal steps are
-plan only): it uses the revoke subtraction, which is not safe, and it is not part of install or uninstall.
+plan only): its removal lines are the revoke lines, which are now the sweep. It is still not verified on a real Mac, and a
+sweep of a path nested inside another granted path would also take the entries the outer grant put there, so rollback
+needs that looked at before it is switched on. It is not part of install or uninstall.
 
 Merge note: this branch changes only the macos arm of `plan_real_apply_refusal` (`lib/plan.sh`): that
 arm now calls `plan_macos_real_apply_refusal`, defined just above it. A sibling branch editing the linux
