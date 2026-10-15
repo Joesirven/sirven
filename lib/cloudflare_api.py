@@ -24,15 +24,22 @@ record file actions (no token, no network):
   marker-set FILE KEY=VALUE...           add or replace fields of the JSON record FILE (mode 0600, replaced in one step)
   marker-get FILE KEY                    print one field; exit 3 when the file or the field is not there
 
-SIRVEN_CLOUDFLARE_API replaces the API address for the tests, and is honored only when it names this machine itself
-(http://127.0.0.1:PORT or http://localhost:PORT), as root too: the test harness runs as root, and an address on this machine
-cannot take the token anywhere else. any other value is ignored, with a note, and the real address is used.
-this program follows no redirect: the Authorization header is sent to the one address and to no other.
+SIRVEN_CLOUDFLARE_API replaces the API address for the tests, and is honored only in a test run, and only when it names this machine
+itself (http://127.0.0.1:PORT or http://localhost:PORT). a test run is: a process that is not root (it can only hurt its own
+account), or root with a file /run/sirven-test-run that is a plain file owned by root and writable by nobody else, which only the
+test container's own setup makes. an environment alone is not enough as root: root's environment can be inherited from anywhere, and
+any local account can listen on a port of this machine, so an address on this machine is not an address that cannot take the token
+anywhere else. in every other case the override is ignored, with a note, and the real address is used.
+
+this program clears the proxy and certificate variables of its environment (http_proxy and the like, SSL_CERT_FILE, SSL_CERT_DIR,
+SSLKEYLOGFILE) before it calls the API, uses no proxy, and follows no redirect: the Authorization header is sent to the one address
+and to no other.
 """
 import base64
 import json
 import os
 import re
+import stat
 import sys
 import urllib.error
 import urllib.parse
@@ -54,15 +61,42 @@ class Failure(Exception):
         self.status = status
 
 
+TEST_RUN_MARKER = "/run/sirven-test-run"
+# variables that change where a request goes or which certificates are trusted (or where TLS secrets are written), whatever the caller
+# had in its environment; compared in lower case for the proxy ones
+CLEARED_EXACT = ("SSL_CERT_FILE", "SSL_CERT_DIR", "SSLKEYLOGFILE", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE", "OPENSSL_CONF")
+CLEARED_LOWER = ("http_proxy", "https_proxy", "all_proxy", "ftp_proxy", "no_proxy")
+
+
+def clear_environment():
+    for name in list(os.environ):
+        if name in CLEARED_EXACT or name.lower() in CLEARED_LOWER:
+            del os.environ[name]
+
+
+def test_run():
+    """not root, or root with the marker file only the test container's setup makes (see the top of this file)"""
+    if os.geteuid() != 0:
+        return True
+    try:
+        info = os.lstat(TEST_RUN_MARKER)
+    except OSError:
+        return False
+    return stat.S_ISREG(info.st_mode) and info.st_uid == 0 and not info.st_mode & 0o022
+
+
 def api_base():
     seam = os.environ.get("SIRVEN_CLOUDFLARE_API", "")
     if not seam:
         return DEFAULT_BASE
     parsed = urllib.parse.urlsplit(seam)
-    if parsed.scheme == "http" and parsed.hostname in ("127.0.0.1", "localhost") and parsed.username is None:
-        return seam.rstrip("/")
-    sys.stderr.write("note: SIRVEN_CLOUDFLARE_API names an address that is not this machine, so it is ignored.\n")
-    return DEFAULT_BASE
+    if not (parsed.scheme == "http" and parsed.hostname in ("127.0.0.1", "localhost") and parsed.username is None):
+        sys.stderr.write("note: SIRVEN_CLOUDFLARE_API names an address that is not this machine, so it is ignored.\n")
+        return DEFAULT_BASE
+    if not test_run():
+        sys.stderr.write("note: SIRVEN_CLOUDFLARE_API is for test runs only, and this is not one, so it is ignored.\n")
+        return DEFAULT_BASE
+    return seam.rstrip("/")
 
 
 def check(pattern, value, what):
@@ -83,8 +117,10 @@ class Client:
         if not token:
             raise Failure("there is no API token on standard input", 2)
         self.token = token
+        clear_environment()
         self.base = api_base()
-        self.opener = urllib.request.build_opener(NoRedirect())
+        # no proxy at all (an empty table, not the environment's) and no redirect
+        self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
 
     def blank(self, text):
         return text.replace(self.token, "[token hidden]")

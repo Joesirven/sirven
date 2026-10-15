@@ -45,6 +45,9 @@ set -uo pipefail
 unset CF_ENV_TOKEN TOKEN TOKEN_ORIGIN
 CF_ENV_TOKEN="${SIRVEN_CLOUDFLARE_API_TOKEN:-}"
 unset SIRVEN_CLOUDFLARE_API_TOKEN
+# what decides where a request goes or which certificates are trusted is not the caller's to set (the API program clears these too)
+unset http_proxy https_proxy all_proxy ftp_proxy no_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY FTP_PROXY NO_PROXY \
+  SSL_CERT_FILE SSL_CERT_DIR SSLKEYLOGFILE REQUESTS_CA_BUNDLE CURL_CA_BUNDLE OPENSSL_CONF
 
 case "${BASH_SOURCE[0]}" in */*) SELF_DIR="${BASH_SOURCE[0]%/*}" ;; *) SELF_DIR="." ;; esac
 # shellcheck source=lib/secret_file.sh

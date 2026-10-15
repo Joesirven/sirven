@@ -28,6 +28,9 @@ printf '%s\n' "$TOKEN" > /tmp/fake-api-token
 python3 -I "$FIXTURES/api_server.py" "$API_DIR" --token-file /tmp/fake-api-token --account "$ACCOUNT" --zone "$ZONE" --zone-name example.test >/dev/null 2>&1 &
 for _ in $(seq 1 50); do [ -s "$API_DIR/port" ] && break; sleep 0.1; done
 export SIRVEN_CLOUDFLARE_API="http://127.0.0.1:$(cat "$API_DIR/port")"
+# root honors that address only in a test run, which is a root-owned file in /run that this container's own setup makes (an environment
+# alone is not enough: root's environment can be inherited from anywhere)
+install -o root -g root -m 0600 /dev/null /run/sirven-test-run
 
 # the scenario exports TOKEN and KEY itself, for the checks below. the installer must not be given them by accident, or every child it starts
 # would carry the sentinel for a reason that is the scenario's, so each run drops both. CALLER_EXPORTED_TOKEN puts back a variable named TOKEN
@@ -297,13 +300,34 @@ for level in observer builder operator; do
 done
 check "the config is the same text for observer, builder and operator (but for the tunnel number)" bash -c 'cmp -s /tmp/config-observer /tmp/config-builder && cmp -s /tmp/config-observer /tmp/config-operator && grep -q "service: ssh://localhost:22" /tmp/config-observer && [ "$(grep -c "service:" /tmp/config-observer)" = 2 ]'
 
-# 10. an address that is not this machine is never used for the API, as root either, even when the environment names one
-check "a non-loopback API address in the environment is ignored" env SIRVEN_CLOUDFLARE_API=http://example.invalid:9 python3 -I -c '
+# 10. an address that is not this machine is never used for the API, as root either, even when the environment names one; and an
+# address that is this machine is used only in a test run (the marker file), never on an environment alone
+api_base_with() {
+  env SIRVEN_CLOUDFLARE_API="$1" python3 -I -c '
 import importlib.util
 spec = importlib.util.spec_from_file_location("api", "/srv/pkg/lib/cloudflare_api.py")
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
-assert module.api_base() == "https://api.cloudflare.com/client/v4", module.api_base()'
+print(module.api_base())' 2>/dev/null
+}
+export -f api_base_with
+REAL_API="https://api.cloudflare.com/client/v4"
+check "a non-loopback API address in the environment is ignored" bash -c '[ "$(api_base_with http://example.invalid:9)" = "$0" ]' "$REAL_API"
+check "with the marker file, as root, the address of this machine is used" bash -c '[ "$(api_base_with http://127.0.0.1:9)" = http://127.0.0.1:9 ]'
+rm -f /run/sirven-test-run
+check "without the marker file, as root, the address of this machine is ignored (the environment alone is not a test run)" bash -c '[ "$(api_base_with http://127.0.0.1:9)" = "$0" ]' "$REAL_API"
+install -o nobody -g nogroup -m 0600 /dev/null /run/sirven-test-run
+check "a marker file owned by someone else is not a test run" bash -c '[ "$(api_base_with http://127.0.0.1:9)" = "$0" ]' "$REAL_API"
+rm -f /run/sirven-test-run; install -o root -g root -m 0666 /dev/null /run/sirven-test-run
+check "a marker file anyone can write is not a test run" bash -c '[ "$(api_base_with http://127.0.0.1:9)" = "$0" ]' "$REAL_API"
+rm -f /run/sirven-test-run; ln -s /etc/hostname /run/sirven-test-run
+check "a link in place of the marker file is not a test run" bash -c '[ "$(api_base_with http://127.0.0.1:9)" = "$0" ]' "$REAL_API"
+rm -f /run/sirven-test-run
+reset_machine
+calls_before="$(wc -l < /tmp/fake-api/calls.log)"
+SIRVEN_CLOUDFLARE_API_TOKEN="$TOKEN" check_exit "a real apply as root without the marker file goes to the real address, which this container cannot reach, and is refused" 2 install_cf
+check "it says it could not reach the Cloudflare API, and the fake API was sent nothing" bash -c 'grep -q "could not reach the Cloudflare API" <<< "$0" && grep -q "nothing was changed" <<< "$0" && [ "$(wc -l < /tmp/fake-api/calls.log)" = "$1" ]' "$LAST_OUTPUT" "$calls_before"
+install -o root -g root -m 0600 /dev/null /run/sirven-test-run
 
 save_trace() { printf '%s\n' "$LAST_OUTPUT" > /tmp/trace-output; printf '/tmp/trace-output'; }
 # 11. a shell trace (bash -x) prints every expansion, and a refusal captures standard error into its message: the token must be in none of

@@ -581,6 +581,61 @@ print(module.api_base())' "$REPO_DIR/lib/cloudflare_api.py")"
   assert_eq "http://127.0.0.1:9" "$base" "an address on this machine is honored"
 }
 
+# the API address of the tests is honored as root only in a test run: with the marker file only the test container makes (a plain file
+# owned by root that nobody else can write), not on an environment alone. the program is run with root and the marker faked (the unit
+# tests are not root, and cannot make a root-owned file).
+test_the_test_api_address_is_ignored_as_root_without_the_marker_file() {
+  local base what
+  for what in none plain-0600-root plain-0644-root plain-0600-other plain-0666-root plain-0620-root symlink-root directory-root; do
+    base="$(SIRVEN_CLOUDFLARE_API="http://127.0.0.1:9" python3 -I -c '
+import importlib.util, os, stat, sys
+spec = importlib.util.spec_from_file_location("cloudflare_api", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+module.os.geteuid = lambda: 0
+what = sys.argv[2]
+kind, _, rest = what.partition("-")
+def lstat(path):
+    assert path == module.TEST_RUN_MARKER, path
+    if what == "none":
+        raise FileNotFoundError(path)
+    form = {"plain": stat.S_IFREG, "symlink": stat.S_IFLNK, "directory": stat.S_IFDIR}[kind]
+    mode = int(rest[:4], 8) if kind == "plain" else 0o777
+    owner = 0 if rest.endswith("root") else 1000
+    return os.stat_result((form | mode, 1, 1, 1, owner, 0, 0, 0, 0, 0))
+module.os.lstat = lstat
+print(module.api_base())' "$REPO_DIR/lib/cloudflare_api.py" "$what" 2>/dev/null)"
+    case "$what" in
+      plain-0600-root | plain-0644-root) assert_eq "http://127.0.0.1:9" "$base" "root with the marker file ($what) honors the address of the tests" ;;
+      *) assert_eq "https://api.cloudflare.com/client/v4" "$base" "root with the marker '$what' must ignore it" ;;
+    esac
+  done
+}
+
+# a proxy or a certificate variable of the caller decides nothing: the request goes straight to the address, trusting what the program
+# trusts. a dead proxy would otherwise make every call fail (or, a live one, read the token)
+test_proxy_and_certificate_variables_of_the_caller_are_cleared() {
+  setup_tunnel
+  local name status
+  for name in http_proxy HTTP_PROXY all_proxy ALL_PROXY https_proxy HTTPS_PROXY; do
+    status=0
+    # shellcheck disable=SC2016 # the quotes keep the shell of the test from expanding what the inner bash expands
+    env "$name=http://127.0.0.1:1" bash -c 'printf "%s\n" "$1" | python3 -I "$2" verify "$3"' _ "$SENTINEL_TOKEN" "$REPO_DIR/lib/cloudflare_api.py" "$ACCOUNT" >/dev/null 2>&1 || status=$?
+    assert_eq 0 "$status" "a dead proxy named in $name is not used"
+  done
+  assert_eq "" "$(SSL_CERT_FILE=/nonexistent SSL_CERT_DIR=/nonexistent SSLKEYLOGFILE="$TEST_TMP/keylog" http_proxy=x HTTPS_PROXY=x no_proxy=x python3 -I -c '
+import importlib.util, os, sys
+spec = importlib.util.spec_from_file_location("cloudflare_api", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+module.Client("a-token")
+print(" ".join(sorted(n for n in os.environ if n.lower().endswith("_proxy") or n.startswith("SSL"))))' "$REPO_DIR/lib/cloudflare_api.py")" "the variables left after the client is made"
+  # the shell helper clears them too, before it starts any process: the fakes it starts do not see them
+  http_proxy=http://127.0.0.1:1 SSL_CERT_FILE=/nonexistent assert_status 0 up
+  assert_not_contains "$(cat "$FAKE_CF_DIR/environment-names.log")" "http_proxy" "cloudflared"
+  assert_not_contains "$(cat "$FAKE_CF_DIR/environment-names.log")" "SSL_CERT_FILE" "cloudflared"
+}
+
 # the Authorization header goes to the one address and to no other: every redirect is refused, so a redirect to a listener of
 # someone else never reaches it
 test_every_redirect_is_refused_and_the_token_is_not_forwarded() {
