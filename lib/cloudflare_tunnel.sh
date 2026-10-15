@@ -6,7 +6,8 @@
 #
 #   cloudflare_tunnel.sh up    --marker F --config F --credentials F --unit F --service NAME --user NAME --hostname H --account A [--zone Z] [--token-file F]
 #   cloudflare_tunnel.sh down  --marker F --config F --credentials F --unit F --service NAME [--token-file F]
-#   cloudflare_tunnel.sh check --marker F --hostname H --account A [--zone Z] [--token-file F]   every refusal 'up' can make, no change
+#   cloudflare_tunnel.sh check --marker F --hostname H --account A [--zone Z] [--token-file F]          every refusal 'up' can make that needs no network
+#   cloudflare_tunnel.sh check-account --marker F --hostname H --account A [--zone Z] [--token-file F]  the ones that need the Cloudflare API (3 reads)
 #   cloudflare_tunnel.sh applied MARKER                       exit 0 when the tunnel is made and its service runs (needs no token)
 #   cloudflare_tunnel.sh token-file-check FILE                exit 0 a usable token file, 1 none there, 2 there but not safe (says why)
 #
@@ -313,9 +314,10 @@ complete() {
   service_active "$(record_get service)"
 }
 
-# first_look_problem: every reason 'up' would refuse, found before any change. sets nothing; prints the reason and returns 1.
-first_look() {
-  local command hostname="$1" account="$2" zone="$3" found zone_found existing count
+# first_look_local HOSTNAME ACCOUNT ZONE: every reason 'up' would refuse that needs no network, found before any change. refuses (says why,
+# exit 2) or returns. this is what the installer asks before it prints the plan: nothing here is sent anywhere.
+first_look_local() {
+  local command hostname="$1" account="$2" zone="$3"
   valid_hostname "$hostname" || refuse "the hostname '$hostname' is not a plain lowercase host name with a zone in it (like agent.example.org)."
   [[ "$account" =~ ^[0-9a-f]{32}$ ]] || refuse "the account number '$account' is not 32 hexadecimal characters (dashboard, any zone, overview, the account number on the right)."
   [ -z "$zone" ] || [[ "$zone" =~ ^[0-9a-f]{32}$ ]] || refuse "the zone number '$zone' is not 32 hexadecimal characters."
@@ -324,6 +326,14 @@ first_look() {
   [ -n "$command" ] || refuse "cloudflared is not installed on this machine. $(install_hint)"
   systemd_running || refuse "systemd does not run on this machine, and the tunnel service is a systemd unit. sirven starts the tunnel only under systemd. run again with --transport none, or start the tunnel yourself."
   command -v python3 >/dev/null 2>&1 || refuse "python3 is not installed."
+}
+
+# first_look_account HOSTNAME ZONE ACCOUNT: the reasons 'up' would refuse that need the Cloudflare API (three read-only requests, the
+# token in the Authorization header): a token the API turns away, a zone that cannot be found, a hostname that already has a record that
+# is not ours. refuses or returns. the first request of the whole install goes out here, and the installer asks only after the owner's yes.
+first_look_account() {
+  local hostname="$1" zone="$2" account="$3" found zone_found existing count
+  [ -n "$TOKEN" ] || refuse "there is no Cloudflare API token. $(token_hint)"
   found="$(api verify "$account" 2>&1 >/dev/null)" || refuse "the token cannot list tunnels of account $account: ${found#error: }. $(token_hint)"
   if [ -z "$zone" ]; then
     zone_found="$(api find-zone "$hostname" 2>&1)" || refuse "could not find the zone of $hostname: ${zone_found#error: }."
@@ -342,6 +352,12 @@ sys.exit(0 if any(r["id"] == mine or (target and r["content"] == target) for r i
     fi
     refuse "$hostname already has a record in the zone that sirven did not make, and sirven never changes a record it did not make. pick another hostname, or remove that record yourself."
   fi
+}
+
+# first_look HOSTNAME ACCOUNT ZONE: both, in that order (what 'up' asks, once it has been told to go ahead)
+first_look() {
+  first_look_local "$1" "$2" "$3"
+  first_look_account "$1" "$3" "$2"
 }
 
 # the record's hostname and account must be the ones asked for, or the machine already has a tunnel for something else
@@ -443,13 +459,25 @@ cmd_token_file_check() {
   [ -f "$1" ] && [ -s "$1" ] || exit 1
 }
 
+# check: every refusal 'up' can make that needs no network. nothing is sent anywhere
 cmd_check() {
   parse_options "$@"
   find_token "$OPT_TOKEN_FILE"
   require_usable_token
   same_target "$OPT_HOSTNAME" "$OPT_ACCOUNT"
   if complete; then return 0; fi
-  first_look "$OPT_HOSTNAME" "$OPT_ACCOUNT" "$OPT_ZONE"
+  first_look_local "$OPT_HOSTNAME" "$OPT_ACCOUNT" "$OPT_ZONE"
+}
+
+# check-account: the refusals 'up' can make that need the Cloudflare API. the installer runs it after the owner has confirmed the plan
+cmd_check_account() {
+  parse_options "$@"
+  find_token "$OPT_TOKEN_FILE"
+  require_usable_token
+  same_target "$OPT_HOSTNAME" "$OPT_ACCOUNT"
+  if complete; then return 0; fi
+  first_look_local "$OPT_HOSTNAME" "$OPT_ACCOUNT" "$OPT_ZONE"
+  first_look_account "$OPT_HOSTNAME" "$OPT_ZONE" "$OPT_ACCOUNT"
 }
 
 cmd_up() {
@@ -627,7 +655,8 @@ case "${1:-}" in
   up) shift; cmd_up "$@" ;;
   down) shift; cmd_down "$@" ;;
   check) shift; cmd_check "$@" ;;
+  check-account) shift; cmd_check_account "$@" ;;
   applied) shift; cmd_applied "$@" ;;
   token-file-check) shift; cmd_token_file_check "$@" ;;
-  *) printf 'usage: cloudflare_tunnel.sh up OPTIONS | down OPTIONS | check OPTIONS | applied MARKER | token-file-check FILE\n' >&2; exit 64 ;;
+  *) printf 'usage: cloudflare_tunnel.sh up OPTIONS | down OPTIONS | check OPTIONS | check-account OPTIONS | applied MARKER | token-file-check FILE\n' >&2; exit 64 ;;
 esac

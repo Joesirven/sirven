@@ -242,6 +242,40 @@ test_a_confirmation_already_given_is_not_asked_again() {
   assert_eq 3 "$CAPTURED_STATUS"
 }
 
+# a check that has to reach the network is run by plan_apply after the owner's yes and before the first change: not before the yes,
+# and a refusal from it stops the apply with that status and nothing changed
+test_the_check_before_the_first_change_runs_after_the_confirmation_and_can_stop_the_apply() {
+  setup_fake_root
+  gate_stubs
+  PLAN_PREFIX=""
+  PLAN_RECORD_FILE=""
+  unset SIRVEN_YES
+  # shellcheck disable=SC2329 # called by plan_real_apply_refusal in lib/plan.sh
+  id() { printf '0'; }
+  # shellcheck disable=SC2329 # called by plan_apply in lib/plan.sh
+  hook() { printf 'hook\n' >> "$TEST_TMP/hook-calls"; return "${HOOK_STATUS:-0}"; }
+  plan_step run "make a file" "[ -e $TEST_TMP/made ]" "touch $TEST_TMP/made"
+  plan_evaluate
+  PLAN_BEFORE_FIRST_CHANGE=hook
+  # not confirmed: the hook is not called, and nothing is made
+  ASSUME_YES=no
+  STUB_TERMINAL=stdin
+  capture plan_apply <<< "no"
+  assert_eq 3 "$CAPTURED_STATUS"
+  assert_no_file "$TEST_TMP/hook-calls"
+  assert_no_file "$TEST_TMP/made"
+  # confirmed, and the hook refuses with 2: the apply stops with 2, before the first step
+  ASSUME_YES=yes
+  HOOK_STATUS=2 assert_status 2 plan_apply
+  assert_eq 1 "$(wc -l < "$TEST_TMP/hook-calls" | tr -d ' ')" "the hook was called once"
+  assert_no_file "$TEST_TMP/made"
+  assert_not_contains "$CAPTURED_STDOUT" "applying"
+  # confirmed, and the hook agrees: the steps run
+  assert_status 0 plan_apply
+  assert_file_exists "$TEST_TMP/made"
+  assert_eq 2 "$(wc -l < "$TEST_TMP/hook-calls" | tr -d ' ')"
+}
+
 test_plan_blockers_are_refused_before_asking_for_yes() {
   setup_fake_root
   gate_stubs

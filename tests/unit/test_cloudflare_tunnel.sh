@@ -193,6 +193,37 @@ test_the_refusals_come_before_the_first_change() {
   assert_eq 0 "$(api_value records)"
 }
 
+# the first look is in two parts. 'check' (what the installer asks before it prints the plan) sends nothing anywhere; 'check-account'
+# (what it asks after the owner's yes) is the one that reaches the API
+test_check_sends_nothing_and_check_account_makes_only_reads() {
+  setup_tunnel
+  local wrong="wrongtoken""0123456789abcdefghij" arguments
+  arguments=(--marker "$MARKER" --hostname "$HOST_NAME" --account "$ACCOUNT")
+  SIRVEN_CLOUDFLARE_API_TOKEN="$SENTINEL_TOKEN" assert_status 0 bash "$HELPER" check "${arguments[@]}"
+  SIRVEN_CLOUDFLARE_API_TOKEN="$wrong" assert_status 0 bash "$HELPER" check "${arguments[@]}"
+  assert_eq "" "$(api_calls)" "check reached the API (even with a token the API turns away)"
+  SIRVEN_CLOUDFLARE_API_TOKEN="$wrong" assert_status 2 bash "$HELPER" check-account "${arguments[@]}"
+  assert_contains "$CAPTURED_STDERR" "cannot list tunnels"
+  assert_contains "$CAPTURED_STDERR" "nothing was changed"
+  assert_not_contains "$CAPTURED_STDERR" "$wrong"
+  assert_eq 1 "$(api_calls | wc -l | tr -d ' ')" "one request, which the API turned away"
+  : > "$API_DIR/calls.log"
+  SIRVEN_CLOUDFLARE_API_TOKEN="$SENTINEL_TOKEN" assert_status 0 bash "$HELPER" check-account "${arguments[@]}"
+  [ "$(api_calls | wc -l | tr -d ' ')" -ge 3 ] || fail "check-account made fewer than the three reads (the token, the zone, the records)"
+  assert_eq 0 "$(api_calls | grep -c -v '^GET ' || true)" "and nothing but reads"
+  assert_eq 0 "$(api_value tunnels)" "nothing was made"
+  # a hostname that already has a record that is not ours is found by check-account, and only there
+  python3 -I - "$API_DIR/state.json" "$HOST_NAME" <<'PY'
+import json, sys
+state = json.load(open(sys.argv[1]))
+state["records"]["a" * 32] = {"id": "a" * 32, "type": "A", "name": sys.argv[2], "content": "192.0.2.1", "proxied": False}
+json.dump(state, open(sys.argv[1], "w"))
+PY
+  SIRVEN_CLOUDFLARE_API_TOKEN="$SENTINEL_TOKEN" assert_status 0 bash "$HELPER" check "${arguments[@]}"
+  SIRVEN_CLOUDFLARE_API_TOKEN="$SENTINEL_TOKEN" assert_status 2 bash "$HELPER" check-account "${arguments[@]}"
+  assert_contains "$CAPTURED_STDERR" "did not make"
+}
+
 test_up_refuses_a_hostname_that_already_has_a_record_of_someone_else() {
   setup_tunnel
   python3 -I - "$API_DIR" "$SIRVEN_CLOUDFLARE_API" "$SENTINEL_TOKEN" "$ZONE" <<'PY'

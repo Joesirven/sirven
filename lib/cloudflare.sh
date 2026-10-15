@@ -159,7 +159,9 @@ cloudflare_down() {
 }
 
 # cloudflare_refuse_before_apply: a real apply that cannot make the tunnel stops before its first change, with what to do. a dry run and
-# a fake root never make it, so they are not stopped. a machine that already has its tunnel needs no token.
+# a fake root never make it, so they are not stopped. a machine that already has its tunnel needs no token. this part sends nothing to the
+# network: it runs before the plan is printed, and the owner has not said yes yet. what needs the Cloudflare API waits for
+# cloudflare_check_account_before_apply, below.
 cloudflare_refuse_before_apply() {
   local token_file_status
   [ "$COMMAND" = install ] && [ "$TRANSPORT" = cloudflare ] && [ "$DRY_RUN" != yes ] && [ -z "$PREFIX" ] || return 0
@@ -188,11 +190,24 @@ cloudflare_refuse_before_apply() {
     printf 'you can: make a token in the Cloudflare dashboard (My Profile, API Tokens): permissions Account, Cloudflare Tunnel, Edit and Zone, domain name records, Edit, limited to the one account and the one zone, then run again with it saved as %s, owned by root, mode 0600 (the safer way), or in the environment: sudo --preserve-env=SIRVEN_CLOUDFLARE_API_TOKEN ... (which works only if the sudo policy allows it). or run again with --transport none.\n' "$(cloudflare_token_file)" >&2
     exit 2
   fi
-  # every other refusal the tunnel step would make, now, so that "nothing was changed" is true: cloudflared missing, no systemd, a token the
-  # API turns away, a hostname that already has a record that is not ours, a zone that cannot be found. the script prints why.
+  # every other refusal the tunnel step would make that needs no network, now, so that "nothing was changed" is true: cloudflared missing,
+  # no systemd, a hostname or number that is not in the form Cloudflare uses. the script prints why.
   # shellcheck disable=SC2046 # the helper's options are words by design
   cloudflare_tunnel_with_token check --marker "$(cloudflare_marker_file)" --hostname "$CLOUDFLARE_HOSTNAME" --account "$CLOUDFLARE_ACCOUNT" \
     ${CLOUDFLARE_ZONE:+--zone "$CLOUDFLARE_ZONE"} --token-file "$(cloudflare_token_file)" || exit 2
+}
+
+# cloudflare_check_account_before_apply: the refusals that need the Cloudflare API (a token the API turns away, a zone that cannot be
+# found, a hostname that already has a record that is not ours). the first request goes out only here: after the plan is printed and the
+# owner has confirmed it (plan_apply runs this through PLAN_BEFORE_FIRST_CHANGE, see install.sh), and before the first change, so "nothing
+# was changed" is still true when it refuses. a refusal is status 2.
+cloudflare_check_account_before_apply() {
+  [ "$COMMAND" = install ] && [ "$TRANSPORT" = cloudflare ] && [ "$DRY_RUN" != yes ] && [ -z "$PREFIX" ] || return 0
+  [ "$OPERATING_SYSTEM" = linux ] || return 0
+  if cloudflare_applied; then return 0; fi
+  # shellcheck disable=SC2046 # the helper's options are words by design
+  cloudflare_tunnel_with_token check-account --marker "$(cloudflare_marker_file)" --hostname "$CLOUDFLARE_HOSTNAME" --account "$CLOUDFLARE_ACCOUNT" \
+    ${CLOUDFLARE_ZONE:+--zone "$CLOUDFLARE_ZONE"} --token-file "$(cloudflare_token_file)" || return 2
 }
 
 plan_cloudflare() {

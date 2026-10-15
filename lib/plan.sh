@@ -61,6 +61,10 @@ PLAN_RECORD_FILE="${PLAN_RECORD_FILE:-}"
 PLAN_STEP_HOOK="${PLAN_STEP_HOOK:-}"
 PLAN_RECHECK="${PLAN_RECHECK:-no}"
 PLAN_CONFIRMED=no
+# PLAN_BEFORE_FIRST_CHANGE: the name of a function the caller sets, run once by plan_apply after the plan is confirmed and before the
+# first step, for a check that has to reach the network (the Cloudflare account, say): nothing goes out before the owner has said yes.
+# a nonzero status stops the apply with that status and nothing changed. it is not cleared by plan_reset.
+PLAN_BEFORE_FIRST_CHANGE="${PLAN_BEFORE_FIRST_CHANGE:-}"
 
 plan_reset() {
   PLAN_KIND=()
@@ -521,6 +525,7 @@ plan_apply() {
     return 3
   fi
   plan_confirm_real_apply || return 3
+  if [ -n "$PLAN_BEFORE_FIRST_CHANGE" ]; then "$PLAN_BEFORE_FIRST_CHANGE" || return "$?"; fi
   printf '\napplying\n'
   while [ "$index" -lt "$PLAN_COUNT" ]; do
     kind="${PLAN_KIND[index]}"

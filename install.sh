@@ -492,7 +492,9 @@ apply_for_real() {
   if [ "$status" -eq 4 ]; then
     if [ "$COMMAND" = revoke ]; then kill_switch_report_failure; else access_control_report_locked_account; fi
   fi
-  if [ "$status" -ne 3 ]; then
+  # 3: not applied (not confirmed, or a plan-only step); 2: refused after the confirmation and before the first change. neither wrote
+  # anything, so neither is an entry in the audit log
+  if [ "$status" -ne 3 ] && [ "$status" -ne 2 ]; then
     if [ "$COMMAND" = revoke ]; then
       if [ "$status" -eq 0 ]; then
         audit_write "$(audit_entry revoke_finished "operation=revoke" "outcome=finished" "json:paths=$(kill_switch_audit_paths)")"
@@ -557,6 +559,8 @@ finish() {
       DIE_STATUS=2 die "the kill switch cut $SERVICE_USER off while this run waited for the lock, and the plan above was made before that. nothing was changed. to bring the account back on purpose, run it again with --reinstate."
     fi
   fi
+  # a check that has to reach the network waits for the owner's yes and runs before the first change (see cloudflare_check_account_before_apply)
+  if [ "$COMMAND" = install ] && [ "$TRANSPORT" = cloudflare ]; then PLAN_BEFORE_FIRST_CHANGE=cloudflare_check_account_before_apply; fi
   apply_for_real || status=$?
   if [ "$COMMAND" = revoke ] && [ "$status" -eq 3 ] && [ -n "$(plan_blockers)" ]; then
     say "revoke is plan only for now. nothing was changed. to undo this install today, use ./uninstall.sh --dry-run to read the removal plan, then ./uninstall.sh to apply it." >&2

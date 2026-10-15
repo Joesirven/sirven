@@ -110,6 +110,16 @@ WRONG="wrongtoken0123456789wrongtoken0123456789"
 SIRVEN_CLOUDFLARE_API_TOKEN="$WRONG" check_exit "apply with a wrong token is refused" 2 install_cf
 check "it says the token cannot list tunnels, and does not print it" bash -c 'grep -q "cannot list tunnels" <<< "$0" && grep -q "nothing was changed" <<< "$0" && ! grep -qF -- wrongtoken0123456789 <<< "$0"' "$LAST_OUTPUT"
 world_unchanged_if 'true' "and it changed nothing" files /tmp/empty.files
+check "the plan was printed first, and the API was asked only after it (the refusal comes below the plan)" bash -c '[ "$(grep -n "transport: cloudflare tunnel" <<< "$0" | head -n 1 | cut -d: -f1)" -lt "$(grep -n "cannot list tunnels" <<< "$0" | head -n 1 | cut -d: -f1)" ]' "$LAST_OUTPUT"
+check "and the refusal left no entry in the audit log" bash -c '! grep -q cloudflare /var/log/sirven/audit.jsonl 2>/dev/null'
+
+# 1e. nothing goes to the API until the plan is confirmed: a good token and no yes (and no terminal here) is "not applied" (exit 3), and the
+# fake API was sent nothing at all
+calls_before_no_yes="$(wc -l < /tmp/fake-api/calls.log 2>/dev/null || echo 0)"
+no_yes_install() { as_a_caller bash install.sh --level observer --transport cloudflare --cloudflare-hostname "$HOST" --cloudflare-account "$ACCOUNT" < /dev/null; }
+SIRVEN_YES=0 SIRVEN_CLOUDFLARE_API_TOKEN="$TOKEN" check_exit "a valid token without a yes is not applied" 3 no_yes_install
+check "it printed the plan, said it was not applied, and sent the API nothing" bash -c 'grep -q "transport: cloudflare tunnel" <<< "$0" && grep -q "not applied" <<< "$0" && [ "$(wc -l < /tmp/fake-api/calls.log)" = "$1" ]' "$LAST_OUTPUT" "$calls_before_no_yes"
+world_unchanged_if 'true' "and it changed nothing" files /tmp/empty.files
 
 # 1d. a hostname that already has a record of someone else is never touched, and nothing is made
 python3 -I - "$SIRVEN_CLOUDFLARE_API" "$TOKEN" "$ZONE" <<'PY'
