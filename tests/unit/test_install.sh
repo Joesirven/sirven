@@ -238,6 +238,32 @@ test_revoke_removes_the_recorded_paths_and_the_paths_given() {
   assert_contains "$log" "$root/srv/other yes agent"
 }
 
+# revoke on macos is plan output on a fake root, but its access control step is the sweep uninstall uses: every
+# entry that names the agent, in the granted folder and everything inside it, then the pass-through parents.
+test_macos_revoke_plan_sweeps_every_entry_like_uninstall() {
+  local root="$TEST_TMP/root" revoke_plan uninstall_plan helper
+  TEST_OS=macos
+  helper="bash $root/var/lib/sirven/package/lib/access_control_macos.sh"
+  assert_status 0 install_sh --prefix "$root" --level builder --path /Users/example/code/app --transport none
+  assert_status 0 install_sh revoke --all --dry-run --prefix "$root" --transport none
+  revoke_plan="$CAPTURED_STDOUT"
+  assert_contains "$revoke_plan" "remove every entry of agent from /Users/example/code/app and everything inside it"
+  assert_contains "$revoke_plan" "$helper sweep agent yes $root/Users/example/code/app"
+  assert_contains "$revoke_plan" "$helper sweep agent no $root/Users/example/code"
+  assert_contains "$revoke_plan" "$helper sweep agent no $root/Users"
+  assert_not_contains "$revoke_plan" "chmod -h -a"
+  assert_not_contains "$revoke_plan" "find -P"
+  # the granted folder is swept before its parents, and the grant record is marked revoked after both
+  assert_eq 1 "$(printf '%s\n' "$revoke_plan" | grep -n "sweep agent" | head -n 1 | grep -c "sweep agent yes $root/Users/example/code/app")" "the granted folder comes first"
+  assert_eq 1 "$(printf '%s\n' "$revoke_plan" | grep -nE "sweep agent no .*/Users$|mark the grant record revoked" | head -n 2 | tail -n 1 | grep -c "mark the grant record revoked")" "the record is marked revoked after the sweeps"
+  # uninstall sweeps the same folders with the same commands, so the two leave the same state
+  assert_status 0 env SIRVEN_OS_OVERRIDE=macos "$REPO_DIR/uninstall.sh" --dry-run --prefix "$root"
+  uninstall_plan="$CAPTURED_STDOUT"
+  assert_contains "$uninstall_plan" "$helper sweep agent yes $root/Users/example/code/app"
+  assert_contains "$uninstall_plan" "$helper sweep agent no $root/Users/example/code"
+  assert_contains "$uninstall_plan" "$helper sweep agent no $root/Users"
+}
+
 test_revoke_locks_before_it_stops_for_an_unreadable_record() {
   local root="$TEST_TMP/root" log
   assert_status 0 install_sh --prefix "$root" --level builder --path /home/example/project --transport none

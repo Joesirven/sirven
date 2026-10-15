@@ -212,6 +212,14 @@ $1
 END
 }
 
+# the lines the kill switch's revoke prints for a path, for the paths inside TEST_TMP only (the title, the check,
+# and the command), with the helper taken from this checkout instead of the pinned copy.
+revoked_lines() {
+  python3 "$REPO_DIR/lib/grant_compiler.py" revoke --level "$MACOS_BUILDER_LEVEL" --os macos \
+    --user "$(id -un)" --prefix "" --path "$1" | grep -v '^#' | grep -F "$TEST_TMP" |
+    sed "s|/var/lib/sirven/package/lib/|$REPO_DIR/lib/|g"
+}
+
 test_the_undo_puts_every_list_back_exactly() {
   macos_only || return 0
   local user project lines before after
@@ -258,6 +266,56 @@ test_the_undo_puts_every_list_back_exactly() {
   assert_not_contains "$(/usr/bin/find -P "$project" -exec /bin/ls -lde {} +)" "user:$user" "no entry of the account is left, on old or new items"
   assert_contains "$(/bin/ls -lde "$project/a.txt")" "group:everyone deny delete"
   assert_eq "$(printf 'secret\n')" "$(cat "$TEST_TMP/outside/secret.txt")" "the file behind the link is untouched"
+}
+
+# revoke does what uninstall does: the commands the kill switch prints for a macos revoke are run for real here
+# on a granted tree, after life in it that a subtraction cannot undo (a new file inherits an entry built from
+# the folder rights, a file moved in with mv has no list at all). no entry of the account is left, every list
+# that was there before is as it was, and nothing behind a link is touched. this proves the commands on this
+# Mac inside TEST_TMP; a whole revoke run (as root, with the service user, the lock and the keys) is not run.
+test_revoke_sweeps_inherited_entries_and_items_with_no_list() {
+  macos_only || return 0
+  local user project grant revoke before after
+  user="$(id -un)"
+  project="$TEST_TMP/project"
+  mkdir -p "$project/sub" "$TEST_TMP/outside" "$TEST_TMP/staging"
+  printf 'one\n' > "$project/a.txt"
+  printf 'secret\n' > "$TEST_TMP/outside/secret.txt"
+  printf 'moved in\n' > "$TEST_TMP/staging/moved.txt"
+  ln -s ../outside "$project/folder-link"
+  ln -s ../outside/secret.txt "$project/file-link"
+  /bin/chmod +a "everyone deny delete" "$project/a.txt"
+  /usr/bin/find -P "$project" "$TEST_TMP/outside" | sort > "$TEST_TMP/paths-before.txt"
+  printf '%s\n' "$TEST_TMP" >> "$TEST_TMP/paths-before.txt"
+  before="$(acl_listing < "$TEST_TMP/paths-before.txt")"
+
+  grant="$(compiled_lines "$project")"
+  revoke="$(revoked_lines "$project")"
+  [ -n "$revoke" ] || fail "the compiler gave no revoke lines for $project"
+  assert_not_contains "$revoke" "chmod" "revoke is not a subtraction"
+  run_each "$(printf '%s\n' "$grant" | cut -f3)"
+
+  printf 'new\n' > "$project/new.txt"
+  mkdir "$project/newdir"
+  printf 'newer\n' > "$project/newdir/inner.txt"
+  mv "$TEST_TMP/staging/moved.txt" "$project/moved.txt"
+  assert_contains "$(/bin/ls -lde "$project/new.txt")" "inherited" "a new file holds an inherited entry"
+  assert_not_contains "$(/bin/ls -lde "$project/moved.txt")" "user:$user" "a file moved in holds no entry and no list"
+
+  if bash -c "$(printf '%s\n' "$revoke" | head -n 1 | cut -f2)"; then
+    fail "the revoke check passed while entries were still there"
+  fi
+  run_each "$(printf '%s\n' "$revoke" | cut -f3)"
+  run_each "$(printf '%s\n' "$revoke" | cut -f2)"
+
+  after="$(acl_listing < "$TEST_TMP/paths-before.txt")"
+  assert_eq "$before" "$after" "every list that existed before the grant is as it was"
+  assert_not_contains "$(/usr/bin/find -P "$project" -exec /bin/ls -lde {} +)" "user:$user" "no entry of the account is left, inherited ones included"
+  assert_not_contains "$(/bin/ls -lde "$project/new.txt" "$project/newdir/inner.txt")" "inherited"
+  assert_contains "$(/bin/ls -lde "$project/a.txt")" "group:everyone deny delete"
+  assert_eq "$(printf 'secret\n')" "$(cat "$TEST_TMP/outside/secret.txt")" "the file behind the link is untouched"
+  # a second revoke has nothing left to do and does not fail on the items that have no list
+  run_each "$(printf '%s\n' "$revoke" | cut -f3)"
 }
 
 test_check_refuses_a_link_and_an_existing_entry() {

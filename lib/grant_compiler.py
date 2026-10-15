@@ -254,7 +254,7 @@ def fragment_line(title, check, command, undo=None):
 
 
 # each removal returns (title, check, command). revoke prints them as steps, and compile
-# attaches them as the undo of the line they reverse, so both always agree.
+# attaches them as the undo of the line they reverse, so both always agree (on macos both are the same sweep).
 
 def linux_snapshot(state_dir, path):
     """where the access control lists of one path are recorded before a grant (root only)."""
@@ -296,26 +296,6 @@ def linux_stop_agent_removal(user):
             "{ usermod --expiredate 1 --lock %s || true; } && { pkill -KILL -u %s || true; }" % (user, user))
 
 
-def macos_traverse_removal(rights, user, target, parent):
-    return ("stop %s passing through %s" % (user, parent),
-            "! /bin/ls -lde %s 2>/dev/null | grep -q 'user:%s allow search'" % (target, user),
-            "/bin/chmod -h -a %s %s" % (shlex.quote("%s allow %s" % (user, rights["traverse"])), target))
-
-
-def macos_files_removal(rights, user, target, path):
-    return ("remove %s file rights in %s" % (user, path),
-            "! /bin/ls -lde %s 2>/dev/null | grep -q 'user:%s allow'" % (target, user),
-            "/usr/bin/find -P %s -type f -exec /bin/chmod -h -a %s {} +"
-            % (target, shlex.quote("%s allow %s" % (user, rights["files"]))))
-
-
-def macos_folders_removal(rights, user, target, path):
-    return ("remove %s folder rights on %s" % (user, path),
-            "! /bin/ls -lde %s 2>/dev/null | grep -q 'user:%s allow'" % (target, user),
-            "/usr/bin/find -P %s -type d -exec /bin/chmod -h -a %s {} +"
-            % (target, shlex.quote("%s allow %s" % (user, rights["directories"]))))
-
-
 def macos_helper(package):
     """the helper that checks and sweeps the lists, in the pinned copy the install keeps."""
     return "/var/lib/%s/package/lib/access_control_macos.sh" % package
@@ -323,8 +303,8 @@ def macos_helper(package):
 
 def macos_sweep_removal(user, target, path, tree, title, prefix, package):
     """the undo of a macos grant: remove every entry of the agent from the path and, for a granted folder,
-    everything inside it, then check that none is left. not the subtraction revoke uses: see the header of
-    lib/access_control_macos.py for why that cannot restore a list exactly."""
+    everything inside it, then check that none is left. not a subtraction of the rights the grant added: see the
+    header of lib/access_control_macos.py for why that cannot restore a list exactly. revoke uses it too."""
     helper = shlex.quote(prefix + macos_helper(package))
     word = linux_recursive_word(tree)
     return (title,
@@ -457,15 +437,19 @@ def revoke_linux(level, user, prefix, paths, with_undo=False, package="sirven"):
     return lines
 
 
-def revoke_macos(level, user, prefix, paths, with_undo=False, package=None):
-    rights = level["access_control"]["macos"]
+def revoke_macos(level, user, prefix, paths, with_undo=False, package="sirven"):
+    """revoke on macos is the same sweep the undo of a grant is, so revoke and uninstall agree and both leave no
+    entry that names the account (see macos_sweep_removal for why a subtraction cannot). the order is as it
+    was: each granted path with everything inside it, then the pass-through parents on their own."""
     lines = []
     for path in paths:
-        target = shlex.quote(prefix + path)
-        lines.append(fragment_line(*macos_files_removal(rights, user, target, path)))
-        lines.append(fragment_line(*macos_folders_removal(rights, user, target, path)))
+        lines.append(fragment_line(*macos_sweep_removal(
+            user, shlex.quote(prefix + path), path, True,
+            "remove every entry of %s from %s and everything inside it" % (user, path), prefix, package)))
     for parent in traverse_parents(paths):
-        lines.append(fragment_line(*macos_traverse_removal(rights, user, shlex.quote(prefix + parent), parent)))
+        lines.append(fragment_line(*macos_sweep_removal(
+            user, shlex.quote(prefix + parent), parent, False,
+            "stop %s passing through %s" % (user, parent), prefix, package)))
     return lines
 
 
