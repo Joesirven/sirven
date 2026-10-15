@@ -1,66 +1,221 @@
 # shellcheck shell=bash
-# cloudflare tunnel transport, the documented second path. every step is plan output only in
-# the alpha cut.
+# cloudflare tunnel transport, the second path. the plan makes a tunnel for this machine through the Cloudflare API, keeps its
+# credentials root-only, routes one hostname you name to this machine's SSH server (and every other name to 404), points that
+# hostname at the tunnel, and runs the tunnel as a service of its own, then records what it made so the kill switch and uninstall can
+# undo exactly that and nothing else in your account. the work is in lib/cloudflare_tunnel.sh and lib/cloudflare_api.py, run from the
+# pinned copy of this package, so the install record's undo line works without this file.
 #
-# interactive once: cloudflared tunnel login opens a browser for your zone, and you create an
-# access application with a service token in the dashboard. after that the agent client
-# connects with the service token and its SSH key. no email codes: the access policy allows
-# the service token only.
-# reads: PREFIX, PACKAGE, CONFIG_DIR, SERVICE_USER
+# what you do by hand, once: make an API token in the Cloudflare dashboard and put cloudflare access in front of the hostname.
+# the token needs Account, Cloudflare Tunnel, Edit and Zone, domain name records, Edit, limited to your one account and one zone
+# (it also needs Zone, Zone, Read, unless you give the zone number in SIRVEN_CLOUDFLARE_ZONE_ID). a token that is not limited to that
+# one zone is not what this is designed for; never use a token that deploys anything else.
+# the token is read from the token file below (the safer way, and the one to use) or from the environment
+# (SIRVEN_CLOUDFLARE_API_TOKEN), and never written anywhere by sirven. it is needed again to take the tunnel away (revoke --all and
+# uninstall delete the tunnel and the alias record in your account); without it they still stop the service and remove the
+# credentials, then say plainly what is left in the account and ask to be run again with the token.
+#
+# the token never stays in the installer's environment. the first thing the installer and the uninstaller do (cloudflare_hold_token,
+# called in main) is move the variable into one that is not exported and unset the original, so no step starts a process that
+# inherits it. only the processes that need it are handed it, by the environment of that one command: the first look that checks
+# the token would be accepted, the step that makes the tunnel, and the step that takes it away; each unsets it at once and gives the
+# interpreter that talks to the API the token through standard input only. what unset cannot do is scrub the block of the
+# environment a process was started with: root can read it in /proc/<process number>/environ while the process runs. give the token
+# through the root-owned token file to avoid this. the shell trace (bash -x) prints the token in plain text: do not trace the
+# installer while a token is in the environment.
+# reads: PREFIX, PACKAGE, CONFIG_DIR, STATE_DIR, SERVICE_USER, ROOT_DIR, OPERATING_SYSTEM, COMMAND, TRANSPORT, DRY_RUN, CLOUDFLARE_*
 
-CLOUDFLARE_REASON="the cloudflare tunnel path is documented in the alpha cut; its plan and apply come later"
-CLOUDFLARE_HOSTNAME="agent.example.com"
+CLOUDFLARE_SERVICE="sirven-cloudflared.service"
+CLOUDFLARE_UNIT_DIRECTORY="/etc/systemd/system"
+CLOUDFLARE_PLACEHOLDER_HOSTNAME="agent.example.org"
+CLOUDFLARE_MACOS_REASON="applying to a macos machine is not verified yet; the tunnel service is a systemd unit, which only linux has"
+# set by the arguments and the environment (install.sh): the hostname to route, the account number, the zone number (optional)
+CLOUDFLARE_HOSTNAME="${CLOUDFLARE_HOSTNAME:-}"
+CLOUDFLARE_ACCOUNT="${CLOUDFLARE_ACCOUNT:-}"
+CLOUDFLARE_ZONE="${CLOUDFLARE_ZONE:-}"
 
-cloudflare_tunnel_name() {
-  printf '%s-agent' "$PACKAGE"
+# the one place the environment route can hold the token, not exported (see cloudflare_hold_token). the held name is its own name, so
+# nothing here is confused with the variable the person set.
+HELD_SIRVEN_CLOUDFLARE_API_TOKEN=""
+
+# cloudflare_hold_token: take the token out of the exported environment, once, before anything else runs. an exported variable of the
+# held name that came from outside is dropped first, so the held variable is a plain shell variable and not exported.
+cloudflare_hold_token() {
+  local named="${SIRVEN_CLOUDFLARE_API_TOKEN:-}"
+  unset SIRVEN_CLOUDFLARE_API_TOKEN HELD_SIRVEN_CLOUDFLARE_API_TOKEN
+  HELD_SIRVEN_CLOUDFLARE_API_TOKEN="$named"
 }
 
-cloudflare_config() {
-  cat <<END
-tunnel: $(cloudflare_tunnel_name)
-credentials-file: $CONFIG_DIR/cloudflared-credentials.json
-ingress:
-  - hostname: $CLOUDFLARE_HOSTNAME
-    service: ssh://localhost:22
-  - service: http_status:404
-END
+# cloudflare_forget_held_token: drop the held token from this shell too, once nothing will read it.
+cloudflare_forget_held_token() {
+  HELD_SIRVEN_CLOUDFLARE_API_TOKEN=""
 }
 
-# true when cloudflared runs as a system service, on either operating system. read only.
-cloudflare_service_installed() {
-  systemctl is-enabled --quiet cloudflared 2>/dev/null || launchctl list 2>/dev/null | grep -q com.cloudflare.cloudflared
+# cloudflare_tunnel_with_token ARGUMENT...: run lib/cloudflare_tunnel.sh with the held token in the environment of that one command,
+# and nowhere else. it unsets the variable before it starts any process of its own.
+cloudflare_tunnel_with_token() {
+  SIRVEN_CLOUDFLARE_API_TOKEN="${HELD_SIRVEN_CLOUDFLARE_API_TOKEN:-}" bash "$ROOT_DIR/lib/cloudflare_tunnel.sh" "$@"
+}
+
+cloudflare_token_file() {
+  printf '%s/cloudflare-api-token' "$CONFIG_DIR"
+}
+
+# the record of what was made: the tunnel's name and number, the alias record, the files, the service. never the token.
+cloudflare_marker_file() {
+  printf '%s/cloudflare-tunnel.json' "$STATE_DIR"
+}
+
+cloudflare_config_file() {
+  printf '%s/cloudflared.yml' "$CONFIG_DIR"
+}
+
+cloudflare_credentials_file() {
+  printf '%s/cloudflared-credentials.json' "$CONFIG_DIR"
+}
+
+cloudflare_unit_file() {
+  printf '%s/%s' "$CLOUDFLARE_UNIT_DIRECTORY" "$CLOUDFLARE_SERVICE"
+}
+
+# the script that makes and takes away the tunnel, in the pinned copy of this package (the path an install record can rely on)
+cloudflare_tunnel_script() {
+  printf '%s/package/lib/cloudflare_tunnel.sh' "$STATE_DIR"
+}
+
+# cloudflare_applied: this machine's tunnel is made and its service runs (the record, its files and the service agree). read only,
+# needs no token.
+cloudflare_applied() {
+  bash "$ROOT_DIR/lib/cloudflare_tunnel.sh" applied "${PREFIX}$(cloudflare_marker_file)" >/dev/null 2>&1
+}
+
+# cloudflare_made_by_us: an earlier run of this package made a tunnel here (the record is there, complete or not).
+cloudflare_made_by_us() {
+  [ -e "${PREFIX}$(cloudflare_marker_file)" ] || [ -L "${PREFIX}$(cloudflare_marker_file)" ]
+}
+
+# true when a token is there to work with: held from the environment, or in the token file. the token file counts only when it passes
+# the same check the tunnel step makes (a plain file, owned by root, no extended access control list, no permission for anyone else), so the
+# refusal comes before a change.
+cloudflare_token_available() {
+  [ -n "${HELD_SIRVEN_CLOUDFLARE_API_TOKEN:-}" ] ||
+    bash "$ROOT_DIR/lib/cloudflare_tunnel.sh" token-file-check "${PREFIX}$(cloudflare_token_file)" >/dev/null 2>&1 ||
+    return 1
+}
+
+# the arguments of the helper that name where everything goes, as one shell-quoted line
+cloudflare_paths_arguments() {
+  printf -- '--marker %s --config %s --credentials %s --unit %s --service %s' \
+    "$(rooted "$(cloudflare_marker_file)")" "$(rooted "$(cloudflare_config_file)")" "$(rooted "$(cloudflare_credentials_file)")" \
+    "$(rooted "$(cloudflare_unit_file)")" "$(shell_quote "$CLOUDFLARE_SERVICE")"
+}
+
+cloudflare_target_arguments() {
+  local hostname="${CLOUDFLARE_HOSTNAME:-$CLOUDFLARE_PLACEHOLDER_HOSTNAME}" account="${CLOUDFLARE_ACCOUNT:-<your account number>}"
+  printf -- '--user %s --hostname %s --account %s' "$(shell_quote "$SERVICE_USER")" "$(shell_quote "$hostname")" "$(shell_quote "$account")"
+  [ -z "$CLOUDFLARE_ZONE" ] || printf -- ' --zone %s' "$(shell_quote "$CLOUDFLARE_ZONE")"
+  printf -- ' --token-file %s' "$(rooted "$(cloudflare_token_file)")"
+}
+
+# cloudflare_down: take the tunnel away, with the held token in the environment of that one command. what the kill switch runs.
+cloudflare_down() {
+  cloudflare_tunnel_with_token down --marker "${PREFIX}$(cloudflare_marker_file)" --token-file "${PREFIX}$(cloudflare_token_file)"
+}
+
+# cloudflare_refuse_before_apply: a real apply that cannot make the tunnel stops before its first change, with what to do. a dry run and
+# a fake root never make it, so they are not stopped. a machine that already has its tunnel needs no token.
+cloudflare_refuse_before_apply() {
+  local token_file_status
+  [ "$COMMAND" = install ] && [ "$TRANSPORT" = cloudflare ] && [ "$DRY_RUN" != yes ] && [ -z "$PREFIX" ] || return 0
+  [ "$OPERATING_SYSTEM" = linux ] || return 0
+  if cloudflare_applied; then return 0; fi
+  if [ -z "$CLOUDFLARE_HOSTNAME" ]; then
+    printf 'error: refused: no hostname is named for the tunnel. nothing was changed.\n' >&2
+    printf 'you can: run again with --cloudflare-hostname agent.your-zone.example (a name inside a zone of your own Cloudflare account that nothing uses yet), or run again with --transport none.\n' >&2
+    exit 2
+  fi
+  if [ -z "$CLOUDFLARE_ACCOUNT" ]; then
+    printf 'error: refused: no Cloudflare account number is named. nothing was changed.\n' >&2
+    printf 'you can: run again with --cloudflare-account NUMBER (the 32 character account number on the right of the Cloudflare dashboard overview of any zone), or run again with --transport none.\n' >&2
+    exit 2
+  fi
+  if ! cloudflare_token_available; then
+    token_file_status=0
+    bash "$ROOT_DIR/lib/cloudflare_tunnel.sh" token-file-check "$(cloudflare_token_file)" >/dev/null || token_file_status=$?
+    if [ "$token_file_status" -eq 2 ]; then
+      printf 'error: refused: the saved API token file cannot be trusted (above). nothing was changed.\n' >&2
+      printf 'you can: fix it (chown root:root %s, take off any extended access control list with setfacl -b %s, then chmod 600 %s; if it has more than one name, copy the token into a new file with umask 077 and remove the old names), or remove it and hand the token over in the environment.\n' \
+        "$(cloudflare_token_file)" "$(cloudflare_token_file)" "$(cloudflare_token_file)" >&2
+      exit 2
+    fi
+    printf 'error: refused: there is no Cloudflare API token to make the tunnel with. nothing was changed.\n' >&2
+    printf 'you can: make a token in the Cloudflare dashboard (My Profile, API Tokens): permissions Account, Cloudflare Tunnel, Edit and Zone, domain name records, Edit, limited to the one account and the one zone, then run again with it saved as %s, owned by root, mode 0600 (the safer way), or in the environment: sudo --preserve-env=SIRVEN_CLOUDFLARE_API_TOKEN ... (which works only if the sudo policy allows it). or run again with --transport none.\n' "$(cloudflare_token_file)" >&2
+    exit 2
+  fi
+  # every other refusal the tunnel step would make, now, so that "nothing was changed" is true: cloudflared missing, no systemd, a token the
+  # API turns away, a hostname that already has a record that is not ours, a zone that cannot be found. the script prints why.
+  # shellcheck disable=SC2046 # the helper's options are words by design
+  cloudflare_tunnel_with_token check --marker "$(cloudflare_marker_file)" --hostname "$CLOUDFLARE_HOSTNAME" --account "$CLOUDFLARE_ACCOUNT" \
+    ${CLOUDFLARE_ZONE:+--zone "$CLOUDFLARE_ZONE"} --token-file "$(cloudflare_token_file)" || exit 2
 }
 
 plan_cloudflare() {
-  local tunnel config credentials
-  tunnel="$(cloudflare_tunnel_name)"
-  config="$(rooted "$CONFIG_DIR/cloudflared.yml")"
-  credentials="$(rooted "$CONFIG_DIR/cloudflared-credentials.json")"
+  local marker script hostname account token_file
+  marker="$(rooted "$(cloudflare_marker_file)")"
+  script="$(rooted "$(cloudflare_tunnel_script)")"
+  token_file="$(rooted "$(cloudflare_token_file)")"
+  hostname="${CLOUDFLARE_HOSTNAME:-$CLOUDFLARE_PLACEHOLDER_HOSTNAME}"
+  account="${CLOUDFLARE_ACCOUNT:-<your account number>}"
   plan_section "transport: cloudflare tunnel"
-  plan_note "replace $CLOUDFLARE_HOSTNAME with a hostname in your own zone."
-  plan_owner "authorize this machine for your zone, once, in the browser" \
-    "run: cloudflared tunnel login"
-  plan_planonly "create the tunnel" \
-    "cloudflared tunnel create --credentials-file $credentials $tunnel" \
-    "$CLOUDFLARE_REASON" \
-    "[ -f $credentials ]"
-  plan_planonly "write the tunnel configuration" \
-    "cat > $config <<'END'
-$(cloudflare_config)
-END" \
-    "$CLOUDFLARE_REASON" \
-    "[ -f $config ]"
-  plan_planonly "point the hostname at the tunnel" \
-    "cloudflared tunnel route dns $tunnel $CLOUDFLARE_HOSTNAME" \
-    "$CLOUDFLARE_REASON"
-  plan_tag always
-  plan_owner "put cloudflare access in front, with a service token" \
-    "cloudflare dashboard, access, applications: add $CLOUDFLARE_HOSTNAME as a self-hosted application.
+  if [ -z "$CLOUDFLARE_HOSTNAME" ]; then
+    plan_note "no hostname is named, so $CLOUDFLARE_PLACEHOLDER_HOSTNAME stands in. a real apply needs --cloudflare-hostname (a name in a zone of your own that nothing uses yet) and --cloudflare-account."
+  fi
+  plan_note "the tunnel routes exactly one hostname, $hostname, to this machine's SSH server (ssh://localhost:22), whatever the level; every other name gets 404. no other port, no private network route."
+  if cloudflare_applied; then
+    plan_note "this machine already has its tunnel, made by an earlier run of this installer and recorded in $(cloudflare_marker_file): no API token and no new tunnel. the kill switch and uninstall delete that tunnel and its alias record, and only them."
+    cloudflare_forget_held_token
+    if [ -e "${PREFIX}$(cloudflare_token_file)" ]; then
+      plan_note "an API token is still saved at $(cloudflare_token_file) and is not needed now: delete it, and hand it over again when you take the tunnel away."
+    fi
+  else
+    plan_owner "give the installer one Cloudflare API token, once" \
+      "Cloudflare dashboard, My Profile, API Tokens: create a token with the permissions Account, Cloudflare Tunnel, Edit and Zone, domain name records, Edit (and Zone, Zone, Read, unless you give the zone number in SIRVEN_CLOUDFLARE_ZONE_ID), limited to your one account and the one zone of $hostname. never a token that can do anything else.
+hand it over one of two ways, and it is the only interactive step:
+  in a file, the safer way and the one to use first: save it as $(cloudflare_token_file), owned by root, mode 0600, with one name only (no hard link) and no extra access control list; it is removed after the tunnel is made, so give it again to take the tunnel away. this is the only way that never puts the token in an environment.
+  in the environment: set SIRVEN_CLOUDFLARE_API_TOKEN in your shell and run sudo --preserve-env=SIRVEN_CLOUDFLARE_API_TOKEN. sudo allows that only when its policy does. the installer takes the token out of its environment at once and hands it only to the steps that need it, but it cannot scrub the block of the environment it was started with: root can still read it in /proc/<installer process number>/environ until the installer ends." \
+      "cloudflare_token_available"
+  fi
+  plan_owner "put cloudflare access in front of the hostname, with a service token" \
+    "cloudflare dashboard, access, applications: add $hostname as a self-hosted application.
 policy action: service auth, allowing only a new service token for your agent client.
-do not add email code login or any other login method."
-  plan_planonly "run the tunnel as a system service" \
-    "cloudflared --config $config service install" \
-    "$CLOUDFLARE_REASON" \
-    "cloudflare_service_installed"
-  plan_note "the agent client connects with: ssh -o ProxyCommand='cloudflared access ssh --hostname %h --service-token-id <token> --service-token-secret <secret>' $SERVICE_USER@$CLOUDFLARE_HOSTNAME"
+do not add email code login or any other login method.
+(until you do, the hostname is reachable by anyone, and only the SSH keys of $SERVICE_USER stand in the way. do this before you give the hostname to anyone.)"
+  if [ "$OPERATING_SYSTEM" = macos ]; then
+    plan_planonly "make the tunnel, point the hostname at it, and run it as a service" \
+      "bash $(cloudflare_tunnel_script) up $(cloudflare_paths_arguments) $(cloudflare_target_arguments)" \
+      "$CLOUDFLARE_MACOS_REASON" \
+      "cloudflare_applied"
+    plan_undo "take this machine's Cloudflare tunnel away, if this installer made it" "[ ! -e $marker ]" \
+      "bash $script down --marker $marker --token-file $token_file"
+  else
+    plan_step system "make the tunnel, point the hostname at it, and run it as a service" \
+      "cloudflare_applied" \
+      "SIRVEN_CLOUDFLARE_API_TOKEN=\"\${HELD_SIRVEN_CLOUDFLARE_API_TOKEN:-}\" bash $script up $(cloudflare_paths_arguments) $(cloudflare_target_arguments)" \
+      "# runs lib/cloudflare_tunnel.sh up; the token comes from $(cloudflare_token_file) or from the environment of this one command, and is never put on a command line.
+# it makes a tunnel named sirven-$SERVICE_USER-<this machine's name>-<random> in account $account, managed from this machine (the dashboard cannot widen it),
+# keeps its credentials in $(cloudflare_credentials_file) and its config in $(cloudflare_config_file) (both root-only), points $hostname at it with an alias record,
+# writes $(cloudflare_unit_file) and starts it. it records each of these in $(cloudflare_marker_file) as soon as it exists, and refuses with nothing changed if there is no token, no cloudflared, no systemd, or a record at $hostname that is not ours.
+# the service it starts runs: cloudflared --no-autoupdate --config $(cloudflare_config_file) tunnel run   (as $CLOUDFLARE_SERVICE, run by root, which only dials out)
+bash $script up $(cloudflare_paths_arguments) $(cloudflare_target_arguments)"
+    # the tunnel step is the only one that reads the token, and it is handed it in its own command's environment (see
+    # cloudflare_hold_token): no step before or after starts a child process that inherits it. once it has run (done, failed or
+    # skipped) the held copy is dropped from the shell too, and the exported name is unset again as defense in depth.
+    plan_forget_secrets HELD_SIRVEN_CLOUDFLARE_API_TOKEN SIRVEN_CLOUDFLARE_API_TOKEN
+    plan_undo "take this machine's Cloudflare tunnel away, if this installer made it" "[ ! -e $marker ]" \
+      "SIRVEN_CLOUDFLARE_API_TOKEN=\"\${HELD_SIRVEN_CLOUDFLARE_API_TOKEN:-}\" bash $script down --marker $marker --token-file $token_file" \
+      "cloudflared tunnel delete, and the alias record, via lib/cloudflare_tunnel.sh down: the service, the credentials and the config go from this machine; the tunnel and the alias record go from your account, each only while it is still the one this installer made. needs the token again (the token file, or SIRVEN_CLOUDFLARE_API_TOKEN)"
+    plan_step run "remove the used API token file, if one was saved" \
+      "[ ! -e $token_file ]" \
+      "rm -f $token_file"
+  fi
+  plan_note "the agent client connects with: ssh -o ProxyCommand='cloudflared access ssh --hostname %h --service-token-id <token> --service-token-secret <secret>' $SERVICE_USER@$hostname"
 }

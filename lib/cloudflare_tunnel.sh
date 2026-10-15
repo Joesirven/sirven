@@ -166,8 +166,9 @@ token_hint() {
 
 short_host() {
   local host
-  host="$(hostname -s 2>/dev/null || hostname)"
-  printf '%s' "$host" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9\n' '-' | sed 's/--*/-/g; s/^-//; s/-$//' | cut -c1-30 | sed 's/-$//'
+  host="$(hostname -s 2>/dev/null || uname -n)"
+  host="$(printf '%s' "$host" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9\n' '-' | sed 's/--*/-/g; s/^-//; s/-$//' | cut -c1-30 | sed 's/-$//')"
+  printf '%s' "${host:-machine}"
 }
 
 random_hex() {

@@ -257,6 +257,9 @@ options:
   --path PATH                grant the level on this absolute path. repeat for more paths.
                              asked default: the current folder when it can be granted
   --transport NAME           tailscale (default), cloudflare, or none
+  --cloudflare-hostname H    with --transport cloudflare: the one hostname, in a zone of your own, that is routed to this
+                             machine's SSH server (or SIRVEN_CLOUDFLARE_HOSTNAME). nothing else is routed
+  --cloudflare-account N     with --transport cloudflare: your Cloudflare account number (or SIRVEN_CLOUDFLARE_ACCOUNT_ID)
   --with-bb                  add the bb install note to the plan (plan only for now)
   --reinstate                turn an account the kill switch cut off back on (unlock, no expiry, the
                              /bin/bash shell) and go on with the install. without it, install refuses
@@ -268,6 +271,9 @@ environment:
   SIRVEN_LEVEL               the level, as --level
   SIRVEN_PATH                paths to grant, separated by colons, or none
   SIRVEN_YES=1               as --yes
+  SIRVEN_CLOUDFLARE_API_TOKEN  with --transport cloudflare: the API token, held out of the environment at once; the safer
+                             way is the token file named in the plan. SIRVEN_CLOUDFLARE_ZONE_ID names the zone when the
+                             token cannot list zones
   SIRVEN_INTERACTIVE=no      never ask; yes asks on standard input even when it is a pipe
 
 examples:
@@ -310,6 +316,9 @@ parse_arguments() {
   PATHS_GIVEN=no
   ASSUME_YES=no
   TRANSPORT=tailscale
+  CLOUDFLARE_HOSTNAME="${SIRVEN_CLOUDFLARE_HOSTNAME:-}"
+  CLOUDFLARE_ACCOUNT="${SIRVEN_CLOUDFLARE_ACCOUNT_ID:-}"
+  CLOUDFLARE_ZONE="${SIRVEN_CLOUDFLARE_ZONE_ID:-}"
   WITH_BB=no
   SERVICE_USER=agent
   OWNER="${SUDO_USER:-$(id -un)}"
@@ -332,6 +341,10 @@ parse_arguments() {
       --path=*) GRANT_PATHS[${#GRANT_PATHS[@]}]="${1#*=}"; PATHS_GIVEN=yes ;;
       --transport) needs_value "$1" "$#" "${2:-}"; TRANSPORT="$2"; shift ;;
       --transport=*) TRANSPORT="${1#*=}" ;;
+      --cloudflare-hostname) needs_value "$1" "$#" "${2:-}"; CLOUDFLARE_HOSTNAME="$2"; shift ;;
+      --cloudflare-hostname=*) CLOUDFLARE_HOSTNAME="${1#*=}" ;;
+      --cloudflare-account) needs_value "$1" "$#" "${2:-}"; CLOUDFLARE_ACCOUNT="$2"; shift ;;
+      --cloudflare-account=*) CLOUDFLARE_ACCOUNT="${1#*=}" ;;
       --with-bb) WITH_BB=yes ;;
       --user) needs_value "$1" "$#" "${2:-}"; SERVICE_USER="$2"; shift ;;
       --user=*) SERVICE_USER="${1#*=}" ;;
@@ -353,6 +366,18 @@ parse_arguments() {
     tailscale | cloudflare | none) ;;
     *) usage_error "--transport must be tailscale, cloudflare, or none, got '$TRANSPORT'" ;;
   esac
+  case "$CLOUDFLARE_HOSTNAME" in
+    '') ;;
+    *[!a-z0-9.-]* | .* | *. | *..* | -* | *.-* | *-.*) usage_error "--cloudflare-hostname must be a plain lowercase host name inside a zone of your own, like agent.example.org" ;;
+    *.*) ;;
+    *) usage_error "--cloudflare-hostname must be a plain lowercase host name inside a zone of your own, like agent.example.org" ;;
+  esac
+  if [ -n "$CLOUDFLARE_ACCOUNT" ] && ! [[ "$CLOUDFLARE_ACCOUNT" =~ ^[0-9a-f]{32}$ ]]; then
+    usage_error "--cloudflare-account must be the 32 character account number from the Cloudflare dashboard"
+  fi
+  if [ -n "$CLOUDFLARE_ZONE" ] && ! [[ "$CLOUDFLARE_ZONE" =~ ^[0-9a-f]{32}$ ]]; then
+    usage_error "SIRVEN_CLOUDFLARE_ZONE_ID must be the 32 character zone number from the Cloudflare dashboard"
+  fi
   case "$SERVICE_USER" in
     [a-z_]*) ;;
     *) usage_error "--user must be a plain lowercase account name" ;;
@@ -535,6 +560,7 @@ finish() {
 main() {
   # first, before anything starts a process: the Tailscale auth key leaves the exported environment (see lib/tailscale.sh)
   tailscale_hold_key
+  cloudflare_hold_token
   parse_arguments "$@"
   setup_from_environment
   OPERATING_SYSTEM="$(detect_os)"
@@ -574,6 +600,7 @@ main() {
 
   adopt_refuse_conflicts
   tailscale_refuse_before_apply
+  cloudflare_refuse_before_apply
 
   PLAN_PREFIX="$PREFIX"
   PLAN_OPERATING_SYSTEM="$OPERATING_SYSTEM"

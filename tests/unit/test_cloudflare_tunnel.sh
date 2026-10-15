@@ -28,7 +28,8 @@ setup_tunnel() {
   mkdir -p "$STATE" "$TEST_TMP/etc" "$TEST_TMP/units"
   API_DIR="$TEST_TMP/api"
   mkdir -p "$API_DIR"
-  python3 -I "$FIXTURES/api_server.py" "$API_DIR" --token "$SENTINEL_TOKEN" --account "$ACCOUNT" --zone "$ZONE" --zone-name "$ZONE_NAME" >/dev/null 2>&1 &
+  printf '%s\n' "$SENTINEL_TOKEN" > "$TEST_TMP/api-token"
+  python3 -I "$FIXTURES/api_server.py" "$API_DIR" --token-file "$TEST_TMP/api-token" --account "$ACCOUNT" --zone "$ZONE" --zone-name "$ZONE_NAME" >/dev/null 2>&1 &
   API_PID=$!
   trap 'kill "$API_PID" 2>/dev/null' EXIT
   while [ ! -s "$API_DIR/port" ] && [ "$waited" -lt 50 ]; do sleep 0.1; waited=$((waited + 1)); done

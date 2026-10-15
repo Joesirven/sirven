@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """a fake Cloudflare API that keeps real state, for the tests of lib/cloudflare_tunnel.sh and lib/cloudflare_api.py.
 
-  python3 api_server.py DIR --token TOKEN --account ACCOUNT --zone-name NAME --zone ZONE [--port-file FILE]
+  python3 api_server.py DIR --token-file FILE --account ACCOUNT --zone-name NAME --zone ZONE
 
 it listens on 127.0.0.1 on a free port, writes the port to DIR/port, and keeps its whole state in DIR/state.json (tunnels,
 records) and every request in DIR/calls.log: "METHOD PATH authorized|unauthorized", never a token. it answers only to the
-one token it was started with. the shapes follow the documented API: a locally managed tunnel needs config_src "local" and a
+one token, read from the first line of --token-file (never from the command line, which any process can list). the shapes follow the documented API: a locally managed tunnel needs config_src "local" and a
 tunnel_secret of at least 32 bytes in base64, a tunnel with connections cannot be deleted until they are ended, deleting a
 tunnel keeps it visible with deleted_at set, and a record is an alias to TUNNEL.cfargotunnel.com.
 knobs (a file in DIR, read on every request): refuse-records, fail-tunnel-delete, connections-stay (the tunnel reports
@@ -23,11 +23,13 @@ from urllib.parse import parse_qs, urlsplit
 
 parser = argparse.ArgumentParser()
 parser.add_argument("directory")
-parser.add_argument("--token", required=True)
+parser.add_argument("--token-file", required=True)
 parser.add_argument("--account", required=True)
 parser.add_argument("--zone", required=True)
 parser.add_argument("--zone-name", required=True)
 options = parser.parse_args()
+with open(options.token_file) as handle:
+    TOKEN = handle.readline().strip()
 DIR = options.directory
 STATE = {"tunnels": {}, "records": {}}
 STATE_FILE = os.path.join(DIR, "state.json")
@@ -62,7 +64,7 @@ class Handler(BaseHTTPRequestHandler):
     def handle_any(self, method):
         url = urlsplit(self.path)
         path, query = url.path, {k: v[0] for k, v in parse_qs(url.query).items()}
-        authorized = self.headers.get("Authorization") == "Bearer " + options.token
+        authorized = self.headers.get("Authorization") == "Bearer " + TOKEN
         with open(os.path.join(DIR, "calls.log"), "a") as log:
             log.write("%s %s %s\n" % (method, self.path, "authorized" if authorized else "unauthorized"))
         body = self.payload() if method in ("POST", "PUT") else {}

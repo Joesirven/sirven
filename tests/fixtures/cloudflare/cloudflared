@@ -3,9 +3,11 @@
 # real one checks about a config: the tunnel number, a credentials file that is there, and an ingress list that ends in a catch-all.
 #   FAKE_CF_VERSION=X     the version it reports (default 2024.8.2)
 #   FAKE_CF_BAD_CONFIG=yes  'ingress validate' fails
+#   FAKE_CF_PS_LOG=FILE   append the command line of every process on the machine at the time of each call, to look for a token in one
 dir="${FAKE_CF_DIR:?FAKE_CF_DIR is not set}"
 mkdir -p "$dir"
 printf 'cloudflared %s\n' "$*" >> "$dir/calls.log"
+[ -z "${FAKE_CF_PS_LOG:-}" ] || ps -eo args >> "$FAKE_CF_PS_LOG"
 # the names (never the values) of the variables this process was started with, so a test can prove the token was not among them
 env | sed 's/=.*//' | tr '\n' ' ' >> "$dir/environment-names.log"; printf '\n' >> "$dir/environment-names.log"
 case "${1:-}" in

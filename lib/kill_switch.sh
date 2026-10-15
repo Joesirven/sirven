@@ -518,10 +518,43 @@ plan_kill_switch_tailscale_logout() {
   fi
 }
 
+# plan_kill_switch_cloudflare_teardown: undo exactly what the installer's tunnel step made. only when this installer made a tunnel
+# (its record is there, complete or half made), whatever transport this revoke names: the record says what to take away, and the script
+# acts only on that, so a tunnel, a record or a cloudflared of the owner's own is never touched. the part on this machine (service,
+# credentials, config) needs no token and is done first; the part in the Cloudflare account needs the token, and without it the step
+# fails loudly, keeps the record and says what is left, so running the command again with the token finishes it.
+plan_kill_switch_cloudflare_teardown() {
+  local marker
+  if ! cloudflare_made_by_us; then
+    cloudflare_forget_held_token
+    return 0
+  fi
+  marker="$(rooted "$(cloudflare_marker_file)")"
+  if [ "$OPERATING_SYSTEM" = linux ]; then
+    plan_step system "take this machine's Cloudflare tunnel away: its service and credentials, and in your account the tunnel and the alias record this installer made, and only those" \
+      "[ ! -e $marker ]" \
+      "cloudflare_down" \
+      "bash $(cloudflare_tunnel_script) down --marker $(cloudflare_marker_file) --token-file $(cloudflare_token_file)   # via lib/cloudflare_tunnel.sh down; the token comes from the token file or from SIRVEN_CLOUDFLARE_API_TOKEN, and without it the service and credentials still go and the step says what is left in the account"
+    plan_tag verify
+    plan_continue
+    plan_forget_secrets HELD_SIRVEN_CLOUDFLARE_API_TOKEN SIRVEN_CLOUDFLARE_API_TOKEN
+    # a token the owner saved again to take the tunnel away is not kept: it goes once the tunnel is gone (and stays while it is not,
+    # so the same command can be run again with it)
+    plan_step system "remove the saved cloudflare API token from disk once the tunnel is gone" \
+      "[ ! -e $(rooted "$(cloudflare_token_file)") ]" \
+      "[ -e $marker ] || rm -f $(rooted "$(cloudflare_token_file)")"
+    plan_continue
+  else
+    plan_planonly "take this machine's Cloudflare tunnel away: its service and credentials, and in your account the tunnel and the alias record this installer made, and only those" \
+      "bash $(cloudflare_tunnel_script) down --marker $(cloudflare_marker_file) --token-file $(cloudflare_token_file)" "$KILL_SWITCH_REASON" "[ ! -e $marker ]"
+  fi
+}
+
 plan_kill_switch_transport() {
   local key_file
   plan_section "kill switch: transport"
   plan_kill_switch_tailscale_logout
+  plan_kill_switch_cloudflare_teardown
   case "$TRANSPORT" in
     tailscale)
       key_file="$(rooted "$(tailscale_auth_key_file)")"
@@ -533,15 +566,12 @@ plan_kill_switch_transport() {
         "tailscale admin console: delete the tag:agent rule and any unused auth key for it. the keys and the account above already refuse the agent; this closes the way in. a node joined with an ephemeral key left the tailnet when it logged out; otherwise delete the machine there too."
       ;;
     cloudflare)
-      if [ "$OPERATING_SYSTEM" = linux ]; then
-        plan_step system "stop the tunnel service" "! cloudflare_service_installed" "cloudflared service uninstall"
+      if [ "$OPERATING_SYSTEM" = linux ] && [ -e "${PREFIX}$(cloudflare_token_file)" ] && ! cloudflare_made_by_us; then
+        plan_step run "remove the cloudflare API token from disk, if one is left" "[ ! -e $(rooted "$(cloudflare_token_file)") ]" "rm -f $(rooted "$(cloudflare_token_file)")"
         plan_continue
-      else
-        plan_planonly "stop the tunnel service" "cloudflared service uninstall" "$KILL_SWITCH_REASON" \
-          "! cloudflare_service_installed"
       fi
       plan_owner "revoke the service token" \
-        "cloudflare dashboard, access, service auth: revoke the agent client's service token."
+        "cloudflare dashboard, access, service auth: revoke the agent client's service token, and delete the access application for the hostname. also delete the API token you made for the installer: it is not needed again."
       ;;
     *)
       plan_note "no transport selected, nothing to cut beyond the keys above."

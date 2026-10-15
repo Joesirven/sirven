@@ -91,10 +91,11 @@ test_tailscale_apply_on_a_fake_root_records_the_join_and_the_logout() {
   assert_no_file "$TEST_TMP/root/var/lib/sirven/tailscale-node.json"
 }
 
-test_cloudflare_apply_says_not_yet() {
-  assert_status 3 install_sh --prefix "$TEST_TMP/root" --path /srv/app --transport cloudflare
-  assert_contains "$CAPTURED_STDERR" "cloudflare tunnel path is documented"
-  assert_no_file "$TEST_TMP/root"
+test_cloudflare_apply_on_a_fake_root_records_the_tunnel_step() {
+  assert_status 0 install_sh --prefix "$TEST_TMP/root" --path /srv/app --transport cloudflare --cloudflare-hostname agent.example.org --cloudflare-account 0123456789abcdef0123456789abcdef
+  assert_not_contains "$CAPTURED_STDERR" "not yet"
+  assert_contains "$(cat "$TEST_TMP/root/var/lib/sirven/simulated-system-commands.log")" "cloudflare_tunnel.sh up"
+  assert_contains "$(cat "$TEST_TMP/root/var/lib/sirven/install-record.tsv")" "cloudflare_tunnel.sh down"
 }
 
 test_with_bb_is_a_plan_only_note() {

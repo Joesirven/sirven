@@ -220,6 +220,8 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then sirven_gate uninstall.sh uninstall "$@";
 . "$ROOT_DIR/lib/lock.sh"
 # shellcheck source=lib/tailscale.sh
 . "$ROOT_DIR/lib/tailscale.sh"
+# shellcheck source=lib/cloudflare.sh
+. "$ROOT_DIR/lib/cloudflare.sh"
 
 usage() {
   cat <<END
@@ -372,10 +374,36 @@ plan_uninstall_tailscale_leftovers() {
     "tailscale logout   # via lib/tailscale_node.sh leave, only when this machine's login is still the node recorded in $(tailscale_marker_file); also removes any copy of the auth key a killed join left"
 }
 
+# plan_uninstall_cloudflare_leftovers: take away a tunnel a run left half made, whether or not the install record has an undo line for it.
+# a tunnel step that made the tunnel and then failed (the alias record refused, the service would not start) is never added to the
+# install record, so the record can be silent about a tunnel that exists in the account. the record file of the tunnel step is the
+# evidence, written as each artifact came into being, and the script acts only on what it names.
+# it comes first in the plan, so it is undone first, like the last thing applied.
+plan_uninstall_cloudflare_leftovers() {
+  local marker index script token_file
+  marker="$(rooted "$(cloudflare_marker_file)")"
+  if [ ! -e "$marker" ] && [ ! -L "$marker" ]; then return 0; fi
+  # the install record already undoes it: that line takes it away, and once is enough
+  index=0
+  while [ "$index" -lt "$RECORD_COUNT" ]; do
+    case "${RECORD_UNDO_ACTION[index]}" in *cloudflare_tunnel.sh\ down*) return 0 ;; esac
+    index=$((index + 1))
+  done
+  script="$(printf '%q' "$ROOT_DIR/lib/cloudflare_tunnel.sh")"
+  token_file="$(rooted "$(cloudflare_token_file)")"
+  plan_section "undo: cloudflare tunnel left behind"
+  plan_step system "take this machine's Cloudflare tunnel away: the one a run left behind, and in your account only what its record names" \
+    "[ ! -e $marker ]" \
+    "SIRVEN_CLOUDFLARE_API_TOKEN=\"\${HELD_SIRVEN_CLOUDFLARE_API_TOKEN:-}\" bash $script down --marker $marker --token-file $token_file" \
+    "bash lib/cloudflare_tunnel.sh down --marker $(cloudflare_marker_file) --token-file $(cloudflare_token_file)   # needs the token again for the part in your account (the token file, or SIRVEN_CLOUDFLARE_API_TOKEN); without it the service and credentials still go and the step says what is left"
+  plan_forget_secrets HELD_SIRVEN_CLOUDFLARE_API_TOKEN SIRVEN_CLOUDFLARE_API_TOKEN
+}
+
 build_uninstall_plan() {
   local index=$((RECORD_COUNT - 1)) section last="" record
   record="$(rooted "$(layout_record_file)")"
   plan_uninstall_tailscale_leftovers
+  plan_uninstall_cloudflare_leftovers
   while [ "$index" -ge 0 ]; do
     section="${RECORD_SECTION[index]}"
     if [ "$section" != "$last" ]; then
@@ -389,6 +417,8 @@ build_uninstall_plan() {
     else
       plan_step "${RECORD_KIND[index]}" "${RECORD_UNDO_TITLE[index]}" "${RECORD_UNDO_CHECK[index]}" \
         "${RECORD_UNDO_ACTION[index]}" "${RECORD_UNDO_SHOWN[index]}"
+      # the step that takes the tunnel away is the last to need the token: it is dropped from the shell once that step has run
+      case "${RECORD_UNDO_ACTION[index]}" in *cloudflare_tunnel.sh\ down*) plan_forget_secrets HELD_SIRVEN_CLOUDFLARE_API_TOKEN SIRVEN_CLOUDFLARE_API_TOKEN ;; esac
     fi
     index=$((index - 1))
   done
@@ -457,6 +487,8 @@ main() {
   # and is dropped (see lib/tailscale.sh). the dirname above still starts with the caller's variables, as install.sh's does.
   tailscale_hold_key
   tailscale_forget_held_key
+  # taking a tunnel away needs the Cloudflare token again, so it is held (out of the environment) until that step has run
+  cloudflare_hold_token
   parse_arguments "$@"
   OPERATING_SYSTEM="$(detect_os)"
   PACKAGE="$(package_name "$ROOT_DIR/project.json")"
@@ -487,6 +519,7 @@ main() {
     RECORD_COUNT=0
     plan_header
     say ""
+    cloudflare_forget_held_token
     say "no install record at $RECORD_FILE."
     say "this package has applied nothing here that it recorded, so there is nothing it may remove."
     return 0
