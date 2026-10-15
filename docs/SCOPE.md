@@ -66,7 +66,7 @@ Each workstream lists what it delivers, what it needs first, and its honest stat
 | W4 | Audit log | Log format (JSON lines), location owned by the owner, append-only from the agent's point of view, session start and end, every command via a forced-command wrapper | W2, W3 | **Format designed; wrapper built if time allows**, otherwise designed |
 | W5 | Kill switch | `revoke --all`: remove authorized keys, end sessions, lock the user, remove tunnel access, write a final audit entry | W2, W4, W6 | **Built on Linux** (applies in a container and on a real machine as root, verified by the harness in a container); plan output on macOS |
 | W6 | Transport: Tailscale | Install check, `tailscale up` with an auth key after one interactive login, tagged device, a policy snippet that lets only the owner's devices reach the agent port | W1 | **Build the plan and documentation**; never run against a real tailnet in tests |
-| W7 | Transport: Cloudflare Tunnel | `cloudflared` tunnel plus Cloudflare Access service token in front of SSH | W1 | **Documented second path**, plan output only |
+| W7 | Transport: Cloudflare Tunnel | `cloudflared` tunnel plus Cloudflare Access service token in front of SSH | W1 | **Built on Linux** (apply and teardown verified in the harness container against a stand-in for the Cloudflare API; the run against a real account needs a test token); Cloudflare Access stays an owner step; plan output on macOS |
 | W8 | Runtime adapters | Per-runtime setup for the service user: Claude Code, Codex, Pi. Config written into the service user's home, never the owner's | W2 | **Claude Code first**; Codex and Pi stubbed with clear "not yet" errors |
 | W9 | Phone-to-agent channel | How the owner's text reaches the runtime on the machine | W6 or W7, W8 | **Not built by the package.** Alpha relies on an existing remote client (bb or the runtime's own remote mode) over the transport. Optional `--with-bb` installs bb; orca to be specified by Jose |
 | W10 | Friend invite | `invite --level observer --path ~/code/app --key <their public key> --expires 7d`, plus `revoke <invite>` | W3, W4, W5 | **Designed** in `docs/PERMISSIONS.md` |
@@ -118,7 +118,7 @@ safely") is W1 → W2 → W3 → W4 → W6 → W8 → W9. Everything else makes 
 | Audit log format | ✓ (spec) | capture wrapper | kernel-level audit (Linux `auditd`, macOS endpoint security) |
 | Kill switch | apply on Linux as root (verified in the harness container); plan output on macOS | apply on macOS | |
 | Tailscale transport | apply and teardown in a Linux container (join as `tag:agent`, logout on revoke and uninstall; live against a test tailnet needs a test key) | apply on a real machine and a real tailnet | |
-| Cloudflare Tunnel transport | docs | plan and apply | |
+| Cloudflare Tunnel transport | apply and teardown in a Linux container (tunnel, alias record and service made, recorded and taken away by revoke and uninstall; live against a test account needs a test token) | apply on a real machine and a real account; Cloudflare Access made by the installer | |
 | Claude Code adapter | plan | apply | |
 | Codex, Pi adapters | | ✓ | |
 | Friend invite and revoke | | ✓ | |

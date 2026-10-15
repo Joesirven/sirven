@@ -38,17 +38,14 @@ kill switch: access control lists
        not yet: the kill switch on macos is plan output until a run in a macos virtual machine verifies it
 
 kill switch: transport
-    9. stop the tunnel service (plan only)
-       $ cloudflared service uninstall
-       not yet: the kill switch on macos is plan output until a run in a macos virtual machine verifies it
-   10. revoke the service token (owner, by hand)
-       cloudflare dashboard, access, service auth: revoke the agent client's service token.
+    9. revoke the service token (owner, by hand)
+       cloudflare dashboard, access, service auth: revoke the agent client's service token, and delete the access application for the hostname. also delete the API token you made for the installer: it is not needed again.
 
 kill switch: finish
      note: kept on purpose: the install record, the audit log, the revoked grant record, the revoke marker, and the home folder of agent with whatever the agent left in it.
      note: the account stays locked and expired, with its shell turned off. to give the agent access again on purpose, run install.sh with --reinstate; nothing here is reversed automatically.
 
-summary: 10 steps. 0 to do, 0 already done, 1 by the owner, 9 plan only.
+summary: 9 steps. 0 to do, 0 already done, 1 by the owner, 8 plan only.
 dry run: nothing was changed. run the same command without --dry-run to apply this plan.
 applying would stop before any change: the plan has plan-only steps the alpha cut does not apply yet.
 exit status: 0

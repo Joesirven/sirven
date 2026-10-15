@@ -103,6 +103,7 @@ compiler_case() {
 # dry-run plans
 install_case install-linux-builder-tailscale linux --level builder --path /home/example/project --transport tailscale
 install_case install-linux-observer-none linux --level observer --path /srv/app --path /home/example/notes --transport none
+install_case install-linux-builder-cloudflare linux --level builder --path /home/example/project --transport cloudflare --cloudflare-hostname agent.example.org --cloudflare-account 0123456789abcdef0123456789abcdef
 install_case install-macos-builder-tailscale-bb macos --level builder --path /Users/example/code/app --transport tailscale --with-bb
 install_case install-macos-operator-cloudflare macos --level operator --path /Users/example/code/site --transport cloudflare
 install_case install-macos-builder-none macos --level builder --path /Users/example/code/app --transport none

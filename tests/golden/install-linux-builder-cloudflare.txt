@@ -1,0 +1,108 @@
+sirven install plan
+  operating system: linux
+  level: builder (write allowed: true)
+  paths: /home/example/project
+  service user: agent
+  owner: example
+  transport: cloudflare
+  prefix: <prefix>
+  mode: dry run: nothing will be changed
+
+package directories
+     note: owned by root. the agent can read its policy but never change it.
+    1. create the state directory /var/lib/sirven, which records what this install creates (to do)
+       $ mkdir -p <prefix>/var/lib/sirven && chmod 0700 <prefix>/var/lib/sirven
+    2. make /var/lib/sirven private to root: mode 0700, owned by root (to do)
+       $ layout_make_state_private <prefix>/var/lib/sirven
+    3. create the policy directory /etc/sirven (to do)
+       $ mkdir -p <prefix>/etc/sirven && chmod 0755 <prefix>/etc/sirven
+    4. create /etc/sirven/levels for the level in force (to do)
+       $ mkdir -p <prefix>/etc/sirven/levels && chmod 0755 <prefix>/etc/sirven/levels
+    5. create /etc/sirven/grants for grant records (to do)
+       $ mkdir -p <prefix>/etc/sirven/grants && chmod 0755 <prefix>/etc/sirven/grants
+    6. keep a pinned copy of this package in /var/lib/sirven/package, so revoke, rollback, and uninstall need no download (to do)
+       # copies install.sh uninstall.sh bin lib levels project.json, and components when present, into a new folder, then moves it into place
+    7. install the launcher /usr/local/sbin/sirven, root-owned, mode 0755: the one command that runs the kept copy (to do, recorded not run under --prefix)
+       $ layout_install_launcher <prefix>/usr/local/sbin/sirven
+     note: from now on run every root command through the launcher, not from a folder the agent may have been granted: sudo /usr/local/sbin/sirven revoke --all (cut the agent off, keep the records), sudo /usr/local/sbin/sirven uninstall, sudo /usr/local/sbin/sirven grant rollback. each runs the root-owned copy in /var/lib/sirven/package.
+     note: the folder you unpacked this package in is code the agent can change if you granted it. delete it after the install, or grant a path that does not hold it.
+
+audit log
+    8. create the audit log directory /var/log/sirven (to do)
+       $ mkdir -p <prefix>/var/log/sirven && chmod 0750 <prefix>/var/log/sirven
+    9. write the audit log format (to do)
+       # write <prefix>/etc/sirven/audit-format.json (mode 0644): the JSON lines format every entry follows
+   10. create the empty audit log (to do)
+       $ touch <prefix>/var/log/sirven/audit.jsonl && chmod 0640 <prefix>/var/log/sirven/audit.jsonl
+   11. give the audit log directory to the owner, example (to do, recorded not run under --prefix)
+       $ chown -R example <prefix>/var/log/sirven
+     note: capture comes from a forced-command wrapper on the agent's SSH key: designed, built after alpha.
+
+service user
+   12. create the service user agent, not an administrator (to do, recorded not run under --prefix)
+       $ useradd --create-home --home-dir <prefix>/home/agent --shell /bin/bash --user-group --comment 'sirven agent' agent
+   13. turn off password login for agent, keys only (to do, recorded not run under --prefix)
+       $ usermod --password '*' agent
+   14. confirm agent is not in sudo, wheel, or admin (to do, recorded not run under --prefix)
+       $ id -nG agent   # must not list sudo, wheel, or admin
+   15. create the SSH folder for agent (to do, recorded not run under --prefix)
+       $ install -d -m 0700 -o agent -g agent <prefix>/home/agent/.ssh
+   16. create an empty authorized_keys file (to do, recorded not run under --prefix)
+       $ install -m 0600 -o agent -g agent /dev/null <prefix>/home/agent/.ssh/authorized_keys
+   17. add the public key of your agent client (owner, by hand)
+       append its public key, one line, to /home/agent/.ssh/authorized_keys.
+       keys only: no password is ever set, stored, or typed.
+
+access to paths, level builder
+     note: builder: reads and writes inside granted paths. builds and tests there, nothing else.
+   18. install the builder level as policy (to do)
+       $ cp levels/builder.json <prefix>/etc/sirven/levels/builder.json && chmod 0644 <prefix>/etc/sirven/levels/builder.json
+     note: undo removes only what this grant adds: the entries for agent and the folder owner, and the default list on folders. it never changes an owner or a group, never touches the owner and other bits or special bits, and never follows a link, so a chown, a chmod 600 or a setuid made while the grant is in force stays. the group bits end as what the group could really do, so a chmod that widens the group bits during the grant does not outlast it.
+   19. record the grant for agent (to do)
+       # write <prefix>/etc/sirven/grants/agent.json (mode 0644): level builder on the paths below, no expiry, cannot grant further
+   20. end every process of agent and lock its account while the access changes (to do, recorded not run under --prefix)
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh quiesce agent <prefix>/var/lib/sirven/agent-quiesce.json
+   21. record the access control lists of /home before the grant (to do, recorded not run under --prefix)
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh record <prefix>/var/lib/sirven/access-lists/2cc974af6afc822c.txt <prefix>/home no agent
+   22. record the access control lists of /home/example before the grant (to do, recorded not run under --prefix)
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh record <prefix>/var/lib/sirven/access-lists/67a166d2c72af6bb.txt <prefix>/home/example no agent
+   23. record the access control lists of /home/example/project before the grant (to do, recorded not run under --prefix)
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh record <prefix>/var/lib/sirven/access-lists/867467bcb77869b9.txt <prefix>/home/example/project yes agent
+   24. let agent pass through /home (to do, recorded not run under --prefix)
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh grant-access <prefix>/home no agent x --snapshot <prefix>/var/lib/sirven/access-lists/2cc974af6afc822c.txt
+   25. let agent pass through /home/example (to do, recorded not run under --prefix)
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh grant-access <prefix>/home/example no agent x --snapshot <prefix>/var/lib/sirven/access-lists/67a166d2c72af6bb.txt
+   26. grant agent rwX on /home/example/project and everything inside (to do, recorded not run under --prefix)
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh grant-access <prefix>/home/example/project yes agent rwX --snapshot <prefix>/var/lib/sirven/access-lists/867467bcb77869b9.txt
+   27. make new files in /home/example/project inherit the grant, with group and other kept out (to do, recorded not run under --prefix)
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh grant-default <prefix>/home/example/project agent rwX --snapshot <prefix>/var/lib/sirven/access-lists/867467bcb77869b9.txt
+   28. give agent its account back (to do, recorded not run under --prefix)
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh release agent <prefix>/var/lib/sirven/agent-quiesce.json
+
+transport: cloudflare tunnel
+     note: the tunnel routes exactly one hostname, agent.example.org, to this machine's SSH server (ssh://localhost:22), whatever the level; every other name gets 404. no other port, no private network route.
+   29. give the installer one Cloudflare API token, once (owner, by hand)
+       Cloudflare dashboard, My Profile, API Tokens: create a token with the permissions Account, Cloudflare Tunnel, Edit and Zone, domain name records, Edit (and Zone, Zone, Read, unless you give the zone number in SIRVEN_CLOUDFLARE_ZONE_ID), limited to your one account and the one zone of agent.example.org. never a token that can do anything else.
+       hand it over one of two ways, and it is the only interactive step:
+         in a file, the safer way and the one to use first: save it as /etc/sirven/cloudflare-api-token, owned by root, mode 0600, with one name only (no hard link) and no extra access control list; it is removed after the tunnel is made, so give it again to take the tunnel away. this is the only way that never puts the token in an environment.
+         in the environment: set SIRVEN_CLOUDFLARE_API_TOKEN in your shell and run sudo --preserve-env=SIRVEN_CLOUDFLARE_API_TOKEN. sudo allows that only when its policy does. the installer takes the token out of its environment at once and hands it only to the steps that need it, but it cannot scrub the block of the environment it was started with: root can still read it in /proc/<installer process number>/environ until the installer ends.
+   30. put cloudflare access in front of the hostname, with a service token (owner, by hand)
+       cloudflare dashboard, access, applications: add agent.example.org as a self-hosted application.
+       policy action: service auth, allowing only a new service token for your agent client.
+       do not add email code login or any other login method.
+       (until you do, the hostname is reachable by anyone, and only the SSH keys of agent stand in the way. do this before you give the hostname to anyone.)
+   31. make the tunnel, point the hostname at it, and run it as a service (to do, recorded not run under --prefix)
+       # runs lib/cloudflare_tunnel.sh up; the token comes from /etc/sirven/cloudflare-api-token or from the environment of this one command, and is never put on a command line.
+       # it makes a tunnel named sirven-agent-<this machine's name>-<random> in account 0123456789abcdef0123456789abcdef, managed from this machine (the dashboard cannot widen it),
+       # keeps its credentials in /etc/sirven/cloudflared-credentials.json and its config in /etc/sirven/cloudflared.yml (both root-only), points agent.example.org at it with an alias record,
+       # writes /etc/systemd/system/sirven-cloudflared.service and starts it. it records each of these in /var/lib/sirven/cloudflare-tunnel.json as soon as it exists, and refuses with nothing changed if there is no token, no cloudflared, no systemd, or a record at agent.example.org that is not ours.
+       # the service it starts runs: cloudflared --no-autoupdate --config /etc/sirven/cloudflared.yml tunnel run   (as sirven-cloudflared.service, run by root, which only dials out)
+       $ bash <prefix>/var/lib/sirven/package/lib/cloudflare_tunnel.sh up --marker <prefix>/var/lib/sirven/cloudflare-tunnel.json --config <prefix>/etc/sirven/cloudflared.yml --credentials <prefix>/etc/sirven/cloudflared-credentials.json --unit <prefix>/etc/systemd/system/sirven-cloudflared.service --service sirven-cloudflared.service --user agent --hostname agent.example.org --account 0123456789abcdef0123456789abcdef --token-file <prefix>/etc/sirven/cloudflare-api-token
+   32. remove the used API token file, if one was saved (already done)
+       $ rm -f <prefix>/etc/sirven/cloudflare-api-token
+     note: the agent client connects with: ssh -o ProxyCommand='cloudflared access ssh --hostname %h --service-token-id <token> --service-token-secret <secret>' agent@agent.example.org
+
+summary: 32 steps. 28 to do, 1 already done, 3 by the owner, 0 plan only.
+dry run: nothing was changed. run the same command without --dry-run to apply this plan.
+to cut the agent off later: sudo /usr/local/sbin/sirven revoke --all --dry-run to read the plan; to remove everything: sudo /usr/local/sbin/sirven uninstall --dry-run
+exit status: 0

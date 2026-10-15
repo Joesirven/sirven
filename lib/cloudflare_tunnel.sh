@@ -476,6 +476,16 @@ cmd_down() {
   python3 -I "$API_SCRIPT" marker-get "$MARKER" account_id >/dev/null 2>&1 </dev/null
   [ "$?" -ne 1 ] || fail "$MARKER cannot be read. nothing was removed. look for a tunnel named sirven-... in the Cloudflare dashboard."
   service="$(record_get service)"; unit="$(record_get unit)"; config="$(record_get config)"; credentials="$(record_get credentials)"
+  # the record is root-only, so these were written by this script; they are still checked before anything is removed or stopped by name
+  for path in "$unit" "$config" "$credentials"; do
+    case "$path" in
+      '' | /*) ;;
+      *) fail "$MARKER names '$path', which is not an absolute path, so nothing was removed. check the record, and look for a tunnel named sirven-... in the Cloudflare dashboard." ;;
+    esac
+  done
+  case "$service" in
+    *[!A-Za-z0-9_.@-]*) fail "$MARKER names the service '$service', which is not a plain unit name, so nothing was removed." ;;
+  esac
 
   # the local part: never needs the token
   if [ -n "$service" ]; then
