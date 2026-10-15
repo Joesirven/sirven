@@ -9,8 +9,8 @@ cd "$SRC" || exit 2
 useradd -m owner
 mkdir -p /srv/app && echo hello > /srv/app/f && chown -R owner:owner /srv/app
 world_aclraw_attributes /srv > /tmp/before.raw
-cp -R "$SRC" /tmp/older && sed -i 's/"summary": "/"summary": "older version: /' /tmp/older/levels/observer.json
-check_exit "the older version installs" 0 bash /tmp/older/install.sh --yes --level observer --transport none --path /srv/app
+cp -R "$SRC" /work/older && sed -i 's/"summary": "/"summary": "older version: /' /work/older/levels/observer.json
+check_exit "the older version installs" 0 bash /work/older/install.sh --yes --level observer --transport none --path /srv/app
 sed -i 's/ --audit [^[:space:]]*//g' /var/lib/sirven/install-record.tsv
 
 check_exit "this version is refused over it" 2 bash install.sh --yes --level observer --transport none --path /srv/app

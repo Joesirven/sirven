@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# SIR-32. the kill switch against a live agent: a real sshd (the package's default configuration, which reads both
-# authorized_keys and authorized_keys2), a key login that works, and a session that is open when revoke --all runs.
+# SIR-32. the kill switch against a live agent: a real sshd (told to read both authorized_keys and authorized_keys2:
+# Debian and Ubuntu read both by default, Fedora's OpenSSH reads only authorized_keys, so the scenario asks for both),
+# a key login that works, and a session that is open when revoke --all runs.
 # afterwards the session is gone, no process of the agent remains, both key files are gone, a key login is refused,
 # and a key put back by hand is refused too (the account is expired and locked, so the lock stands without the keys).
 # revoke is run with no --transport flag, so the default transport is tailscale and the machine has no tailscale:
@@ -12,16 +13,17 @@ cd "$SRC" || exit 2
 mkdir -p /srv/app && echo hello > /srv/app/file.txt
 bash install.sh --yes --level observer --transport none --path /srv/app >/dev/null 2>&1
 
-# the owner's agent client key, in both files the default sshd configuration reads.
+# the owner's agent client key, in both files sshd is told to read.
 mkdir -p /tmp/k && ssh-keygen -q -t ed25519 -N '' -f /tmp/k/id
 cp /tmp/k/id.pub /home/agent/.ssh/authorized_keys
 cp /tmp/k/id.pub /home/agent/.ssh/authorized_keys2
 chown agent:agent /home/agent/.ssh/authorized_keys /home/agent/.ssh/authorized_keys2
 ssh-keygen -A >/dev/null 2>&1
 mkdir -p /run/sshd
-check "precondition: the default sshd configuration reads authorized_keys2 too" \
-  bash -c 'sshd -T | grep -i "^authorizedkeysfile" | grep -q authorized_keys2'
-/usr/sbin/sshd -p 2222 -o ListenAddress=127.0.0.1 -o PidFile=/tmp/sshd.pid
+sshd_keys="AuthorizedKeysFile .ssh/authorized_keys .ssh/authorized_keys2"
+check "precondition: the sshd configuration in use reads authorized_keys2 too" \
+  bash -c 'sshd -T -o "$0" | grep -i "^authorizedkeysfile" | grep -q authorized_keys2' "$sshd_keys"
+/usr/sbin/sshd -p 2222 -o ListenAddress=127.0.0.1 -o PidFile=/tmp/sshd.pid -o "$sshd_keys"
 sleep 1
 # the agent client: the key, no password, no prompts
 cat > /tmp/agent-ssh <<'SCRIPT'
