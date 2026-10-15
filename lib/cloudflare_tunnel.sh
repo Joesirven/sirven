@@ -28,7 +28,8 @@
 # local part (stop and remove the service, remove the credentials and the config) never needs the token, so the agent is cut off from
 # this machine even when the token is gone. the part in the
 # Cloudflare account does: without the token 'down' says plainly what is left there (tunnel and record numbers), keeps the record,
-# and exits 1, so the same command with the token finishes it.
+# and exits 1, so the same command with the token finishes it. (that is this script's exit status: the installer runs it as a step, so
+# the step fails and revoke or uninstall exit 4, the status the documents give. 'up' without a token is a refusal, exit 2, before any change.)
 #
 # the API token comes from the environment (SIRVEN_CLOUDFLARE_API_TOKEN), which this script takes into a variable of its own and unsets
 # before it starts any other process, or from the token file (mode 0600, owned by root, one name, no extended access list: the safer

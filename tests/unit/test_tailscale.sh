@@ -709,7 +709,7 @@ test_a_hard_linked_key_file_is_refused() {
   ln "$TEST_TMP/key-file" "$TEST_TMP/other-name"
   assert_status 2 bash "$NODE" key-file-check "$TEST_TMP/key-file"
   assert_contains "$CAPTURED_STDERR" "more than one name (2 hard links)"
-  assert_contains "$CAPTURED_STDERR" "the key would stay on disk under the other"
+  assert_contains "$CAPTURED_STDERR" "the secret would stay on disk under the other"
   assert_status 2 bash "$NODE" join "$MARKER" agent "$TEST_TMP/key-file"
   assert_contains "$CAPTURED_STDERR" "more than one name"
   assert_contains "$CAPTURED_STDERR" "nothing was changed"

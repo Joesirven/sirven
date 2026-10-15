@@ -14,13 +14,15 @@
 # uninstall delete the tunnel and the alias record in your account); without it they still stop the service and remove the
 # credentials, then say plainly what is left in the account and ask to be run again with the token.
 #
-# the token never stays in the installer's environment. the first thing the installer and the uninstaller do (cloudflare_hold_token,
-# called in main) is move the variable into one that is not exported and unset the original, so no step starts a process that
-# inherits it. only the processes that need it are handed it, by the environment of that one command: the first look that checks
+# the token does not stay in the installer's environment. the first thing main() does (cloudflare_hold_token) is move the variable into
+# one that is not exported and unset the original, so no step started after that inherits it. what runs before main() is not covered:
+# the root gate at the top of install.sh and uninstall.sh starts processes first (uname, and the python3 that vets the folder the
+# libraries are read from), and so does the line that finds the installer's own folder (dirname); they are started with the caller's
+# environment, which holds the token when it was handed over that way. only the processes that need it are handed it afterwards, by the environment of that one command: the first look that checks
 # the token would be accepted, the step that makes the tunnel, and the step that takes it away; each unsets it at once and gives the
 # interpreter that talks to the API the token through standard input only. what unset cannot do is scrub the block of the
 # environment a process was started with: root can read it in /proc/<process number>/environ while the process runs. give the token
-# through the root-owned token file to avoid this. the shell trace (bash -x) prints every expansion, so the
+# through the root-owned token file to avoid both. the shell trace (bash -x) prints every expansion, so the
 # lines that expand the token switch the trace off (and back on), and the helper switches it off from its first line; a trace of the
 # installer shows the rest of its work and never the token (scenario 65 traces a refusal and an apply and looks for it).
 # reads: PREFIX, PACKAGE, CONFIG_DIR, STATE_DIR, SERVICE_USER, ROOT_DIR, OPERATING_SYSTEM, COMMAND, TRANSPORT, DRY_RUN, CLOUDFLARE_*
@@ -260,7 +262,7 @@ plan_cloudflare() {
       "Cloudflare dashboard, My Profile, API Tokens: create a token with the permissions Account, Cloudflare Tunnel, Edit and Zone, domain name records, Edit (and Zone, Zone, Read, unless you give the zone number in SIRVEN_CLOUDFLARE_ZONE_ID), limited to your one account and the one zone of $hostname. never a token that can do anything else.
 hand it over one of two ways, and it is the only interactive step:
   in a file, the safer way and the one to use first: save it as $(cloudflare_token_file), owned by root, mode 0600, with one name only (no hard link) and no extra access control list; it is removed after the tunnel is made, so give it again to take the tunnel away. this is the only way that never puts the token in an environment.
-  in the environment: set SIRVEN_CLOUDFLARE_API_TOKEN in your shell and run sudo --preserve-env=SIRVEN_CLOUDFLARE_API_TOKEN. sudo allows that only when its policy does. the installer takes the token out of its environment at once and hands it only to the steps that need it, but it cannot scrub the block of the environment it was started with: root can still read it in /proc/<installer process number>/environ until the installer ends." \
+  in the environment: set SIRVEN_CLOUDFLARE_API_TOKEN in your shell and run sudo --preserve-env=SIRVEN_CLOUDFLARE_API_TOKEN. sudo allows that only when its policy does. the installer takes the token out of its environment at once and hands it only to the steps that need it, but it cannot scrub the block of the environment it was started with: root can still read it in /proc/<installer process number>/environ until the installer ends, and the few commands the root gate runs before that (uname, the check of the folder it reads from, dirname) are started with it too." \
       "cloudflare_token_available"
   fi
   plan_owner "put cloudflare access in front of the hostname, with a service token" \

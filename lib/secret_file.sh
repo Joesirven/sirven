@@ -1,7 +1,8 @@
 # shellcheck shell=bash
 # secret_file.sh: the checks a saved secret file (a Tailscale auth key, a Cloudflare API token) must pass before it is read. sourced by
 # lib/tailscale_node.sh and lib/cloudflare_tunnel.sh, which run from the pinned copy of this package; it starts no process of its own
-# except ls, cut, awk, getfacl, id and uname, which the checks need.
+# except ls, cut, awk, getfacl, id and uname, which the checks need. the messages name no one kind of secret: the caller says which file
+# it was ("the API token file X is not used: ..."), so they are the same for both.
 
 # has_extended_access_list FILE: true when FILE carries an access control list beyond the plain owner, group and other bits, which
 # is a way to give another account access that the mode bits do not show. looked for on purpose, in every way the machine offers,
@@ -27,10 +28,10 @@ has_extended_access_list() {
   return 1
 }
 
-# key_file_problem FILE: why FILE may not be read as the auth key, or nothing when it may (or is not there at all).
-# a key file must be a plain file (not a link, one name only), owned by root (by whoever runs this, when that is not root, which only the tests do),
-# with no extended access list and no permission for the group or for anyone else: a file others can write picks the tailnet this
-# machine joins, and a file others can read leaks the key.
+# key_file_problem FILE: why FILE may not be read as a secret, or nothing when it may (or is not there at all).
+# a secret file must be a plain file (not a link, one name only), owned by root (by whoever runs this, when that is not root, which only the tests do),
+# with no extended access list and no permission for the group or for anyone else: a file others can write decides what this machine
+# is given to do with it, and a file others can read leaks the secret.
 key_file_problem() {
   local file="$1" listing mode owner links
   [ -e "$file" ] || [ -L "$file" ] || return 0
@@ -46,12 +47,12 @@ key_file_problem() {
     printf 'it is owned by account number %s, not by root' "$owner"
     return 0
   fi
-  # a second name for the same file (a hard link) passes the owner and mode checks above, but the removal after the join deletes only
-  # the name it was given, so the key would stay on disk under the other name. a bind mount or a link made after this check has run
-  # is not caught here at all (both need root), and the same removal leaves the key on disk under it.
+  # a second name for the same file (a hard link) passes the owner and mode checks above, but the removal after the file has been used
+  # deletes only the name it was given, so the secret would stay on disk under the other name. a bind mount or a link made after this
+  # check has run is not caught here at all (both need root), and the same removal leaves the secret on disk under it.
   case "$links" in
     1) ;;
-    *) printf 'it has more than one name (%s hard links): the removal after the join deletes only one of them, so the key would stay on disk under the other; copy the key into a new file (umask 077; cat KEY_FILE > NEW_FILE), mode 0600, and remove the old names' "$links"; return 0 ;;
+    *) printf 'it has more than one name (%s hard links): the removal after it is used deletes only one of them, so the secret would stay on disk under the other; copy it into a new file (umask 077; cat FILE > NEW_FILE), mode 0600, and remove the old names' "$links"; return 0 ;;
   esac
   if has_extended_access_list "$file"; then
     printf 'it has an extended access control list, an access entry beyond the owner, group and other bits (the mode bits do not show who it lets in); remove it (setfacl -b on Linux, chmod -N on macOS) and keep the mode 0600'
