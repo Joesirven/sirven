@@ -79,9 +79,12 @@ esac
 [ -n "$default_image" ] || exit 2
 for scenario in "$HARNESS_DIR"/scenarios/linux/*.sh; do
   selected=""
-  IFS=, read -ra filters <<< "$FILTER"
-  [ "${#filters[@]}" -gt 0 ] || filters=("")
-  for f in "${filters[@]}"; do case "$scenario" in *"$f"*) selected=yes ;; esac; done
+  rest="$FILTER,"
+  while [ -n "$rest" ]; do
+    f="${rest%%,*}"
+    rest="${rest#*,}"
+    case "$scenario" in *"$f"*) selected=yes ;; esac
+  done
   [ -n "$selected" ] || continue
   name="$(basename "$scenario" .sh)"
   printf '\n# %s\n' "$name"
