@@ -56,7 +56,8 @@ tailscale_refuse_before_apply() {
     bash "$ROOT_DIR/lib/tailscale_node.sh" key-file-check "$(tailscale_auth_key_file)" >/dev/null || key_file_status=$?
     if [ "$key_file_status" -eq 2 ]; then
       printf 'error: refused: the saved auth key file cannot be trusted (above). nothing was changed.\n' >&2
-      printf 'you can: fix it (chown root:root and chmod 600 %s), or remove it and hand the key over in the environment.\n' "$(tailscale_auth_key_file)" >&2
+      printf 'you can: fix it (chown root:root %s, take off any extended access control list with setfacl -b %s, then chmod 600 %s), or remove it and hand the key over in the environment.\n' \
+        "$(tailscale_auth_key_file)" "$(tailscale_auth_key_file)" "$(tailscale_auth_key_file)" >&2
       exit 2
     fi
     printf 'error: refused: there is no Tailscale auth key to join the tailnet with. nothing was changed.\n' >&2
@@ -118,7 +119,7 @@ plan_tailscale() {
     "tailscale admin console, settings, keys: generate an auth key with tag:agent, pre-approved. ephemeral is the better choice: the node then leaves the tailnet by itself when it logs out.
 hand it over one of two ways, and it is the only interactive step:
   in a file, the safer way and the one to use first: save it as $(tailscale_auth_key_file), owned by root, mode 0600, with no extra access control list; it is removed after the join.
-  in the environment: set SIRVEN_TAILSCALE_AUTHKEY (or TAILSCALE_AUTHKEY) in your shell and run sudo --preserve-env=SIRVEN_TAILSCALE_AUTHKEY. that works only if the sudo policy allows it (env_keep or the SETENV tag in the sudoers file); otherwise sudo drops the variable and the join finds no key. the installer forgets the variable once the join has run." \
+  in the environment: set SIRVEN_TAILSCALE_AUTHKEY (or TAILSCALE_AUTHKEY) in your shell and run sudo --preserve-env=SIRVEN_TAILSCALE_AUTHKEY. sudo allows that only when its policy does: a sudoers rule for all commands implies the SETENV tag, a narrower rule needs that tag, or an env_keep line for the variable. when the policy does not allow it, sudo may refuse the command with an error; without the option, sudo drops the variable and the join finds no key. the installer forgets the variable once the join step has run." \
     "tailscale_key_available"
   if [ "$OPERATING_SYSTEM" = macos ]; then
     plan_planonly "join the tailnet as a tagged device with that key" \

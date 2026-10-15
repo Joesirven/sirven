@@ -40,12 +40,14 @@ sudo sh -c 'umask 077; cat > /etc/sirven/tailscale-auth-key'
 Paste the key, press Return, then Ctrl-D.
 
 The other way is the environment: `SIRVEN_TAILSCALE_AUTHKEY` (or `TAILSCALE_AUTHKEY`) set in your shell
-and kept through sudo with `sudo --preserve-env=SIRVEN_TAILSCALE_AUTHKEY`. Sudo honors that only when
-its policy allows it (an `env_keep` setting or the `SETENV` tag in the sudoers file); otherwise it drops
-the variable and the installer refuses with "there is no Tailscale auth key", changing nothing. Read the
-key into the variable with `read -rs SIRVEN_TAILSCALE_AUTHKEY; export SIRVEN_TAILSCALE_AUTHKEY`, not
+and kept through sudo with `sudo --preserve-env=SIRVEN_TAILSCALE_AUTHKEY`. Sudo allows that only when
+its policy does (the sudoers file, which says what sudo may do): a rule for all commands implies the
+`SETENV` tag, a narrower rule needs that tag, or an `env_keep` line naming the variable. When the policy
+does not allow it, sudo may refuse the whole command with an error. Plain `sudo` without the option
+drops the variable, and the installer then refuses with "there is no Tailscale auth key", changing
+nothing. Read the key into the variable with `read -rs SIRVEN_TAILSCALE_AUTHKEY; export SIRVEN_TAILSCALE_AUTHKEY`, not
 `SIRVEN_TAILSCALE_AUTHKEY=<the key> command`, since a command line is kept in shell history and shows
-in the process list. The installer unsets both variables as soon as the join step has run.
+in the process list. When the plan joins, the installer unsets both variables as soon as the join step has run. A machine that is already the agent node has no join step, and the key stays in the environment there; use the file.
 
 ## Where the pin lives
 

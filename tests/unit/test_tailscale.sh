@@ -459,6 +459,7 @@ test_an_apply_that_the_join_would_refuse_late_is_refused_before_any_change() {
   assert_status 2 tailscale_refuse_before_apply
   assert_contains "$CAPTURED_STDERR" "its mode is"
   assert_contains "$CAPTURED_STDERR" "cannot be trusted"
+  assert_contains "$CAPTURED_STDERR" "setfacl -b"
   assert_not_contains "$CAPTURED_STDERR" "there is no Tailscale auth key"
   chmod 600 "$CONFIG_DIR/tailscale-auth-key"
   assert_status 0 tailscale_refuse_before_apply
