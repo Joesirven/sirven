@@ -23,9 +23,38 @@ world_unchanged_if 'true' "and it changed nothing: files" files /tmp/empty.files
 world_unchanged_if 'true' "and it changed nothing: accounts" accounts /tmp/empty.accounts
 check "tailscale was never asked to join" bash -c '! grep -q "^tailscale up --auth-key" /tmp/fake-ts/calls.log 2>/dev/null'
 
-# 2. with a key: joined, tagged, recorded
-SIRVEN_TAILSCALE_AUTHKEY="$KEY" check_exit "apply with a key joins the tailnet" 0 install_ts
+# 1b. a key file with an access entry for another account is refused before the first change, whatever the mask shows. the mask
+# decides what the group bits of ls show: at r-- they show the entry, at --- they show nothing at all, and both are refused.
+KEY_FILE=/etc/sirven/tailscale-auth-key
+mkdir -p /etc/sirven
+printf '%s\n' "$KEY" > "$KEY_FILE"; chown root:root "$KEY_FILE"; chmod 600 "$KEY_FILE"
+setfacl -m u:nobody:r "$KEY_FILE"
+check "the entry shows in the group bits (the mask is r--)" bash -c '[ "$(ls -ldn "$0" | cut -c1-11)" = "-rw-r-----+" ]' "$KEY_FILE"
+check_exit "apply with a root-owned 0600 key file that has an entry for another account is refused" 2 install_ts
+check "the refusal names the access control list, and nothing was changed" bash -c 'grep -q "extended access control list" <<< "$0" && grep -q "nothing was changed" <<< "$0"' "$LAST_OUTPUT"
+check "the key is not in the refusal" bash -c '! grep -qF -- "$KEY" <<< "$0"' "$LAST_OUTPUT"
+setfacl -m m::--- "$KEY_FILE"
+check "with the mask at --- the group bits show nothing: the case the mode bits alone let through" bash -c '[ "$(ls -ldn "$0" | cut -c1-11)" = "-rw-------+" ]' "$KEY_FILE"
+check_exit "the same file is refused with the mask hiding the entry" 2 install_ts
+check "and it names the access control list" bash -c 'grep -q "extended access control list" <<< "$0"' "$LAST_OUTPUT"
+check "tailscale was never asked to join" bash -c '! grep -q "^tailscale up --auth-key" /tmp/fake-ts/calls.log 2>/dev/null'
+rm -rf /etc/sirven
+world_unchanged_if 'true' "and it changed nothing: files" files /tmp/empty.files
+world_unchanged_if 'true' "and it changed nothing: accounts" accounts /tmp/empty.accounts
+
+# 2. with a key: joined, tagged, recorded. a saved key file is there too, so the step after the join (it removes that file) runs. root
+# finds rm in the system folders first, so for this step only (a disposable machine) the real rm is moved aside and a stand-in takes
+# its place: it records the names (never the values) of the variables in the environment it was started with, then runs the real one.
+mkdir -p /etc/sirven
+printf '%s\n' "$KEY" > "$KEY_FILE"; chown root:root "$KEY_FILE"; chmod 600 "$KEY_FILE"
+mv /usr/bin/rm /usr/bin/rm.real
+printf '#!/bin/sh\ncase "$*" in *tailscale-auth-key*) env | /usr/bin/sed "s/=.*//" > /tmp/rm-environment-names ;; esac\nexec /usr/bin/rm.real "$@"\n' > /usr/bin/rm
+chmod 755 /usr/bin/rm
+SIRVEN_TAILSCALE_AUTHKEY="$KEY" TAILSCALE_AUTHKEY="$KEY" check_exit "apply with a key joins the tailnet" 0 install_ts
 out="$LAST_OUTPUT"
+mv -f /usr/bin/rm.real /usr/bin/rm
+check "the step after the join started its child with neither key variable in the environment" bash -c '[ -s /tmp/rm-environment-names ] && ! grep -q "TAILSCALE_AUTHKEY" /tmp/rm-environment-names'
+check "and the saved key file was removed by that step" bash -c '[ ! -e "$0" ]' "$KEY_FILE"
 check "the node is up, tagged tag:agent, named after the account" bash -c '[ "$(cat /tmp/fake-ts/state)" = Running ] && grep -q tag:agent /tmp/fake-ts/tags && grep -q -- "--hostname=agent-harness-node" /tmp/fake-ts/up-arguments'
 check "no Tailscale SSH, no route or name resolution acceptance, no exit node" bash -c '! grep -q -e "--exit-node" /tmp/fake-ts/up-arguments && grep -q -e "--ssh=false" -e "--accept-dns=false" -e "--accept-routes=false" /tmp/fake-ts/up-arguments'
 check "the record is root-only and names the node" bash -c '[ "$(stat -c %a:%U /var/lib/sirven/tailscale-node.json)" = 600:root ] && grep -q "\"node_id\": \"nodeid-" /var/lib/sirven/tailscale-node.json'
