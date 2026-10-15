@@ -1,0 +1,282 @@
+#!/usr/bin/env bash
+# SIR-2, SIR-34. the Cloudflare tunnel transport on a real install, with a fake Cloudflare API that keeps state (on this machine's own
+# loopback), a fake cloudflared that validates the config, and a stand-in systemctl that keeps unit state in files (the container has no
+# systemd). the real API is scenario 64, which needs a test token and a network. apply without a token is refused before the first change;
+# apply with a token makes one tunnel, one alias record and one service, root-only credentials, and records them; a second apply needs no
+# token and does nothing; revoke (whatever transport it names) and uninstall each take away exactly that and nothing else in the account,
+# loudly and repeatably when the token is missing; a half-made tunnel is taken away by uninstall; the token is nowhere on the disk, in
+# any output, on any command line, or in the environment of any step that is not the tunnel step.
+set -uo pipefail
+. "$(dirname "$0")/../../lib/world.sh"
+cd "$SRC" || exit 2
+
+FIXTURES="$SRC/tests/fixtures/cloudflare"
+export TOKEN="cfapi""SENTINELtoken0123456789_ZZZZ-9876543210abc"
+export KEY="$TOKEN"
+ACCOUNT=0123456789abcdef0123456789abcdef
+ZONE=fedcba9876543210fedcba9876543210
+HOST=agent.example.test
+export FAKE_CF_DIR=/tmp/fake-cloudflared FAKE_SYSTEMD_DIR=/tmp/fake-systemd
+export API_DIR=/tmp/fake-api
+UNIT=sirven-cloudflared.service
+
+# the stand-ins live where root looks for tools: /usr/local/bin is searched after the system folders when only root can write it
+install -o root -g root -m 755 "$FIXTURES/cloudflared" /usr/local/bin/cloudflared
+install -o root -g root -m 755 "$FIXTURES/systemctl" /usr/sbin/systemctl
+mkdir -p /run/systemd/system /etc/systemd/system /tmp/fake-api
+printf '%s\n' "$TOKEN" > /tmp/fake-api-token
+python3 -I "$FIXTURES/api_server.py" "$API_DIR" --token-file /tmp/fake-api-token --account "$ACCOUNT" --zone "$ZONE" --zone-name example.test >/dev/null 2>&1 &
+for _ in $(seq 1 50); do [ -s "$API_DIR/port" ] && break; sleep 0.1; done
+export SIRVEN_CLOUDFLARE_API="http://127.0.0.1:$(cat "$API_DIR/port")"
+
+install_cf() { bash install.sh --yes --level "${LEVEL:-observer}" --transport cloudflare --cloudflare-hostname "$HOST" --cloudflare-account "$ACCOUNT" "$@"; }
+revoke_cf() { bash install.sh revoke --all --yes "$@"; }
+api_value() { python3 -I -c '
+import json, sys
+state = json.load(open(sys.argv[1]))
+live = [t for t in state["tunnels"].values() if not t.get("deleted_at")]
+print({"tunnels": len(live), "records": len(state["records"])}[sys.argv[2]])' "$API_DIR/state.json" "$1"; }
+api_state_empty() { [ "$(api_value tunnels)" = 0 ] && [ "$(api_value records)" = 0 ]; }
+no_token_on_disk() { local hits; hits="$(grep -rl -F -- "$TOKEN" /etc /var /root /home /usr /opt /srv/pkg 2>/dev/null | grep -v '^/srv/pkg/tests/')"; [ -z "$hits" ] || { printf "the token is in: %s\n" "$hits"; return 1; }; }
+cloudflare_files() { world_files | grep -i -e cloudflare -e sirven-cloudflared | grep -v -e '^/usr/local/bin/cloudflared ' -e '^/srv/pkg/' || true; }
+export -f api_value api_state_empty no_token_on_disk
+reset_machine() { bash uninstall.sh --yes >/dev/null 2>&1; rm -f /var/lib/sirven/agent-revoked-agent.json; rm -rf /var/lib/sirven/package; rm -rf "$FAKE_CF_DIR" "$FAKE_SYSTEMD_DIR"; }
+
+# stand-ins for mkdir, chown and install (the commands the steps before the tunnel run) that record the NAMES, never the values, of the
+# variables in the environment they were started with, then run the real command. for the runs that follow only (a disposable machine).
+CHILD_ENV_LOG=/tmp/child-environment-names
+shim_children_on() {
+  local name
+  : > "$CHILD_ENV_LOG"
+  for name in mkdir chown install; do
+    mv "/usr/bin/$name" "/usr/bin/$name.real"
+    printf '#!/bin/sh\nprintf "%%s: %%s\\n" "%s" "$(env | /usr/bin/sed "s/=.*//" | /usr/bin/tr "\\n" " ")" >> %s\nexec /usr/bin/%s.real "$@"\n' "$name" "$CHILD_ENV_LOG" "$name" > "/usr/bin/$name"
+    chmod 755 "/usr/bin/$name"
+  done
+}
+shim_children_off() {
+  local name
+  for name in mkdir chown install; do mv -f "/usr/bin/$name.real" "/usr/bin/$name"; done
+}
+
+world_files > /tmp/empty.files
+world_accounts > /tmp/empty.accounts
+check "before anything, the machine has no file of cloudflare's or of the unit but the stand-in tool" bash -c '[ -z "$(cloudflare_files)" ]'
+
+# 1. no token: refused up front, nothing changed
+check_exit "apply without a token is refused" 2 install_cf
+check "the refusal says there is no token, names the token file and the environment, and that nothing was changed" bash -c 'grep -q "there is no Cloudflare API token" <<< "$0" && grep -q "/etc/sirven/cloudflare-api-token" <<< "$0" && grep -q "SIRVEN_CLOUDFLARE_API_TOKEN" <<< "$0" && grep -q "nothing was changed" <<< "$0"' "$LAST_OUTPUT"
+world_unchanged_if 'true' "and it changed nothing: files" files /tmp/empty.files
+world_unchanged_if 'true' "and it changed nothing: accounts" accounts /tmp/empty.accounts
+check "the API was never called" bash -c '[ ! -e /tmp/fake-api/calls.log ]'
+check_exit "apply without a hostname is refused" 2 bash install.sh --yes --level observer --transport cloudflare --cloudflare-account "$ACCOUNT"
+check "it says so, and nothing was changed" bash -c 'grep -q "no hostname is named" <<< "$0" && grep -q "nothing was changed" <<< "$0"' "$LAST_OUTPUT"
+
+# 1b. a token file others can read, with an access entry for another account, or with a second name: each refused before the first change
+TOKEN_FILE=/etc/sirven/cloudflare-api-token
+mkdir -p /etc/sirven
+printf '%s\n' "$TOKEN" > "$TOKEN_FILE"; chown root:root "$TOKEN_FILE"; chmod 644 "$TOKEN_FILE"
+check_exit "apply with a token file that everyone can read is refused" 2 install_cf
+check "the refusal names the mode, and the token is not in it" bash -c 'grep -q "its mode is" <<< "$0" && grep -q "nothing was changed" <<< "$0" && ! grep -qF -- "$KEY" <<< "$0"' "$LAST_OUTPUT"
+chmod 600 "$TOKEN_FILE"; setfacl -m u:nobody:r "$TOKEN_FILE"; setfacl -m m::--- "$TOKEN_FILE"
+check_exit "apply with a root-owned 0600 token file that has an entry for another account (mask hiding it) is refused" 2 install_cf
+check "it names the access control list" bash -c 'grep -q "extended access control list" <<< "$0"' "$LAST_OUTPUT"
+setfacl -b "$TOKEN_FILE"
+mkdir -p /var/other-name && ln "$TOKEN_FILE" /var/other-name/copy
+check_exit "apply with a token file that has a second name is refused" 2 install_cf
+check "it names the second name" bash -c 'grep -q "more than one name" <<< "$0"' "$LAST_OUTPUT"
+rm -rf /var/other-name /etc/sirven
+world_unchanged_if 'true' "none of the refusals changed anything: files" files /tmp/empty.files
+world_unchanged_if 'true' "none of the refusals changed anything: accounts" accounts /tmp/empty.accounts
+
+# 1c. a wrong token is turned away by the API before the first change, and is not in the output
+WRONG="wrongtoken0123456789wrongtoken0123456789"
+SIRVEN_CLOUDFLARE_API_TOKEN="$WRONG" check_exit "apply with a wrong token is refused" 2 install_cf
+check "it says the token cannot list tunnels, and does not print it" bash -c 'grep -q "cannot list tunnels" <<< "$0" && grep -q "nothing was changed" <<< "$0" && ! grep -qF -- wrongtoken0123456789 <<< "$0"' "$LAST_OUTPUT"
+world_unchanged_if 'true' "and it changed nothing" files /tmp/empty.files
+
+# 1d. a hostname that already has a record of someone else is never touched, and nothing is made
+python3 -I - "$SIRVEN_CLOUDFLARE_API" "$TOKEN" "$ZONE" <<'PY'
+import json, sys, urllib.request
+base, token, zone = sys.argv[1:4]
+request = urllib.request.Request(base + "/zones/%s/dns_records" % zone, data=json.dumps({"type": "A", "name": "agent.example.test", "content": "192.0.2.1"}).encode(), method="POST")
+request.add_header("Authorization", "Bearer " + token)
+urllib.request.urlopen(request)
+PY
+SIRVEN_CLOUDFLARE_API_TOKEN="$TOKEN" check_exit "apply onto a hostname that has a record of someone else is refused" 2 install_cf
+check "it says whose record it is, and nothing was changed" bash -c 'grep -q "did not make" <<< "$0" && grep -q "nothing was changed" <<< "$0"' "$LAST_OUTPUT"
+check "no tunnel was made, and the record of someone else is untouched" bash -c '[ "$(python3 -I -c "
+import json
+s = json.load(open(\"/tmp/fake-api/state.json\"))
+print(len(s[\"tunnels\"]), len(s[\"records\"]))")" = "0 1" ]'
+python3 -I -c '
+import json
+p = "/tmp/fake-api/state.json"
+s = json.load(open(p)); s["records"] = {}; json.dump(s, open(p, "w"))'
+
+# 2. with a token: one tunnel, one alias record, one service, recorded. the steps before and after the tunnel step start children, and
+# none of them is given the token
+mkdir -p /etc/sirven
+printf '%s\n' "$TOKEN" > "$TOKEN_FILE"; chown root:root "$TOKEN_FILE"; chmod 600 "$TOKEN_FILE"
+calls_at_start="$(wc -l < /tmp/fake-api/calls.log)"
+mv /usr/bin/rm /usr/bin/rm.real
+printf '#!/bin/sh\ncase "$*" in *cloudflare-api-token*) env | /usr/bin/sed "s/=.*//" > /tmp/rm-environment-names ;; esac\nexec /usr/bin/rm.real "$@"\n' > /usr/bin/rm
+chmod 755 /usr/bin/rm
+shim_children_on
+FAKE_CF_PS_LOG=/tmp/ps-during-apply SIRVEN_CLOUDFLARE_API_TOKEN="$TOKEN" check_exit "apply with a token makes the tunnel" 0 install_cf
+out="$LAST_OUTPUT"
+mv -f /usr/bin/rm.real /usr/bin/rm
+shim_children_off
+check "steps before the tunnel did start children (so the next check proves something)" bash -c '[ "$(grep -c "^mkdir:" "$0")" -gt 0 ] && [ "$(grep -c "^chown:" "$0")" -gt 0 ]' "$CHILD_ENV_LOG"
+check "and none of them was started with the token variable in its environment" bash -c '! grep -q "CLOUDFLARE_API_TOKEN" "$0"' "$CHILD_ENV_LOG"
+check "the step after the tunnel started its child without the token variable in the environment" bash -c '[ -s /tmp/rm-environment-names ] && ! grep -q "CLOUDFLARE_API_TOKEN" /tmp/rm-environment-names'
+check "the saved token file was removed by that step" bash -c '[ ! -e "$0" ]' "$TOKEN_FILE"
+check "one tunnel and one alias record in the account" bash -c '[ "$(api_value tunnels)" = 1 ] && [ "$(api_value records)" = 1 ]'
+check "the alias record points at the tunnel" bash -c 'python3 -I -c "
+import json
+s = json.load(open(\"/tmp/fake-api/state.json\"))
+t = [t for t in s[\"tunnels\"].values() if not t.get(\"deleted_at\")][0]
+r = list(s[\"records\"].values())[0]
+assert r[\"content\"] == t[\"id\"] + \".cfargotunnel.com\" and r[\"name\"] == \"agent.example.test\" and t[\"config_src\"] == \"local\""'
+check "the credentials, the record and the config are root-only" bash -c '[ "$(stat -c %a:%U /etc/sirven/cloudflared-credentials.json)" = 600:root ] && [ "$(stat -c %a:%U /var/lib/sirven/cloudflare-tunnel.json)" = 600:root ] && [ "$(stat -c %a:%U /etc/sirven/cloudflared.yml)" = 600:root ]'
+check "the config routes the one hostname to ssh and everything else to 404" bash -c 'tail -n 4 /etc/sirven/cloudflared.yml | tr "\n" "|" | grep -qF "ingress:|  - hostname: agent.example.test|    service: ssh://localhost:22|  - service: http_status:404|"'
+check "the service runs as root with a name of its own, and cloudflared was asked to validate the config" bash -c 'grep -q "^ExecStart=/usr/local/bin/cloudflared --no-autoupdate --config /etc/sirven/cloudflared.yml tunnel run" /etc/systemd/system/sirven-cloudflared.service && ! grep -q "^User=" /etc/systemd/system/sirven-cloudflared.service && [ -e /tmp/fake-systemd/sirven-cloudflared.service.active ] && grep -q "ingress validate" /tmp/fake-cloudflared/calls.log'
+check "nothing of the owner's own cloudflared was written or run" bash -c '[ ! -e /etc/cloudflared ] && ! grep -q -e "service install" -e "tunnel login" -e "route dns" /tmp/fake-cloudflared/calls.log /tmp/fake-systemd/calls.log'
+check "the install record can undo it" grep -q 'cloudflare_tunnel.sh down --marker /var/lib/sirven/cloudflare-tunnel.json' /var/lib/sirven/install-record.tsv
+check "the token is nowhere on the disk" no_token_on_disk
+check "the token is in no output" bash -c '! grep -qF -- "$TOKEN" <<< "$0"' "$out"
+check "the audit log and the install record have no token" bash -c '! grep -qF -- "$TOKEN" /var/log/sirven/audit.jsonl /var/lib/sirven/install-record.tsv'
+check "the token was on no command line while cloudflared ran" bash -c '[ -s /tmp/ps-during-apply ] && ! grep -qF -- "$TOKEN" /tmp/ps-during-apply'
+check "no step but the tunnel step was started with the token variable (the fake cloudflared and systemctl saw none)" bash -c '! grep -q CLOUDFLARE_API_TOKEN /tmp/fake-cloudflared/environment-names.log /tmp/fake-systemd/environment-names.log'
+check "every call this apply made to the API carried the token in the Authorization header" bash -c 'tail -n +$(($0 + 1)) /tmp/fake-api/calls.log | grep -c authorized | grep -qv "^0$" && ! tail -n +$(($0 + 1)) /tmp/fake-api/calls.log | grep -q unauthorized' "$calls_at_start"
+
+# 3. again: nothing more happens, no error, and no token is needed
+world_files > /tmp/one.files
+calls_before="$(wc -l < /tmp/fake-api/calls.log)"
+check_exit "a second apply without any token exits 0" 0 install_cf
+check "it made no tunnel and called no API" bash -c '[ "$(wc -l < /tmp/fake-api/calls.log)" = "$0" ] && [ "$(api_value tunnels)" = 1 ]' "$calls_before"
+world_unchanged_if 'true' "and it changed no file" files /tmp/one.files
+shim_children_on
+SIRVEN_CLOUDFLARE_API_TOKEN="$TOKEN" check_exit "a second apply with a token in the environment (no tunnel is made) exits 0" 0 install_cf
+shim_children_off
+check "the steps that ran started children, and none had the token variable" bash -c '[ -s "$0" ] && ! grep -q CLOUDFLARE_API_TOKEN "$0"' "$CHILD_ENV_LOG"
+
+# 4. revoke that names no transport at all (so the default one) takes the tunnel away, because the record says there is one
+shim_children_on
+SIRVEN_CLOUDFLARE_API_TOKEN="$TOKEN" check_exit "revoke --all applies" 0 revoke_cf
+shim_children_off
+check "the plan showed the teardown and the audit log recorded the step" bash -c 'grep -q "take this machine.s Cloudflare tunnel away" <<< "$0" && grep -q "take this machine.s Cloudflare tunnel away" /var/log/sirven/audit.jsonl' "$LAST_OUTPUT"
+check "the account has no tunnel and no record of ours any more" api_state_empty
+check "the service is stopped and disabled, and the files are gone" bash -c '[ ! -e /tmp/fake-systemd/sirven-cloudflared.service.active ] && [ ! -e /tmp/fake-systemd/sirven-cloudflared.service.enabled ] && [ ! -e /etc/systemd/system/sirven-cloudflared.service ] && [ ! -e /etc/sirven/cloudflared.yml ] && [ ! -e /etc/sirven/cloudflared-credentials.json ] && [ ! -e /var/lib/sirven/cloudflare-tunnel.json ]'
+check "no child of the revoke had the token variable, and the token is nowhere" bash -c '! grep -q CLOUDFLARE_API_TOKEN "$0"' "$CHILD_ENV_LOG"
+check "the token is in no output of the revoke" bash -c '! grep -qF -- "$TOKEN" <<< "$0"' "$LAST_OUTPUT"
+deletes_before="$(grep -c '^DELETE ' /tmp/fake-api/calls.log)"
+check_exit "a second revoke exits 0" 0 revoke_cf
+check "and deleted nothing more" bash -c '[ "$(grep -c "^DELETE " /tmp/fake-api/calls.log)" = "$0" ]' "$deletes_before"
+
+# 5. revoke WITHOUT the token: the machine is cut off, the account is not touched, it says exactly what is left, and the same command with the
+# token finishes it
+reset_machine
+SIRVEN_CLOUDFLARE_API_TOKEN="$TOKEN" install_cf --reinstate >/dev/null 2>&1
+check "setup: the tunnel is made again" bash -c '[ "$(api_value tunnels)" = 1 ]'
+tunnel_number="$(python3 -I -c 'import json; print([t for t in json.load(open("/tmp/fake-api/state.json"))["tunnels"].values() if not t.get("deleted_at")][0]["id"])')"
+check_exit "revoke --all without a token exits 4" 4 revoke_cf
+check "it names the tunnel and the record that are still in the account, and how to finish" bash -c 'grep -q "there is no Cloudflare API token" <<< "$0" && grep -qF -- "$1" <<< "$0" && grep -q "run the same command again with the token" <<< "$0"' "$LAST_OUTPUT" "$tunnel_number"
+check "the service and the credentials are gone, the agent is locked out, and the record stays" bash -c '[ ! -e /etc/sirven/cloudflared-credentials.json ] && [ ! -e /etc/systemd/system/sirven-cloudflared.service ] && [ ! -e /tmp/fake-systemd/sirven-cloudflared.service.active ] && [ -s /var/lib/sirven/cloudflare-tunnel.json ] && passwd --status agent | grep -q "^agent L"'
+check "the account still has the tunnel and the record (not touched)" bash -c '[ "$(api_value tunnels)" = 1 ] && [ "$(api_value records)" = 1 ]'
+SIRVEN_CLOUDFLARE_API_TOKEN="$TOKEN" check_exit "the same revoke with the token exits 0" 0 revoke_cf
+check "and finished the job" bash -c '[ ! -e /var/lib/sirven/cloudflare-tunnel.json ] && api_state_empty'
+
+# 5b. the token in the token file works for the teardown too
+reset_machine
+SIRVEN_CLOUDFLARE_API_TOKEN="$TOKEN" install_cf --reinstate >/dev/null 2>&1
+printf '%s\n' "$TOKEN" > "$TOKEN_FILE"; chown root:root "$TOKEN_FILE"; chmod 600 "$TOKEN_FILE"
+check_exit "revoke --all with the token in the token file exits 0" 0 revoke_cf
+check "and the tunnel is gone from the account" api_state_empty
+check "the revoke removed the token file it was given" bash -c '[ ! -e "$0" ]' "$TOKEN_FILE"
+
+# 6. what the owner changed in the account is left alone: a record that now points elsewhere, a tunnel that was renamed
+reset_machine
+SIRVEN_CLOUDFLARE_API_TOKEN="$TOKEN" install_cf --reinstate >/dev/null 2>&1
+python3 -I -c '
+import json
+p = "/tmp/fake-api/state.json"
+s = json.load(open(p))
+for r in s["records"].values(): r["content"] = "someone-elses-tunnel.cfargotunnel.com"
+json.dump(s, open(p, "w"))'
+SIRVEN_CLOUDFLARE_API_TOKEN="$TOKEN" check_exit "revoke with a record the owner repointed exits 0" 0 revoke_cf
+check "it left the repointed record alone and deleted our tunnel" bash -c 'grep -q "no longer points at this tunnel" <<< "$0" && [ "$(api_value records)" = 1 ] && [ "$(api_value tunnels)" = 0 ]' "$LAST_OUTPUT"
+python3 -I -c '
+import json
+p = "/tmp/fake-api/state.json"
+s = json.load(open(p)); s["records"] = {}; json.dump(s, open(p, "w"))'
+reset_machine
+SIRVEN_CLOUDFLARE_API_TOKEN="$TOKEN" install_cf --reinstate >/dev/null 2>&1
+python3 -I -c '
+import json
+p = "/tmp/fake-api/state.json"
+s = json.load(open(p))
+for t in s["tunnels"].values():
+    if not t.get("deleted_at"): t["name"] = "owners-own-tunnel"
+json.dump(s, open(p, "w"))'
+SIRVEN_CLOUDFLARE_API_TOKEN="$TOKEN" check_exit "revoke with a tunnel the owner renamed exits 0" 0 revoke_cf
+check "it left the renamed tunnel alone" bash -c 'grep -q "is now named owners-own-tunnel" <<< "$0" && [ "$(api_value tunnels)" = 1 ]' "$LAST_OUTPUT"
+python3 -I -c '
+import json
+p = "/tmp/fake-api/state.json"
+s = json.load(open(p))
+for t in s["tunnels"].values(): t["deleted_at"] = "2026-01-01T00:00:00Z"
+json.dump(s, open(p, "w"))'
+
+# 7. uninstall alone takes away exactly what apply made, and the machine has nothing of cloudflare's left but the stand-in tool
+reset_machine
+SIRVEN_CLOUDFLARE_API_TOKEN="$TOKEN" install_cf >/dev/null 2>&1
+check "setup: the tunnel is made" bash -c '[ "$(api_value tunnels)" = 1 ]'
+SIRVEN_CLOUDFLARE_API_TOKEN="$TOKEN" check_exit "uninstall takes the tunnel away" 0 bash uninstall.sh --yes
+out="$LAST_OUTPUT"
+check "the account has nothing of ours" api_state_empty
+check "this machine has no file of cloudflare's or of the unit left, but the stand-in tool" bash -c '[ -z "$(cloudflare_files)" ]'
+check "the token is in no output of the uninstall" bash -c '! grep -qF -- "$TOKEN" <<< "$0"' "$out"
+check "and nowhere on the disk" no_token_on_disk
+
+# 8. a tunnel made and then not finished (the alias record refused): the install step fails, the install record has no line for it,
+# and uninstall still takes the half-made tunnel away, because the record file of the tunnel step names it
+reset_machine
+: > /tmp/fake-api/refuse-records
+SIRVEN_CLOUDFLARE_API_TOKEN="$TOKEN" check_exit "apply when the alias record is refused fails (exit 4)" 4 install_cf
+check "it says which step failed and why" bash -c 'grep -q "could not point agent.example.test at the tunnel" <<< "$0"' "$LAST_OUTPUT"
+check "the tunnel exists in the account and the record file names it" bash -c '[ "$(api_value tunnels)" = 1 ] && grep -q tunnel_id /var/lib/sirven/cloudflare-tunnel.json'
+check "the install record has no line for the failed step" bash -c '! grep -q cloudflare_tunnel.sh /var/lib/sirven/install-record.tsv'
+SIRVEN_CLOUDFLARE_API_TOKEN="$TOKEN" check_exit "uninstall takes the half-made tunnel away" 0 bash uninstall.sh --yes
+check "it says it is the one a run left behind" bash -c 'grep -q "a run left behind" <<< "$0"' "$LAST_OUTPUT"
+check "the account has nothing of ours, and the record file is gone" bash -c 'api_state_empty && [ ! -e /var/lib/sirven/cloudflare-tunnel.json ]'
+rm -f /tmp/fake-api/refuse-records
+# the same, finished by a second apply instead: the tunnel is reused
+reset_machine
+: > /tmp/fake-api/refuse-records
+SIRVEN_CLOUDFLARE_API_TOKEN="$TOKEN" install_cf >/dev/null 2>&1
+first_tunnel="$(python3 -I -c 'import json; print([t for t in json.load(open("/tmp/fake-api/state.json"))["tunnels"].values() if not t.get("deleted_at")][0]["id"])')"
+rm -f /tmp/fake-api/refuse-records
+SIRVEN_CLOUDFLARE_API_TOKEN="$TOKEN" check_exit "a second apply finishes the half-made tunnel" 0 install_cf
+check "with the same tunnel, one record, and the service running" bash -c '[ "$(api_value tunnels)" = 1 ] && [ "$(api_value records)" = 1 ] && grep -q "$0" /var/lib/sirven/cloudflare-tunnel.json && [ -e /tmp/fake-systemd/sirven-cloudflared.service.active ]' "$first_tunnel"
+SIRVEN_CLOUDFLARE_API_TOKEN="$TOKEN" bash uninstall.sh --yes >/dev/null 2>&1
+
+# 9. the routing is the same for every level
+for level in observer builder operator; do
+  reset_machine
+  LEVEL="$level" SIRVEN_CLOUDFLARE_API_TOKEN="$TOKEN" install_cf >/dev/null 2>&1
+  sed '1d' /etc/sirven/cloudflared.yml | sed "s|^credentials-file:.*||" > "/tmp/config-$level"
+  SIRVEN_CLOUDFLARE_API_TOKEN="$TOKEN" bash uninstall.sh --yes >/dev/null 2>&1
+done
+check "the config is the same text for observer, builder and operator (but for the tunnel number)" bash -c 'cmp -s /tmp/config-observer /tmp/config-builder && cmp -s /tmp/config-observer /tmp/config-operator && grep -q "service: ssh://localhost:22" /tmp/config-observer && [ "$(grep -c "service:" /tmp/config-observer)" = 2 ]'
+
+# 10. an address that is not this machine is never used for the API, as root either, even when the environment names one
+check "a non-loopback API address in the environment is ignored" env SIRVEN_CLOUDFLARE_API=http://example.invalid:9 python3 -I -c '
+import importlib.util
+spec = importlib.util.spec_from_file_location("api", "/srv/pkg/lib/cloudflare_api.py")
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+assert module.api_base() == "https://api.cloudflare.com/client/v4", module.api_base()'
+
+# nothing of the stand-ins or the scenario's own state is left in a place the next scenario would see: the container is thrown away
+finish

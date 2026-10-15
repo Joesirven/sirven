@@ -1,0 +1,20 @@
+# the disposable machine for the live Cloudflare scenario: the same bare Debian as Dockerfile.linux, plus the real cloudflared from
+# Cloudflare's own release, checked against a pinned checksum (the checksums are the ones Cloudflare publishes next to each file; bump
+# the version and both on purpose), and the certificate authorities the real API needs. a separate image, so a change here never
+# rebuilds the image the other scenarios share.
+FROM debian:12-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587
+ARG TARGETARCH
+ARG CLOUDFLARED_VERSION=2026.10.0
+ARG CLOUDFLARED_SHA256_AMD64=d33ff2d14475178d2012c2c56beba87389ac5ded27649519f198a7d3134a99db
+ARG CLOUDFLARED_SHA256_ARM64=e6422b9d4f72d3194bc5a38676f13667c06666523217b842a877d72a80b5ac08
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends bash python3 acl passwd procps util-linux coreutils findutils diffutils openssh-server openssh-client cron at ca-certificates curl \
+ && rm -rf /var/lib/apt/lists/* \
+ && case "$TARGETARCH" in amd64) sum="$CLOUDFLARED_SHA256_AMD64" ;; arm64) sum="$CLOUDFLARED_SHA256_ARM64" ;; *) echo "no pinned cloudflared for $TARGETARCH" >&2; exit 1 ;; esac \
+ && mkdir /tmp/cloudflared-download && cd /tmp/cloudflared-download \
+ && curl -fsSL -o cloudflared "https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}/cloudflared-linux-${TARGETARCH}" \
+ && echo "$sum  cloudflared" | sha256sum -c - \
+ && install -o root -g root -m 755 cloudflared /usr/local/bin/cloudflared \
+ && cd / && rm -rf /tmp/cloudflared-download \
+ && apt-get purge -y curl && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
+WORKDIR /work
