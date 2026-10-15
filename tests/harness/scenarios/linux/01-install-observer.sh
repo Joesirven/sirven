@@ -9,9 +9,17 @@ useradd -m neighbor
 mkdir -p /srv/app && echo hello > /srv/app/file.txt
 
 check_exit "install observer on /srv/app applies" 0 bash install.sh --yes --level observer --transport none --path /srv/app
-check "install says it applied 25 steps (23 and the two that stop and give back the agent's account)" grep -q 'applied 25 steps' <<< "$LAST_OUTPUT"
+check "install says it applied 26 steps (24 and the two that stop and give back the agent's account)" grep -q 'applied 26 steps' <<< "$LAST_OUTPUT"
 
 check "service user agent exists" id -u agent
+# Fedora's account tool gives every new account an empty mail spool, Debian and Ubuntu give none. the install removes the service
+# user's on every image, so the check runs everywhere; it only counts where the image makes a spool, which neighbor (made above by
+# the same tool) shows.
+if [ -e /var/spool/mail/neighbor ]; then
+  check "service user's mail spool is gone after the install (this image makes one)" world_mail_spool_gone agent
+else
+  skip "service user's mail spool gone after the install" "this image's account tool makes no mail spool"
+fi
 check "service user is not an administrator" bash -c '! id -nG agent | tr " " "\n" | grep -qx -e sudo -e wheel -e admin'
 check "password login is off" bash -c '[ "$(getent shadow agent | cut -d: -f2)" = "*" ]'
 check "ssh folder is 0700 and owned by agent" bash -c '[ "$(stat -c "%a %U" /home/agent/.ssh)" = "700 agent" ]'
@@ -38,6 +46,6 @@ check "pinned copy exists" test -f /var/lib/sirven/package/PINNED-COPY
 check "audit log has an install entry" grep -q '"outcome": *"finished"' /var/log/sirven/audit.jsonl
 
 check_exit "re-run is idempotent" 0 bash install.sh --yes --level observer --transport none --path /srv/app
-check "re-run skipped the finished steps" grep -q 'skipped 24 already done' <<< "$LAST_OUTPUT"
+check "re-run skipped the finished steps" grep -q 'skipped 25 already done' <<< "$LAST_OUTPUT"
 
 finish
