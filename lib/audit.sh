@@ -2,7 +2,8 @@
 # audit log: the directory, the empty log, the format it is written in, and a small writer.
 #
 # the log lives in a directory owned by the owner. the agent has no access to it at all, so
-# from the agent's point of view it is append only through the wrapper and nothing else.
+# today only the package's own writer below appends to it. the forced-command wrapper that
+# would add sessions and commands is planned, not built.
 #
 # the writer is for the package's own commands. when install.sh, uninstall.sh, or a grant
 # rollback applies a plan for real (never in a dry run), every numbered step writes a step
@@ -50,7 +51,7 @@ audit_format_json() {
   },
   "rules": [
     "the directory belongs to the owner, mode 0750; the agent cannot read, edit, or remove entries",
-    "entries are appended by a forced-command wrapper on the SSH key; it sees what you send, not every system call",
+    "install, grant, and revoke entries are appended by this package; session and command entries are meant to come from a forced-command wrapper on the SSH key, which is designed, not built yet, and it will see what you send, not every system call",
     "install, uninstall, grant rollback, sirven add, and sirven remove write step and grant entries when they apply for real, never in a dry run",
     "install writes one adopt entry for each thing it found and kept, when it applies for real",
     "the kill switch writes revoke_started first and revoke_finished last"

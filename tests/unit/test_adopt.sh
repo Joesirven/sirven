@@ -102,16 +102,50 @@ test_a_personal_tailscale_login_is_refused_with_what_to_do() {
   ROOT="$TEST_TMP/root"
   mkdir -p "$ROOT"
   before="$(snapshot)"
-  FAKE_TAILSCALE_STATE=personal-node assert_status 2 install_sh --dry-run --prefix "$ROOT" --level builder --path /srv/app --transport tailscale
-  assert_eq "" "$CAPTURED_STDOUT" "a refusal prints no plan"
+  # a real run refuses before any change and prints no plan.
+  FAKE_TAILSCALE_STATE=personal-node assert_status 2 install_sh --prefix "$ROOT" --level builder --path /srv/app --transport tailscale
+  assert_eq "" "$CAPTURED_STDOUT" "a real refusal prints no plan"
   assert_contains "$CAPTURED_STDERR" "error: refused: what is already on this machine conflicts with this request. nothing was changed."
   assert_contains "$CAPTURED_STDERR" "this machine is already logged in to Tailscale (tags: none), and it is not the agent node."
   assert_contains "$CAPTURED_STDERR" "run again with --transport none"
   assert_contains "$CAPTURED_STDERR" "tag this machine tag:agent yourself"
-  assert_eq "$before" "$(snapshot)"
-  FAKE_TAILSCALE_STATE=personal-node assert_status 2 install_sh --prefix "$ROOT" --level builder --path /srv/app --transport tailscale
   assert_eq "$before" "$(snapshot)" "a refused apply changed the fake root"
   assert_only_read_calls
+}
+
+test_a_dry_run_with_a_conflict_prints_the_plan_and_the_conflict_and_exits_2() {
+  local before
+  ROOT="$TEST_TMP/root"
+  mkdir -p "$ROOT"
+  before="$(snapshot)"
+  FAKE_TAILSCALE_STATE=personal-node assert_status 2 install_sh --dry-run --prefix "$ROOT" --level builder --path /srv/app --transport tailscale
+  assert_contains "$CAPTURED_STDOUT" "sirven install plan"
+  assert_contains "$CAPTURED_STDOUT" "conflicts with what is already on this machine: a real run would refuse"
+  assert_contains "$CAPTURED_STDOUT" "this machine is already logged in to Tailscale (tags: none), and it is not the agent node."
+  assert_contains "$CAPTURED_STDOUT" "(blocked by a conflict)"
+  assert_contains "$CAPTURED_STDOUT" "you can: keep it as it is and run again with --transport none"
+  assert_contains "$CAPTURED_STDOUT" "tag this machine tag:agent yourself"
+  assert_contains "$CAPTURED_STDOUT" "service user"
+  assert_contains "$CAPTURED_STDOUT" ", 1 blocked by a conflict."
+  assert_contains "$CAPTURED_STDOUT" "dry run: nothing was changed."
+  assert_contains "$CAPTURED_STDOUT" "a real run would refuse until the conflicts above are resolved, and would change nothing. this dry run exits 2, the same status as that refusal."
+  assert_not_contains "$CAPTURED_STDOUT" "run the same command without --dry-run to apply this plan"
+  assert_not_contains "$CAPTURED_STDERR" "error:"
+  assert_eq "$before" "$(snapshot)" "a dry run changed the fake root"
+  assert_only_read_calls
+}
+
+test_a_dry_run_lists_every_conflict_and_a_clean_dry_run_still_exits_0() {
+  seed
+  printf '{}\n' > "$ROOT/etc/sirven/levels/builder.json"
+  SIRVEN_PATH=none TEST_OWNER=someone assert_status 2 install_sh --dry-run --prefix "$ROOT" --level builder --transport tailscale
+  assert_contains "$CAPTURED_STDOUT" "a grant is in force for agent"
+  assert_contains "$CAPTURED_STDOUT" "differs from this package's levels/builder.json"
+  assert_contains "$CAPTURED_STDOUT" "belongs to example, and this run would give it to someone."
+  assert_contains "$CAPTURED_STDOUT" ", 3 blocked by a conflict."
+  assert_status 0 install_sh --dry-run --prefix "$TEST_TMP/clean" --level observer --transport none
+  assert_not_contains "$CAPTURED_STDOUT" "blocked by a conflict"
+  assert_not_contains "$CAPTURED_STDOUT" "a real run would refuse"
 }
 
 test_a_logged_out_tailscale_is_kept_and_the_join_stays() {
@@ -146,8 +180,10 @@ test_with_bb_and_no_bb_stays_plan_only() {
 test_granting_no_path_over_a_grant_in_force_is_refused() {
   seed
   SIRVEN_PATH=none assert_status 2 install_sh --dry-run --prefix "$ROOT" --level builder --transport tailscale
+  assert_contains "$CAPTURED_STDOUT" "a grant is in force for agent: level builder on /srv/app. this request grants no path"
+  assert_contains "$CAPTURED_STDOUT" "/usr/local/sbin/sirven revoke --all --dry-run"
+  SIRVEN_PATH=none assert_status 2 install_sh --prefix "$ROOT" --level builder --transport tailscale
   assert_contains "$CAPTURED_STDERR" "a grant is in force for agent: level builder on /srv/app. this request grants no path"
-  assert_contains "$CAPTURED_STDERR" "/usr/local/sbin/sirven revoke --all --dry-run"
 }
 
 test_a_changed_policy_copy_is_refused_not_overwritten() {
@@ -170,8 +206,10 @@ test_an_unreadable_grant_record_is_refused_not_overwritten() {
 test_an_audit_log_owned_by_someone_else_is_refused() {
   seed
   TEST_OWNER=someone assert_status 2 install_sh --dry-run --prefix "$ROOT" --transport tailscale
+  assert_contains "$CAPTURED_STDOUT" "the audit log directory /var/log/sirven belongs to example, and this run would give it to someone."
+  assert_contains "$CAPTURED_STDOUT" "run again with --owner example"
+  TEST_OWNER=someone assert_status 2 install_sh --prefix "$ROOT" --transport tailscale
   assert_contains "$CAPTURED_STDERR" "the audit log directory /var/log/sirven belongs to example, and this run would give it to someone."
-  assert_contains "$CAPTURED_STDERR" "run again with --owner example"
 }
 
 test_asking_for_a_different_grant_changes_it_as_before() {

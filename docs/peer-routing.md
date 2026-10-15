@@ -30,9 +30,9 @@ rest ships together.
 | Step | Component | Code |
 | --- | --- | --- |
 | A site is requested, prepared, voted on, built into the registry, and published | site-allowlist review workflow | `lib/allowlist_review.py` |
-| The identity issuer signs that registry version, valid for 7 days by default | attestation layer | `cli.mjs registry sign` |
+| The identity issuer signs that registry version, valid for 7 days by default | attestation layer | `lib/attestation/cli.mjs registry sign` |
 | A machine verifies the signature and installs the snapshot; any failure carries nothing | attestation layer, policy engine | `peer_routing.py refresh` |
-| The requesting user's device signs an envelope for one peer, one domain, one size, and the exact request bytes | attestation layer | `cli.mjs sign --request-digest` |
+| The requesting user's device signs an envelope for one peer, one domain, one size, and the exact request bytes | attestation layer | `lib/attestation/cli.mjs sign --request-digest` |
 | The carrying machine runs the decision table, then the peer verifier on the exact bytes | policy engine, attestation layer | `peer_routing.py carry` |
 | The bytes are reserved against the 5,000,000,000 byte monthly cap | reciprocity ledger | `reciprocity.py check` |
 | The runtime and the tier dial ask whether peer routing is available | runtime, tier dial | `peer_routing.py readiness`, `GET /v1/status` |
@@ -44,8 +44,8 @@ its bytes reserved; `www.` matches its registry entry; signed-in traffic is refu
 is closed, and with the gate open it still needs a site reviewed for signed-in sessions. Refusals,
 one per component: a site never reviewed, Solo, a tampered registry, a registry signed by an
 untrusted key, an expired registry, an envelope for another peer, for other bytes, expired,
-replayed, forged, from a revoked user, and past the 5 gigabyte cap. A fresh machine is not ready,
-a fresh machine is not ready and reports `peer_routing_available: false`; a configured carrying machine, now that the transport is built, reports it `true`, though the user-side wiring and the ship gate still keep any real traffic from flowing.
+replayed, forged, from a revoked user, and past the 5 gigabyte cap. A fresh machine is not ready
+and reports `peer_routing_available: false`. A configured carrying machine reports `peer_routing_available: true`, now that the transport is built, though the user-side wiring and the ship gate still keep any real traffic from flowing.
 
 ## The peer transport, honestly
 

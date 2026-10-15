@@ -3,26 +3,27 @@
 Status: draft for Jose's review, 2026-10-09. Working name **Sirven**, subtitle "secure agent access".
 The name lives only in `project.json`; this document says "Sirven" or "the package".
 
+Updated 2026-10-15: the repository name, the Tailscale row (W6), the `--with-bb` row (W9), and the demo outline row (W13) now match the repository (see docs/status/2026-10-15-docs-claims.md). The other status cells are as written on 2026-10-09.
+
 ## Name
 
 - **Sirven is a working name.** Known public-name collisions: sirven.com (an image content delivery
   network) and getsirven.com. Revisit the name before any public launch.
 - Positioning: "the shadcn of agent access": install it, own it, no hosted middleman.
-- The GitHub repository is still `Joesirven/secure-agent-access`. Renaming it to `Joesirven/sirven`
-  is pending Jose's GitHub authentication fix on the MacBook; update `repository` in
-  `project.json` when it happens.
+- The GitHub repository is `Joesirven/sirven`, and `repository` in `project.json` says so. It was
+  `Joesirven/secure-agent-access` when this draft was written on 2026-10-09.
 
 ## What it is
 
 An open-source onboarding package that lets an owner point their agent runtime (Claude Code,
 Codex, or Pi) at a macOS or Linux machine and get secure agent access in one sitting. The owner
 texts their agent from a phone, the agent starts work on the owner's machine, and that access is
-scoped, logged, and revocable. "The shadcn of agent access": you copy in a small, readable set of
+scoped, revocable, and (install and grant changes only, for now) logged. "The shadcn of agent access": you copy in a small, readable set of
 scripts and data files that you own and can change. It is not a hosted service.
 
 The defaults are the product. A fresh install is conservative: a dedicated service user with no
-administrator rights, access granted per path, every action written to an audit log, and one
-command that revokes everything.
+administrator rights, access granted per path, install and grant changes written to an audit log (session and
+command logging is planned, not built yet), and one command that revokes everything.
 
 ## Hard constraints
 
@@ -50,7 +51,7 @@ command that revokes everything.
 | Level | A preset bundle of permissions: `observer`, `builder`, `operator`. Defined in `docs/PERMISSIONS.md`. |
 | Grant | A level applied to specific paths for a specific principal (the owner's agent or a friend's), with an optional expiry. |
 | Invite | A grant to a friend's agent, bound to that agent's public key. |
-| Audit log | Append-only record of every session and command run as the service user. |
+| Audit log | Append-only record of install and grant changes. Session and command logging is planned, not built yet. |
 | Kill switch | One command that revokes every key, ends every session, and locks the service user. |
 | Access control list | Per-file permission entries (`setfacl` on Linux, `chmod +a` on macOS) used to grant one path without opening the whole home directory. |
 
@@ -63,16 +64,16 @@ Each workstream lists what it delivers, what it needs first, and its honest stat
 | W1 | Installer core | `install.sh`: operating system detection, preflight checks, at most two setup questions with visible defaults (`--yes` and `SIRVEN_*` for no questions), a plan-then-apply engine, `--dry-run`, idempotent re-runs, `--prefix` for a fake root | none | **Build** |
 | W2 | Service user | Create or reuse `agent` (Linux `useradd`, macOS `sysadminctl`/`dscl`), no administrator group, locked password, SSH key only | W1 | **Build**, verified by dry run and fake-root tests; real creation on Linux as root (verified in the harness container); macOS real creation is built but switched off by default |
 | W3 | Permission model | Levels as data (`levels/*.json` or similar), grant schema, a compiler from grants to access control list commands | none | **Design doc plus reference data and compiler** |
-| W4 | Audit log | Log format (JSON lines), location owned by the owner, append-only from the agent's point of view, session start and end, every command via a forced-command wrapper | W2, W3 | **Format designed; wrapper built if time allows**, otherwise designed |
+| W4 | Audit log | Log format (JSON lines), location owned by the owner, append-only from the agent's point of view, session start and end, every command via a forced-command wrapper | W2, W3 | **Format designed and written for install and grant changes; the wrapper is designed, not built** |
 | W5 | Kill switch | `revoke --all`: remove authorized keys, end sessions, lock the user, remove tunnel access, write a final audit entry | W2, W4, W6 | **Built on Linux** (applies in a container and on a real machine as root, verified by the harness in a container); plan output on macOS |
-| W6 | Transport: Tailscale | Install check, `tailscale up` with an auth key after one interactive login, tagged device, a policy snippet that lets only the owner's devices reach the agent port | W1 | **Build the plan and documentation**; never run against a real tailnet in tests |
+| W6 | Transport: Tailscale | Install check, `tailscale up` with an auth key after one interactive login, tagged device, a policy snippet that lets only the owner's devices reach the agent port | W1 | **Built for Linux containers**: the plan, the join as `tag:agent`, and the logout on revoke and uninstall (see the alpha cut table). Never run against a real tailnet in tests; the live join needs a test key and has not run yet |
 | W7 | Transport: Cloudflare Tunnel | `cloudflared` tunnel plus Cloudflare Access service token in front of SSH | W1 | **Built on Linux** (apply and teardown verified in the harness container against a stand-in for the Cloudflare API; the run against a real account needs a test token); Cloudflare Access stays an owner step; plan output on macOS |
 | W8 | Runtime adapters | Per-runtime setup for the service user: Claude Code, Codex, Pi. Config written into the service user's home, never the owner's | W2 | **Claude Code first**; Codex and Pi stubbed with clear "not yet" errors |
-| W9 | Phone-to-agent channel | How the owner's text reaches the runtime on the machine | W6 or W7, W8 | **Not built by the package.** Alpha relies on an existing remote client (bb or the runtime's own remote mode) over the transport. Optional `--with-bb` installs bb; orca to be specified by Jose |
+| W9 | Phone-to-agent channel | How the owner's text reaches the runtime on the machine | W6 or W7, W8 | **Not built by the package.** Alpha relies on an existing remote client (bb or the runtime's own remote mode) over the transport. Optional `--with-bb` adds a bb note to the plan only; orca to be specified by Jose |
 | W10 | Friend invite | `invite --level observer --path ~/code/app --key <their public key> --expires 7d`, plus `revoke <invite>` | W3, W4, W5 | **Designed** in `docs/PERMISSIONS.md` |
 | W11 | Multi-machine | An inventory file listing machines; the same grants applied to each over SSH from the owner's laptop; per-machine state and drift report | W1 to W6 stable | **Designed only** |
 | W12 | Advanced config | One config file (its name derived from `project.json`) for custom levels, extra paths, log retention, transport options | W3 | **Schema sketched**, not built |
-| W13 | Docs, demo, video | README with diagram, `docs/DEMO.md` outline, 15-second explainer | none | **Build** |
+| W13 | Docs, demo, video | README with diagram, a demo outline (`docs/DEMO.md`, not written yet), 15-second explainer | none | **Build** |
 | W14 | Test harness | Fake-root unit tests (any machine), dry-run golden files, Linux container tests for real user and access control list creation, macOS testing plan | W1 | **Unit and dry-run tests tonight**; container tests if a container is available on the MacBook |
 
 ## Dependency order
@@ -130,8 +131,8 @@ safely") is W1 → W2 → W3 → W4 → W6 → W8 → W9. Everything else makes 
 ## Risks
 
 1. **Audit capture is weaker than it sounds.** A forced-command wrapper logs what enters through
-   SSH, but a process the agent starts can do things the wrapper never sees. Honest framing for
-   alpha: "every session and command you send is logged", not "every system call". Kernel-level
+   SSH, but a process the agent starts can do things the wrapper never sees. Honest framing once
+   the wrapper is built: "every session and command you send is logged", not "every system call". Kernel-level
    audit is designed, not built.
 2. **macOS access control lists and privacy controls.** macOS protects some folders (Desktop,
    Documents, Downloads) behind privacy prompts that a service user cannot answer. Alpha defaults

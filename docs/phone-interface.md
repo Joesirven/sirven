@@ -200,10 +200,10 @@ because phone control runs as you, against your phone.
 ## Relation to the runtime interface
 
 The runtime thread defines `docs/runtime-interface.md`, the local interface the policy engine,
-tier dial, and usage meter plug into. That document was not in the repository when this was
-written, so this interface follows the pattern its brief describes (local, authenticated,
-plainly logged) and stands on its own. When it lands, reconcile: same port family and token
-handling, and `/v1/phone` mounted under the runtime's interface or beside it.
+tier dial, and usage meter plug into. That document is in the repository now. This phone
+interface was written to the pattern its brief describes (local, authenticated, plainly
+logged), and it has not yet been reconciled with the document. Open: the same port family and
+token handling, and whether `/v1/phone` is mounted under the runtime's interface or beside it.
 
 ## The iPhone ride backend
 

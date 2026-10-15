@@ -37,7 +37,7 @@ switch, and granting access to anyone else.
 - `paths`: the policy for which paths can be granted at all (below). `default_grants` is always
   empty: nothing is granted unless the owner names it.
 - `expiry`: owner grants have no expiry; friend invites always do
-- `audit`: sessions and commands are always logged; the agent can never read or write the log
+- `audit`: install and grant changes are logged; session and command logging is planned, not built yet. the agent can never read or write the log
 - `widening`: every field is `false`
 - `owner_listed` (operator only): the services and logs the owner names for operator. both
   lists are empty and nothing reads them yet.
@@ -71,7 +71,7 @@ every field, its meaning, and what enforces it today. "rule n" points at the lis
 | `expiry.friend_invite.default_level` | the level an invite gets when none is named | rule 5: observer only |
 | `expiry.friend_invite.required` | an invite must expire | rule 4: always true |
 | `expiry.friend_invite.default_days`, `.maximum_days` | the expiry an invite gets, and the most it may ask for | rule 4: above zero, default no more than maximum |
-| `audit.session_start_and_end`, `.every_command` | what the forced-command wrapper writes | rule 6: always true. the wrapper is built after alpha |
+| `audit.session_start_and_end`, `.every_command` | what the forced-command wrapper writes | always true in the data and checked by `lib/grant_compiler.py`; not one of the numbered rules. the wrapper is planned, not built |
 | `audit.file_changes` | whether file changes are captured | `false`: needs kernel-level audit, designed, not built |
 | `audit.agent_can_read_log`, `.agent_can_write_log` | whether the agent reaches its own log | rule 6: always false |
 | `audit.retention_days` | how long entries are kept | not enforced yet; nothing rotates the log |
@@ -98,7 +98,7 @@ subcommand validates the level first, so a broken file never reaches a plan.
 5. only observer is the default level for friend invites. with several files, `validate` checks
    that exactly one, observer, is.
 6. the audit log stays out of reach: `agent_can_read_log` and `agent_can_write_log` are false,
-   and sessions and commands are always logged.
+   and session and command logging is planned, not built yet.
 7. passing through a parent folder grants nothing else: the linux traverse entry is exactly
    `x` and the macos one exactly `search`.
 8. no capability is both allowed and denied.
@@ -229,7 +229,9 @@ the kill switch reads it to know what to remove.
   or the environment comes from the grant record, nothing is asked for it, and the plan shows it
   as `adopted:`. giving a different level or path is a grant change, shown as one. granting no
   path over a grant in force, or reinstalling a level whose policy copy was edited, is refused
-  before any change. see `lib/adopt.sh`.
+  before any change (exit 2, no plan). a dry run prints the whole plan with each such conflict as
+  a step blocked by the conflict, ends with a line saying a real run would refuse, and also exits
+  2. see `lib/adopt.sh`.
 - **install.** `install.sh` writes the grant record and the entries. when it applies for real,
   each step it actually runs appends its undo to the install record,
   `/var/lib/<package>/install-record.tsv`, and a changed grant record writes a `grant` entry to
@@ -309,6 +311,16 @@ the kill switch reads it to know what to remove.
   finishes, which the install, rollback and uninstall messages say, with how to give it back now
   (`access_control_snapshot.sh release AGENT MARKER`).
 
+  **AppArmor (SIR-83, measured on the server ba-sing-se).** with AppArmor enforcing under its docker-default
+  profile, the agent cannot build a deep chain at all: its folder creation stops at depth 4,090 with Errno 36
+  (ENAMETOOLONG), at about 8,189 bytes of absolute path. unconfined, the same chain reaches 12,000 levels. the
+  harness scenarios 67 (revoke) and 68 (uninstall) keep the default profile and check that, on the deepest chain
+  the confined agent can build, every access list entry is removed and no process is left. revoke (scenario 67) also locks the account;
+  uninstall (scenario 68) removes the service user. the SIR-83 commit message records both passing on the server
+  ba-sing-se (zero access list entries left); not re-run from this Mac. not yet verified: a tree
+  built with AppArmor lifted, then revoked under the default profile. the attempt to carry such a tree between two
+  containers failed (a committed image kept only about 1,996 levels and lost the grant), so that case is open.
+
   **links.** undo never follows a link. it opens the granted folder one component at a time without
   following links and checks it is still the folder that was recorded (same device and inode),
   then walks down by file descriptor and reads and writes the list on the open descriptor, so there is
@@ -381,7 +393,7 @@ the kill switch reads it to know what to remove.
 
   **a stopped revoke is never undone by an install.** the marker `agent-revoked-USER.json` (one per account) is separate from the install's
   `agent-quiesce.json` (which remembers the account's earlier state so a finished install can give it back). while the marker is
-  there, install refuses (exit 2, also in a dry run, and also when the kill switch stopped halfway), and the step that gives an
+  there, install refuses (exit 2, in a dry run too where the plan is printed with the refusal as a blocked step, and also when the kill switch stopped halfway), and the step that gives an
   account back (`release`) refuses too. install also refuses an account that is left expired when no install was in the middle of
   changing it. `sirven grant rollback` is refused (the grant record no longer matches the audit log). the owner brings the
   account back on purpose with `install.sh --reinstate`: it unlocks the account, removes the expiry, gives back the `/bin/bash`
@@ -486,5 +498,6 @@ revoke <invite>
 - `audit.retention_days` is not enforced: nothing rotates or trims the log yet.
 - reinstalling with different paths adds the new entries but does not remove the old ones.
   use `bin/sirven grant rollback`, or the kill switch, to remove access.
-- audit capture is per session and per command through the forced-command wrapper. a process
-  the agent starts can do things the wrapper never sees.
+- audit capture per session and per command is designed, not built: it is meant to come through
+  the forced-command wrapper. a process the agent starts can do things that wrapper would never
+  see.

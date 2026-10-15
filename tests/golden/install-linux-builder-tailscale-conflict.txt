@@ -1,0 +1,112 @@
+sirven install plan
+  operating system: linux
+  level: builder (write allowed: true)
+  paths: /home/example/project
+  service user: agent
+  owner: example
+  transport: tailscale
+  prefix: <prefix>
+  mode: dry run: nothing will be changed
+
+conflicts with what is already on this machine: a real run would refuse
+     note: sirven adopts what it finds and never overwrites it. a real run stops before any change until each of these is resolved; this dry run shows the rest of the plan as it would be.
+    1. this machine is already logged in to Tailscale (tags: none), and it is not the agent node. joining as tag:agent would log it in again with a new key and re-tag it, and sirven never changes a Tailscale login, key, or tag. (blocked by a conflict)
+       you can: keep it as it is and run again with --transport none: the agent stays reachable over your tailnet, under your tailnet's own policy. or tag this machine tag:agent yourself in the Tailscale admin console and run again: sirven adopts a tagged machine as it is.
+
+already on this machine, adopted as it is
+     adopted: Tailscale 1.76.1, logged in as a device of your tailnet (tags: none). kept as it is: never logged out, re-keyed, or re-tagged.
+
+package directories
+     note: owned by root. the agent can read its policy but never change it.
+    2. create the state directory /var/lib/sirven, which records what this install creates (to do)
+       $ mkdir -p <prefix>/var/lib/sirven && chmod 0700 <prefix>/var/lib/sirven
+    3. make /var/lib/sirven private to root: mode 0700, owned by root (to do)
+       $ layout_make_state_private <prefix>/var/lib/sirven
+    4. create the policy directory /etc/sirven (to do)
+       $ mkdir -p <prefix>/etc/sirven && chmod 0755 <prefix>/etc/sirven
+    5. create /etc/sirven/levels for the level in force (to do)
+       $ mkdir -p <prefix>/etc/sirven/levels && chmod 0755 <prefix>/etc/sirven/levels
+    6. create /etc/sirven/grants for grant records (to do)
+       $ mkdir -p <prefix>/etc/sirven/grants && chmod 0755 <prefix>/etc/sirven/grants
+    7. keep a pinned copy of this package in /var/lib/sirven/package, so revoke, rollback, and uninstall need no download (to do)
+       # copies install.sh uninstall.sh bin lib levels project.json, and components when present, into a new folder, then moves it into place
+    8. install the launcher /usr/local/sbin/sirven, root-owned, mode 0755: the one command that runs the kept copy (to do, recorded not run under --prefix)
+       $ layout_install_launcher <prefix>/usr/local/sbin/sirven
+     note: from now on run every root command through the launcher, not from a folder the agent may have been granted: sudo /usr/local/sbin/sirven revoke --all (cut the agent off, keep the records), sudo /usr/local/sbin/sirven uninstall, sudo /usr/local/sbin/sirven grant rollback. each runs the root-owned copy in /var/lib/sirven/package.
+     note: the folder you unpacked this package in is code the agent can change if you granted it. delete it after the install, or grant a path that does not hold it.
+
+audit log
+    9. create the audit log directory /var/log/sirven (to do)
+       $ mkdir -p <prefix>/var/log/sirven && chmod 0750 <prefix>/var/log/sirven
+   10. write the audit log format (to do)
+       # write <prefix>/etc/sirven/audit-format.json (mode 0644): the JSON lines format every entry follows
+   11. create the empty audit log (to do)
+       $ touch <prefix>/var/log/sirven/audit.jsonl && chmod 0640 <prefix>/var/log/sirven/audit.jsonl
+   12. give the audit log directory to the owner, example (to do, recorded not run under --prefix)
+       $ chown -R example <prefix>/var/log/sirven
+     note: capture comes from a forced-command wrapper on the agent's SSH key: designed, built after alpha.
+
+service user
+   13. create the service user agent, not an administrator (to do, recorded not run under --prefix)
+       $ useradd --create-home --home-dir <prefix>/home/agent --shell /bin/bash --user-group --comment 'sirven agent' agent
+   14. turn off password login for agent, keys only (to do, recorded not run under --prefix)
+       $ usermod --password '*' agent
+   15. confirm agent is not in sudo, wheel, or admin (to do, recorded not run under --prefix)
+       $ id -nG agent   # must not list sudo, wheel, or admin
+   16. create the SSH folder for agent (to do, recorded not run under --prefix)
+       $ install -d -m 0700 -o agent -g agent <prefix>/home/agent/.ssh
+   17. create an empty authorized_keys file (to do, recorded not run under --prefix)
+       $ install -m 0600 -o agent -g agent /dev/null <prefix>/home/agent/.ssh/authorized_keys
+   18. add the public key of your agent client (owner, by hand)
+       append its public key, one line, to /home/agent/.ssh/authorized_keys.
+       keys only: no password is ever set, stored, or typed.
+
+access to paths, level builder
+     note: builder: reads and writes inside granted paths. builds and tests there, nothing else.
+   19. install the builder level as policy (to do)
+       $ cp levels/builder.json <prefix>/etc/sirven/levels/builder.json && chmod 0644 <prefix>/etc/sirven/levels/builder.json
+     note: undo removes only what this grant adds: the entries for agent and the folder owner, and the default list on folders. it never changes an owner or a group, never touches the owner and other bits or special bits, and never follows a link, so a chown, a chmod 600 or a setuid made while the grant is in force stays. the group bits end as what the group could really do, so a chmod that widens the group bits during the grant does not outlast it.
+   20. record the grant for agent (to do)
+       # write <prefix>/etc/sirven/grants/agent.json (mode 0644): level builder on the paths below, no expiry, cannot grant further
+   21. end every process of agent and lock its account while the access changes (to do, recorded not run under --prefix)
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh quiesce agent <prefix>/var/lib/sirven/agent-quiesce.json
+   22. record the access control lists of /home before the grant (to do, recorded not run under --prefix)
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh record <prefix>/var/lib/sirven/access-lists/2cc974af6afc822c.txt <prefix>/home no agent
+   23. record the access control lists of /home/example before the grant (to do, recorded not run under --prefix)
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh record <prefix>/var/lib/sirven/access-lists/67a166d2c72af6bb.txt <prefix>/home/example no agent
+   24. record the access control lists of /home/example/project before the grant (to do, recorded not run under --prefix)
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh record <prefix>/var/lib/sirven/access-lists/867467bcb77869b9.txt <prefix>/home/example/project yes agent
+   25. let agent pass through /home (to do, recorded not run under --prefix)
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh grant-access <prefix>/home no agent x --snapshot <prefix>/var/lib/sirven/access-lists/2cc974af6afc822c.txt
+   26. let agent pass through /home/example (to do, recorded not run under --prefix)
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh grant-access <prefix>/home/example no agent x --snapshot <prefix>/var/lib/sirven/access-lists/67a166d2c72af6bb.txt
+   27. grant agent rwX on /home/example/project and everything inside (to do, recorded not run under --prefix)
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh grant-access <prefix>/home/example/project yes agent rwX --snapshot <prefix>/var/lib/sirven/access-lists/867467bcb77869b9.txt
+   28. make new files in /home/example/project inherit the grant, with group and other kept out (to do, recorded not run under --prefix)
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh grant-default <prefix>/home/example/project agent rwX --snapshot <prefix>/var/lib/sirven/access-lists/867467bcb77869b9.txt
+   29. give agent its account back (to do, recorded not run under --prefix)
+       $ bash <prefix>/var/lib/sirven/package/lib/access_control_snapshot.sh release agent <prefix>/var/lib/sirven/agent-quiesce.json
+
+transport: tailscale
+   30. write the tailnet policy snippet (to do)
+       # write <prefix>/etc/sirven/tailscale-policy-snippet.hujson (mode 0644): tag:agent, reachable only from your login, only on port 22
+   31. paste the policy snippet into your tailnet policy (owner, by hand)
+       tailscale admin console, access controls: merge /etc/sirven/tailscale-policy-snippet.hujson and put your login in place of you@example.com.
+   32. give the installer one tagged auth key, once (owner, by hand)
+       tailscale admin console, settings, keys: generate an auth key with tag:agent, pre-approved. ephemeral is the better choice: the node then leaves the tailnet by itself when it logs out.
+       hand it over one of two ways, and it is the only interactive step:
+         in a file, the safer way and the one to use first: save it as /etc/sirven/tailscale-auth-key, owned by root, mode 0600, with one name only (no hard link) and no extra access control list; it is removed after the join. this is the only way that never puts the key in an environment.
+         in the environment: set SIRVEN_TAILSCALE_AUTHKEY (or TAILSCALE_AUTHKEY) in your shell and run sudo --preserve-env=SIRVEN_TAILSCALE_AUTHKEY. sudo allows that only when its policy does: a sudoers rule for all commands implies the SETENV tag, a narrower rule needs that tag, or an env_keep line for the variable. when the policy does not allow it, sudo may refuse the command with an error; without the option, sudo drops the variable and the join finds no key. the installer takes the key out of its environment at once and hands it only to the join, but it cannot scrub the block of the environment it was started with: root can still read it in /proc/<installer process number>/environ until the installer ends.
+   33. join the tailnet as a tagged device with that key (to do, recorded not run under --prefix)
+       # runs lib/tailscale_node.sh join; the key comes from <prefix>/etc/sirven/tailscale-auth-key or from the environment of this one command, and is never put on a command line.
+       # it records the node in /var/lib/sirven/tailscale-node.json, and refuses with nothing changed if there is no key, no tailscale, or a login that is not ours.
+       $ tailscale up --auth-key=file:<a private copy of the key> --advertise-tags=tag:agent --hostname=agent-<this machine's name> --ssh=false --accept-dns=false --accept-routes=false --reset --timeout=60s
+   34. remove the used auth key from disk, if one was saved (already done)
+       $ rm -f <prefix>/etc/sirven/tailscale-auth-key
+     note: the agent client connects with: ssh agent@<this machine's tailnet name>. tailscale ssh stays off; the machine's own SSH server and keys are used.
+
+summary: 34 steps. 29 to do, 1 already done, 3 by the owner, 0 plan only, 1 blocked by a conflict.
+dry run: nothing was changed.
+a real run would refuse until the conflicts above are resolved, and would change nothing. this dry run exits 2, the same status as that refusal.
+to cut the agent off later: sudo /usr/local/sbin/sirven revoke --all --dry-run to read the plan; to remove everything: sudo /usr/local/sbin/sirven uninstall --dry-run
+exit status: 2

@@ -66,11 +66,11 @@ key file, which the installer never prints.
 The release pin is two lines near the top of `bootstrap/sirven-bootstrap.sh`:
 
 ```
-SIRVEN_PINNED_TAG="v0.1.0"
-SIRVEN_PINNED_SHA256="556ce5fb658c6d6f1e0fa74de39c4d6c4508c61f65ac51dd52c3feda914a2718"
+SIRVEN_PINNED_TAG="v0.2.0"
+SIRVEN_PINNED_SHA256="7750941c45a627f353362dda0a7f54e5b589cdf4e5b0f6bef78ba5e00beeb6ad"
 ```
 
-Those are the values for release v0.1.0, as pinned at the time of writing. Read the current pins in the script itself.
+Those are the values for release v0.2.0, as pinned on 2026-10-15. The pin changes with each release, so read the current pins in the script itself.
 
 The served script carries its own pin, so nothing is fetched from anywhere to find out which
 release to install. Only `bootstrap/release.sh` writes these two lines.
@@ -84,31 +84,33 @@ bytes, so the bootstrap never uses them.
 Publishing a release has an outside step (the upload) that only the maintainer runs. The script
 builds and pins, and prints the upload command without running it.
 
+In the steps below, `vX.Y.Z` stands for the new release tag, such as the next version number. Each tag is used once.
+
 1. Create the tag on the merged commit, on main, and push it.
 
    ```
-   git tag -a v0.2.0 -m "sirven 0.2.0"
-   git push origin v0.2.0
+   git tag -a vX.Y.Z -m "sirven X.Y.Z"
+   git push origin vX.Y.Z
    ```
 
    Protect release tags in the repository settings, so a pushed tag cannot be moved or deleted.
 
-2. Build and pin. This builds `dist/release/sirven-v0.2.0.tar.gz`, builds it a second time and
+2. Build and pin. This builds `dist/release/sirven-vX.Y.Z.tar.gz`, builds it a second time and
    checks the bytes repeat, checksums it, and writes the two pin lines.
 
    ```
-   bash bootstrap/release.sh v0.2.0
+   bash bootstrap/release.sh vX.Y.Z
    ```
 
 3. Upload the file the script checksummed, as a release asset. The command is printed for you, and
    it is the one place the release is published:
 
    ```
-   gh release create v0.2.0 dist/release/sirven-v0.2.0.tar.gz --repo Joesirven/sirven --verify-tag --title "sirven v0.2.0"
+   gh release create vX.Y.Z dist/release/sirven-vX.Y.Z.tar.gz --repo Joesirven/sirven --verify-tag --title "sirven vX.Y.Z"
    ```
 
    Then check the uploaded bytes against the pin, with the URL the bootstrap uses:
-   `https://github.com/Joesirven/sirven/releases/download/v0.2.0/sirven-v0.2.0.tar.gz`.
+   `https://github.com/Joesirven/sirven/releases/download/vX.Y.Z/sirven-vX.Y.Z.tar.gz`.
 
 4. Review, merge, and deploy the script. Commit `bootstrap/sirven-bootstrap.sh` on a branch and merge
    it to main, so the file the server serves is in git. Then copy it to the file the server serves
