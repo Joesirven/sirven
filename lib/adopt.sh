@@ -39,13 +39,29 @@ ADOPT_REVOKED=no
 ADOPT_RECORD=no
 ADOPT_AUDIT_ENTRIES=""
 
-# adopt_check_seams: a seam pointing at a command is for tests, so only a dry run or a fake root.
+# adopt_seam NAME: the value of the seam variable NAME, or nothing. the seams are for tests, and they name a command that is run (as root,
+# on a root run), or say "none" and so switch off the look at what is already on the machine, so they are honoured only in a test run
+# (sirven_test_run in lib/common.sh): root runs only the tailscale and the bb that the search path, vetted by the root gate, finds.
+adopt_seam() {
+  local value
+  eval "value=\"\${$1:-}\""
+  sirven_test_run || value=""
+  printf '%s' "$value"
+}
+
+# adopt_check_seams: a seam pointing at a command is for tests, so only a dry run or a fake root; and as root only in a test run, where
+# it is otherwise ignored, with a note.
 adopt_check_seams() {
   local name value
   for name in SIRVEN_TAILSCALE SIRVEN_BB; do
     eval "value=\"\${$name:-}\""
+    [ -n "$value" ] || continue
+    if ! sirven_test_run; then
+      warn "$name is for test runs only, and this is not one (running as root, with no test marker), so it is ignored."
+      continue
+    fi
     case "$value" in
-      '' | none) ;;
+      none) ;;
       *)
         if [ "$DRY_RUN" != yes ] && [ -z "$PREFIX" ]; then
           usage_error "$name only works with --dry-run or --prefix"
@@ -75,7 +91,7 @@ _adopt_command() {
 _adopt_tailscale_command() {
   local fallback=""
   [ "${OPERATING_SYSTEM:-}" = macos ] && fallback="$ADOPT_TAILSCALE_APP"
-  _adopt_command "${SIRVEN_TAILSCALE:-}" tailscale "$fallback"
+  _adopt_command "$(adopt_seam SIRVEN_TAILSCALE)" tailscale "$fallback"
 }
 
 # _adopt_tailscale_status COMMAND: key=value lines from 'tailscale status --json'. only the
@@ -152,7 +168,7 @@ adopt_detect_bb() {
   local command
   ADOPT_BB=none
   ADOPT_BB_VERSION=""
-  command="$(_adopt_command "${SIRVEN_BB:-}" bb)"
+  command="$(_adopt_command "$(adopt_seam SIRVEN_BB)" bb)"
   [ -n "$command" ] || return 0
   ADOPT_BB=installed
   ADOPT_BB_VERSION="$(first_version "$("$command" --version 2>/dev/null | head -n 1)")"

@@ -47,7 +47,7 @@ if [ "$EUID" -eq 0 ]; then
   PATH=/usr/sbin:/usr/bin:/sbin:/bin
   export PATH
   # (bash has already read BASH_ENV and ENV before this line, for this script; sudo removes them. this protects what is started from here.)
-  unset BASH_ENV ENV CDPATH LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT PYTHONPATH PYTHONHOME PYTHONSTARTUP
+  unset BASH_ENV ENV CDPATH LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT PYTHONPATH PYTHONHOME PYTHONSTARTUP TMPDIR
 fi
 SIRVEN_KEPT=/var/lib/sirven/package
 
@@ -742,10 +742,12 @@ run_runtime() {
 # held by a running process and released by the system when that process exits.
 # SIRVEN_KEEP_AWAKE_BIN points at a build elsewhere, such as the one inside the signed app.
 keep_awake() {
-  local built candidate
+  local built candidate named="${SIRVEN_KEEP_AWAKE_BIN:-}"
   [ "$(detect_os)" = macos ] || die "sirven awake is for macos only"
+  # the person's own program, for the person's own run: root runs only the build that goes with this package
+  [ "$(id -u)" -ne 0 ] || named=""
   built="$ROOT_DIR/macos/keep-awake/.build"
-  for candidate in "${SIRVEN_KEEP_AWAKE_BIN:-}" "$built/release/sirven-keep-awake" "$built/debug/sirven-keep-awake"; do
+  for candidate in "$named" "$built/release/sirven-keep-awake" "$built/debug/sirven-keep-awake"; do
     if [ -n "$candidate" ] && [ -x "$candidate" ]; then
       exec "$candidate" "$@"
     fi

@@ -148,3 +148,93 @@ test_an_exported_ssh_command_is_not_run_by_the_preflight() {
   PREFLIGHT_SSH_COMMAND="$planted" bash -c '. "$1/lib/common.sh"; . "$1/lib/preflight.sh"; preflight_ssh_server yes' _ "$REPO_DIR" > /dev/null 2>&1 || true
   assert_no_file "$TEST_TMP/ssh.ran"
 }
+
+# ---- the shared test-run rule (lib/common.sh): not root, or root with the marker only a test container's setup makes
+
+test_a_test_run_is_any_process_that_is_not_root() {
+  # shellcheck disable=SC2329 # called by sirven_test_run in lib/common.sh
+  id() { printf '1000'; }
+  assert_status 0 sirven_test_run "$TEST_TMP/no-such-marker"
+}
+
+test_as_root_a_test_run_needs_the_marker_and_the_marker_must_be_root_owned_and_private() {
+  # shellcheck disable=SC2329 # called by sirven_test_run in lib/common.sh
+  id() { printf '0'; }
+  assert_status 1 sirven_test_run "$TEST_TMP/no-such-marker"
+  : > "$TEST_TMP/marker"
+  chmod 0600 "$TEST_TMP/marker"
+  if [ "$(command id -u)" -eq 0 ]; then
+    assert_status 0 sirven_test_run "$TEST_TMP/marker"
+    chmod 0620 "$TEST_TMP/marker"
+    assert_status 1 sirven_test_run "$TEST_TMP/marker"
+    chmod 0602 "$TEST_TMP/marker"
+    assert_status 1 sirven_test_run "$TEST_TMP/marker"
+    rm -f "$TEST_TMP/marker"
+    ln -s /etc/hostname "$TEST_TMP/marker"
+    assert_status 1 sirven_test_run "$TEST_TMP/marker"
+  else
+    # not root: the file is ours, not root's, so a marker we made ourselves is refused
+    assert_status 1 sirven_test_run "$TEST_TMP/marker"
+    mkdir "$TEST_TMP/folder-marker"
+    assert_status 1 sirven_test_run "$TEST_TMP/folder-marker"
+  fi
+}
+
+# the commands the adopt step probes are seams for tests: root runs only what the vetted search path finds
+test_as_root_the_tailscale_and_bb_seams_are_ignored_without_the_marker() {
+  local planted
+  planted="$(make_planted_script tailscale)"
+  # shellcheck disable=SC2329 # called by the library
+  id() { printf '0'; }
+  # shellcheck source=lib/adopt.sh
+  . "$REPO_DIR/lib/adopt.sh"
+  PREFIX="$TEST_TMP/fake"
+  SIRVEN_TAILSCALE="$planted"
+  SIRVEN_BB="$planted"
+  assert_eq "" "$(_adopt_tailscale_command)" "root, no marker: SIRVEN_TAILSCALE names nothing"
+  assert_eq "" "$(_adopt_command "$(adopt_seam SIRVEN_BB)" bb)" "root, no marker: SIRVEN_BB names nothing"
+}
+
+test_not_as_root_the_tailscale_and_bb_seams_are_honoured() {
+  local planted
+  planted="$(make_planted_script tailscale)"
+  # shellcheck disable=SC2329 # called by the library
+  id() { printf '1000'; }
+  # shellcheck source=lib/adopt.sh
+  . "$REPO_DIR/lib/adopt.sh"
+  PREFIX="$TEST_TMP/fake"
+  SIRVEN_TAILSCALE="$planted"
+  assert_eq "$planted" "$(_adopt_tailscale_command)"
+  SIRVEN_TAILSCALE=none
+  assert_eq "" "$(_adopt_tailscale_command)"
+}
+
+test_the_adopt_seam_check_says_when_a_seam_is_ignored_as_root() {
+  # shellcheck disable=SC2329 # called by the library
+  id() { printf '0'; }
+  # shellcheck source=lib/adopt.sh
+  . "$REPO_DIR/lib/adopt.sh"
+  DRY_RUN=yes
+  PREFIX=""
+  # shellcheck disable=SC2034 # read by adopt_check_seams
+  SIRVEN_TAILSCALE=none
+  # shellcheck disable=SC2034 # read by adopt_check_seams
+  SIRVEN_BB=""
+  capture adopt_check_seams
+  assert_contains "$CAPTURED_STDERR" "SIRVEN_TAILSCALE"
+  assert_contains "$CAPTURED_STDERR" "ignored"
+}
+
+# the keep-awake program is run by the user who asked for it, never by root from an inherited variable
+test_as_root_the_keep_awake_variable_is_ignored() {
+  local planted
+  planted="$(make_planted_script awake)"
+  # shellcheck disable=SC2016 # the script body is text for bash -c
+  SIRVEN_KEEP_AWAKE_BIN="$planted" SIRVEN_OS_OVERRIDE=macos bash -c '
+    id() { printf "0"; }
+    export -f id
+    ROOT_DIR="$1"; . "$1/lib/common.sh"
+    eval "$(sed -n "/^keep_awake()/,/^}/p" "$1/bin/sirven")"
+    keep_awake' _ "$REPO_DIR" > /dev/null 2>&1 || true
+  assert_no_file "$TEST_TMP/awake.ran"
+}

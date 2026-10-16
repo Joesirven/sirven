@@ -40,7 +40,7 @@ if [ "$EUID" -eq 0 ]; then
   PATH=/usr/sbin:/usr/bin:/sbin:/bin
   export PATH
   # (bash has already read BASH_ENV and ENV before this line, for this script; sudo removes them. this protects what is started from here.)
-  unset BASH_ENV ENV CDPATH LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT PYTHONPATH PYTHONHOME PYTHONSTARTUP
+  unset BASH_ENV ENV CDPATH LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT PYTHONPATH PYTHONHOME PYTHONSTARTUP TMPDIR
 fi
 SIRVEN_KEPT=/var/lib/sirven/package
 
