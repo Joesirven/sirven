@@ -486,8 +486,10 @@ kill_switch_audit_paths() {
 # revoke_started before its first step and revoke_finished after its last, also when a step failed.
 apply_for_real() {
   local status=0 record before
+  # every one of these is set here on every path, because lib/plan.sh takes none of them from the environment
   PLAN_RECORD_FILE="${PREFIX}$(layout_record_file)"
   PLAN_STEP_HOOK=audit_step_hook
+  PLAN_RECHECK=no
   if [ "$COMMAND" = revoke ]; then PLAN_RECHECK=yes; fi
   AUDIT_OPERATION="$COMMAND"
   AUDIT_PENDING="$STAGE_DIR/audit-pending.jsonl"

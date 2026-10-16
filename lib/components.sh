@@ -206,8 +206,12 @@ components_header() {
 
 components_apply() {
   local status=0 operation="$COMPONENT_ACTION $COMPONENT_NAME"
-  # shellcheck disable=SC2034 # read by lib/plan.sh, which runs each step
+  # shellcheck disable=SC2034 # read by lib/plan.sh, which runs each step; it takes none of these from the environment
   PLAN_STEP_HOOK=audit_step_hook
+  # shellcheck disable=SC2034 # read by lib/plan.sh
+  PLAN_RECORD_FILE=""
+  # shellcheck disable=SC2034 # read by lib/plan.sh
+  PLAN_RECHECK=no
   # shellcheck disable=SC2034 # read by lib/audit.sh when it writes the entry
   AUDIT_OPERATION="$operation"
   # shellcheck disable=SC2034 # read by lib/audit.sh when it writes the entry

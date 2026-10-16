@@ -454,6 +454,11 @@ plan_header() {
 
 apply_for_real() {
   local status=0
+  # every one of these is set here on every path, because lib/plan.sh takes none of them from the environment: with the audit log
+  # removed there is no audit step hook, and the empty string says so
+  PLAN_RECORD_FILE=""
+  PLAN_STEP_HOOK=""
+  PLAN_RECHECK=no
   if [ "$REMOVE_AUDIT_LOG" != yes ]; then
     PLAN_STEP_HOOK=audit_step_hook
     AUDIT_OPERATION=uninstall
