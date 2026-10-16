@@ -19,7 +19,7 @@ unchanged_after() {  # USER: the shadow line and the shell, before and after a r
   after="$(getent shadow "$user"; getent passwd "$user")"
   [ "$before" = "$after" ] && pgrep -u "$user" >/dev/null
 }
-for user in svcdb svc700 nobody www-data daemon; do
+for user in svcdb svc700 nobody mail daemon; do
   check "$user (user number $(id -u "$user")): refused, account and processes untouched" bash -c "$(declare -f unchanged_after); unchanged_after $user && [ \"\$REFUSED_STATUS\" = 2 ]"
   check "$user: the message says it is a system account" grep -q 'is a system account here' /tmp/out.txt
   pkill -KILL -u "$user" 2>/dev/null
