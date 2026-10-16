@@ -419,7 +419,22 @@ the kill switch reads it to know what to remove.
   copy (the first install), the folder must be one nobody but root and the owner can write. "can write" is judged on every
   file and folder of the package tree and every folder on the way to it: owner, mode, group members, and access list entries; a
   link that leaves the package is refused; a read-only mount is **not** taken as safe, because the same files can be writable
-  through another mount. the state directory is forced to mode 0700 and root as owner whether or not this run made it.
+  through another mount. two allowances, both narrow. (1) a folder on the way that is sticky and open to everyone, like `/tmp`
+  (mode 1777), is let through only when it belongs to root or the owner and the folder just below it also does and is not open
+  to others, because the sticky bit then stops anyone else from renaming or replacing that entry; the folder below gets no such
+  allowance itself (a second sticky folder in a row is refused), and the package folder and everything inside it always get the
+  full check. a sticky folder with an access list entry for somebody else is still refused. (2) a group that can write is trusted
+  when every account in it is root, the owner, or (in group root only) a system account, meaning a user number below `UID_MIN`
+  of `/etc/login.defs` (1000 when it says nothing), whose shell is exactly one of `/sbin/nologin`, `/usr/sbin/nologin`,
+  `/bin/false`, `/usr/bin/false`, `/bin/sync`, `/sbin/shutdown` or `/sbin/halt`. an empty shell field means `/bin/sh` and is not on
+  the list. the password is never looked at (the gate does not read `/etc/shadow`): a locked password (`!` or `*`) does not stop a
+  key login, `su` from root, a scheduled job or a service from running as the account, so it makes nobody harmless; this was
+  demonstrated with a group-root account with `/bin/bash` and the password `!`, which could plant code that root then ran. Fedora
+  puts `sync`, `shutdown`, `halt` and `operator` in group root, and their shells are on the list, so without the list every folder
+  owned by `root:root` would have been refused there. residual risk, which the rule cannot remove: a service running as a
+  `nologin` account that is in group root can still write whatever group root can write. putting such an account in group root is
+  a decision for the administrator of the machine. any other account in the group,
+  and a name in the group file with no account, makes the group untrusted, and the refusal names it. when a file has an access list, the group bits of its mode are the mask, not what the owning group may do, so the owning group's own entry (cut by the mask) is what is judged; a refusal for an access list entry names that entry (`an access list entry gives agent write`), never the group. the state directory is forced to mode 0700 and root as owner whether or not this run made it.
   a `--prefix` with a `.` or `..` component is refused whether or not the folders exist, and a started-from-standard-input script is refused.
   the safe way to run any root command is the launcher `/usr/local/sbin/sirven`, written by install, root-owned, mode 755: it
   sets its own search path and runs the kept copy. install writes it only if `/usr/local/sbin` and every folder above it can be written by

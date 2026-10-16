@@ -48,20 +48,18 @@ SIRVEN_KEPT=/var/lib/sirven/package
 # it; otherwise exit 3 and print each place somebody else can write. read only. this text is the checker.
 sirven_vet() {
   /usr/bin/python3 -I - "$1" "$2" <<'PY'
-import grp, os, pwd, stat, struct, sys
+import grp, os, pwd, re, stat, struct, sys
 folder, owner = sys.argv[1], sys.argv[2]
-ACCESS_LIST, USER, GROUP, MASK = "system.posix_acl_access", 0x02, 0x08, 0x10
+ACCESS_LIST, USER, GROUP_OBJ, GROUP, MASK = "system.posix_acl_access", 0x02, 0x04, 0x08, 0x10
+LOGIN_DEFS = "/etc/login.defs"
+# the only shells a system account in group root may have: nothing that gives a login (nologin, false) or one fixed program
+# that Fedora gives its stock accounts (sync, shutdown, halt). an empty shell field means /bin/sh, so it is not on the list.
+QUIET_SHELLS = ("/sbin/nologin", "/usr/sbin/nologin", "/bin/false", "/usr/bin/false", "/bin/sync", "/sbin/shutdown", "/sbin/halt")
 users = {0}
 try:
     users.add(pwd.getpwnam(owner).pw_uid)
 except KeyError:
     pass
-names = set()
-for number in users:
-    try:
-        names.add(pwd.getpwuid(number).pw_name)
-    except KeyError:
-        pass
 def uid_name(number):
     try:
         return pwd.getpwuid(number).pw_name
@@ -72,13 +70,36 @@ def gid_name(number):
         return grp.getgrgid(number).gr_name
     except KeyError:
         return "group number %d" % number
-def group_trusted(gid):
+def system_limit():  # the first ordinary user number: UID_MIN of the login definitions, 1000 when they do not say
+    try:
+        with open(LOGIN_DEFS) as handle:
+            found = re.search(r"^[ \t]*UID_MIN[ \t]+([0-9]+)[ \t]*(#.*)?$", handle.read(), re.M)
+        return int(found.group(1)) if found else 1000
+    except (OSError, ValueError):
+        return 1000
+def harmless(name, gid, limit):
+    # root and the owner are trusted. in group root (number 0) so is a system account (a user number below the first ordinary one)
+    # whose shell is on the short list QUIET_SHELLS. a locked password counts for nothing: a key login, su, cron or a service still runs
+    # as the account. every other member is an outsider.
+    try:
+        entry = pwd.getpwnam(name)
+    except KeyError:
+        return False
+    if entry.pw_uid in users:
+        return True
+    return gid == 0 and entry.pw_uid < limit and entry.pw_shell in QUIET_SHELLS
+def outsiders(gid):  # the members of group gid who could still change what the group can write, by name
     try:
         members = set(grp.getgrgid(gid).gr_mem)
     except KeyError:
-        return gid == 0
+        if gid != 0:
+            return ["(the members of group number %d are unknown)" % gid]
+        members = set()
     members.update(entry.pw_name for entry in pwd.getpwall() if entry.pw_gid == gid)
-    return members <= names
+    limit = system_limit()
+    return sorted(name for name in members if not harmless(name, gid, limit))
+def group_trusted(gid):
+    return not outsiders(gid)
 def entries(path):
     if not hasattr(os, "getxattr"):
         return []
@@ -87,16 +108,26 @@ def entries(path):
     except OSError:
         return []
     return [struct.unpack_from("<HHI", blob, offset) for offset in range(4, len(blob) - 7, 8)]
-def writers(path, info, on_the_way):
+def writers(path, info, sticky_parent):
+    # sticky_parent: this folder is on the way to the package, sticky and open to everyone (like /tmp), and the folder below it is
+    # judged with no such allowance. the sticky bit stops anyone but the owner of an entry from renaming or replacing it, so the
+    # open bit and the group bit (both only let others add entries) cannot change what is already there. never true for the package
+    # folder or anything inside it.
     if info.st_uid not in users:
         return "owned by %s, who can change its mode" % uid_name(info.st_uid)
     mode = stat.S_IMODE(info.st_mode)
-    if mode & 0o002 and not (on_the_way and mode & stat.S_ISVTX):
+    if mode & 0o002 and not sticky_parent:
         return "writable by everyone (mode %o)" % mode
-    if mode & 0o020 and not group_trusted(info.st_gid):
-        return "writable by the group %s (mode %o), which has other members" % (gid_name(info.st_gid), mode)
     listed = entries(path)
     mask = next((perm for tag, perm, _ in listed if tag == MASK), 7)
+    # with an access list the group bits of the mode are the mask, not the owning group's own permission: that is the group
+    # entry (tag 0x04), cut by the mask. judging the mask as the group's would name the group for what an entry did.
+    own_group = next((perm for tag, perm, _ in listed if tag == GROUP_OBJ), None)
+    group_write = mode & 0o020 if own_group is None else own_group & mask & 0o2
+    if group_write and not sticky_parent:
+        others = outsiders(info.st_gid)
+        if others:
+            return "writable by the group %s (mode %o), which has other members: %s" % (gid_name(info.st_gid), mode, ", ".join(others))
     for tag, perm, number in listed:
         if perm & mask & 0o2:
             if tag == USER and number not in users:
@@ -109,14 +140,20 @@ try:
     real = os.path.realpath(folder)
     parts = [part for part in real.split("/") if part]
     path = "/"
+    allowed = False  # the folder above was let through as a sticky parent: this one gets no such allowance
     for index in range(len(parts) + 1):
         if index:
             path = os.path.join(path, parts[index - 1])
         info = os.lstat(path)
         if stat.S_ISDIR(info.st_mode):
-            reason = writers(path, info, index < len(parts))
+            sticky = (index < len(parts) and not allowed and info.st_mode & stat.S_ISVTX and info.st_mode & 0o002
+                      and info.st_uid in users)
+            reason = writers(path, info, bool(sticky))
+            allowed = bool(sticky) and not reason
             if reason:
                 problems.append((path, reason))
+        else:
+            allowed = False
     pending = [real]
     while pending:
         item = pending.pop()
