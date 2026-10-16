@@ -93,7 +93,7 @@ components_parse() {
   PREFIX=""
   # shellcheck disable=SC2034 # read by lib/audit.sh (audit_entry records the user) and lib/access_control.sh
   SERVICE_USER=agent
-  OWNER="${SUDO_USER:-$(id -un)}"
+  OWNER="${SIRVEN_GATE_OWNER:-$(id -un)}"
   # shellcheck disable=SC2034 # ASSUME_YES is read by lib/plan.sh (plan_confirm_real_apply)
   while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -206,8 +206,12 @@ components_header() {
 
 components_apply() {
   local status=0 operation="$COMPONENT_ACTION $COMPONENT_NAME"
-  # shellcheck disable=SC2034 # read by lib/plan.sh, which runs each step
+  # shellcheck disable=SC2034 # read by lib/plan.sh, which runs each step; it takes none of these from the environment
   PLAN_STEP_HOOK=audit_step_hook
+  # shellcheck disable=SC2034 # read by lib/plan.sh
+  PLAN_RECORD_FILE=""
+  # shellcheck disable=SC2034 # read by lib/plan.sh
+  PLAN_RECHECK=no
   # shellcheck disable=SC2034 # read by lib/audit.sh when it writes the entry
   AUDIT_OPERATION="$operation"
   # shellcheck disable=SC2034 # read by lib/audit.sh when it writes the entry

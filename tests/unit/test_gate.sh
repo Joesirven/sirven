@@ -15,6 +15,79 @@ test_the_gate_block_is_the_same_in_every_entry_script() {
   assert_eq "$install" "$sirven" "install.sh and bin/sirven carry the same gate"
 }
 
+# TMPDIR names the folder the stage directory (the pending audit file, the grant snapshot) is made in, and root writes there
+gate_owner_helpers() {  # the owner decision helpers from the gate block
+  gate_block "$REPO_DIR/install.sh" | sed -n '/^sirven_flag_value()/,/^sirven_gate()/{ /^sirven_gate()/d; p; }'
+}
+
+gate_owner_call() {  # FUNCTION ARGUMENT...: run a gate owner helper (heredocs cannot live inside bash -c text)
+  gate_owner_helpers > "$TEST_TMP/gate_owner_fns.sh"
+  bash -c '. "$1"; "$2" "${@:3}"' _ "$TEST_TMP/gate_owner_fns.sh" "$@"
+}
+
+# ---- the owner the gate trusts for vetting (SIR-99). SUDO_USER alone is not enough as root.
+
+test_the_gate_owner_helpers_read_flags_from_the_arguments() {
+  assert_eq example "$(gate_owner_call sirven_flag_value --owner --owner example --dry-run)"
+  assert_eq other "$(gate_owner_call sirven_flag_value --user --user other --prefix /x)"
+  assert_status 1 gate_owner_call sirven_flag_value --owner --dry-run
+}
+
+test_sudo_user_is_not_trusted_without_a_matching_sudo_uid() {
+  vet_python_available || return 0
+  local body me
+  body="$(gate_owner_helpers)"
+  me="$(id -un)"
+  assert_eq "" "$(env SUDO_USER="$me" SUDO_UID=1 bash -c "$body; sirven_trusted_sudo_user agent")"
+}
+
+test_sudo_user_is_not_trusted_when_loginuid_is_unset() {
+  vet_python_available || return 0
+  [ -r /proc/self/loginuid ] || return 0
+  local body me uid
+  body="$(gate_owner_helpers)"
+  me="$(id -un)"
+  uid="$(id -u)"
+  assert_eq "" "$(env SUDO_USER="$me" SUDO_UID="$uid" bash -c "$body; sirven_trusted_sudo_user agent")"
+}
+
+test_sudo_user_is_trusted_when_sudo_uid_and_loginuid_match() {
+  vet_python_available || return 0
+  [ -r /proc/self/loginuid ] || return 0
+  local body me uid loginuid
+  body="$(gate_owner_helpers)"
+  me="$(id -un)"
+  uid="$(id -u)"
+  loginuid="$(cat /proc/self/loginuid)"
+  [ "$loginuid" != 4294967295 ] || return 0
+  assert_eq "$me" "$(env SUDO_USER="$me" SUDO_UID="$uid" bash -c "$body; sirven_trusted_sudo_user agent")"
+}
+
+test_the_gate_owner_defaults_to_root_without_a_trusted_sudo_user_or_an_explicit_owner() {
+  vet_python_available || return 0
+  assert_eq root "$(gate_owner_call sirven_gate_owner agent)"
+  assert_eq root "$(SUDO_USER=agent SUDO_UID=1500 gate_owner_call sirven_gate_owner agent)"
+}
+
+test_the_gate_owner_takes_an_explicit_owner_and_refuses_the_service_user() {
+  vet_python_available || return 0
+  assert_eq example "$(gate_owner_call sirven_gate_owner agent --owner example)"
+  gate_owner_helpers > "$TEST_TMP/gate_owner_fns.sh"
+  # shellcheck disable=SC2016 # the script body is text for bash -c
+  assert_status 2 bash -c '. "$1"; sirven_gate_owner agent "$@"' _ "$TEST_TMP/gate_owner_fns.sh" --owner agent --user agent
+  assert_contains "$CAPTURED_STDERR" "service user"
+}
+
+test_the_gate_drops_the_variables_that_would_steer_what_root_writes_and_runs() {
+  local block name file
+  for file in install.sh uninstall.sh bin/sirven; do
+    block="$(gate_block "$REPO_DIR/$file" | grep -v '^[[:space:]]*#')"
+    for name in BASH_ENV ENV CDPATH LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT PYTHONPATH PYTHONHOME PYTHONSTARTUP TMPDIR; do
+      assert_contains "$block" "$name" "$file: the gate must unset $name for root"
+    done
+  done
+}
+
 test_the_gate_does_not_read_a_file_of_the_folder_it_judges() {
   local block
   block="$(gate_block "$REPO_DIR/install.sh" | grep -v '^[[:space:]]*#')"
@@ -103,7 +176,7 @@ test_a_package_name_with_a_slash_or_dots_is_refused() {
 # so the cases do not depend on which accounts the machine running them has; the folders are real.
 
 gate_checker() {  # the python text of the checker: the here-document of sirven_vet in install.sh
-  gate_block "$REPO_DIR/install.sh" | sed -n "/<<'PY'/,/^PY\$/p" | sed '1d;$d'
+  gate_block "$REPO_DIR/install.sh" | awk '/^sirven_vet\(\)/,/^PY$/{print}' | sed -n "/<<'PY'/,/^PY\$/p" | sed '1d;$d'
 }
 
 fake_run() {  # SPEC_JSON VERB ARGUMENT...: run tests/lib/gate_fake.py with the made-up databases

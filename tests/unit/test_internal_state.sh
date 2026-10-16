@@ -1,0 +1,240 @@
+# shellcheck shell=bash
+# internal state is never read from the environment. a variable that names a command or a function that runs as root, a file root writes,
+# or that changes a safety decision (the folder prefix, the question before a real change) is set by sirven's own code and by nothing
+# else: root can inherit an environment from anywhere (sudo -E, a root shell, a service). each test exports the variable, then checks
+# that the code ignores it. a variable that is a test hook is honoured only in a test run (see sirven_test_run in lib/common.sh).
+
+# shellcheck source=lib/common.sh
+. "$REPO_DIR/lib/common.sh"
+
+install_sh() {
+  SIRVEN_OS_OVERRIDE=linux "$REPO_DIR/install.sh" "$@" --owner example
+}
+
+uninstall_sh() {
+  SIRVEN_OS_OVERRIDE=linux "$REPO_DIR/uninstall.sh" "$@"
+}
+
+# a script that records that it ran, for a variable to name. the script is a plain file, as a planted one would be.
+make_planted_script() {  # NAME: prints the script's path; it leaves NAME.ran beside it when it runs
+  local script="$TEST_TMP/$1.sh"
+  # shellcheck disable=SC2016 # the script body is text for the printf, not an expansion
+  printf '#!/bin/sh\necho "$0 $*" >> "%s/%s.ran"\n' "$TEST_TMP" "$1" > "$script"
+  chmod 0755 "$script"
+  printf '%s' "$script"
+}
+
+# value_after_loading LIBRARY NAME VALUE: the value NAME has after the library is loaded into a shell that had NAME exported as VALUE
+value_after_loading() {
+  # shellcheck disable=SC2016 # the script body is text for bash -c
+  env "$2=$3" bash -c '. "$1/lib/common.sh"; . "$1/lib/$2.sh"; printf "%s" "${!3}"' _ "$REPO_DIR" "$1" "$2"
+}
+
+assert_ignored_at_load() {  # LIBRARY NAME EXPECTED
+  local value
+  value="$(value_after_loading "$1" "$2" "planted-by-the-environment")"
+  assert_eq "$3" "$value" "$2 must start from its fixed value, not from the environment (lib/$1.sh)"
+}
+
+# ---- the plan engine (lib/plan.sh)
+
+test_plan_prefix_starts_from_its_fixed_value() {
+  assert_ignored_at_load plan PLAN_PREFIX ""
+}
+
+test_plan_simulation_log_starts_from_its_fixed_value() {
+  assert_ignored_at_load plan PLAN_SIMULATION_LOG ""
+}
+
+test_plan_operating_system_starts_from_its_fixed_value() {
+  assert_ignored_at_load plan PLAN_OPERATING_SYSTEM linux
+}
+
+test_plan_record_file_starts_from_its_fixed_value() {
+  assert_ignored_at_load plan PLAN_RECORD_FILE ""
+}
+
+test_plan_step_hook_starts_from_its_fixed_value() {
+  assert_ignored_at_load plan PLAN_STEP_HOOK ""
+}
+
+test_plan_recheck_starts_from_its_fixed_value() {
+  assert_ignored_at_load plan PLAN_RECHECK no
+}
+
+# the audit step hook is set by uninstall.sh only when the audit log is kept; with --remove-audit-log an exported hook would run after every step
+test_an_exported_step_hook_does_not_run_on_an_uninstall_that_removes_the_audit_log() {
+  local planted
+  assert_status 0 install_sh --prefix "$TEST_TMP/root" --transport none --yes --level builder --path /home/example/project
+  planted="$(make_planted_script step)"
+  PLAN_STEP_HOOK="$planted" assert_status 0 uninstall_sh --prefix "$TEST_TMP/root" --yes --remove-audit-log
+  assert_contains "$CAPTURED_STDOUT" "applied"
+  assert_no_file "$TEST_TMP/step.ran"
+}
+
+test_an_exported_step_hook_does_not_run_on_install_or_revoke() {
+  local planted
+  planted="$(make_planted_script step)"
+  PLAN_STEP_HOOK="$planted" assert_status 0 install_sh --prefix "$TEST_TMP/root" --transport none --yes --level builder --path /home/example/project
+  PLAN_STEP_HOOK="$planted" assert_status 0 install_sh revoke --all --prefix "$TEST_TMP/root" --yes
+  assert_no_file "$TEST_TMP/step.ran"
+}
+
+# the install record is appended to (and made mode 0600) by root: the file is not the environment's to name
+test_an_exported_record_file_is_not_written() {
+  local victim="$TEST_TMP/victim"
+  # shellcheck disable=SC2016 # the script body is text for bash -c
+  PLAN_RECORD_FILE="$victim" assert_status 0 bash -c '. "$1/lib/common.sh"; . "$1/lib/plan.sh"; PLAN_PREFIX="$2"; PLAN_SIMULATION_LOG=""; plan_reset
+    plan_step run "make a file" "false" "true"; plan_undo "undo it" "false" "true"; plan_evaluate; plan_apply' _ "$REPO_DIR" "$TEST_TMP/fake"
+  assert_no_file "$victim"
+}
+
+# the simulation log is appended to by a fake-root run: the file is not the environment's to name
+test_an_exported_simulation_log_is_not_written() {
+  local victim="$TEST_TMP/victim-log"
+  PLAN_SIMULATION_LOG="$victim" assert_status 0 install_sh --prefix "$TEST_TMP/root" --transport none --yes --level builder --path /home/example/project
+  assert_no_file "$victim"
+}
+
+# the folder prefix decides whether this is a fake root (no refusal, no question, nothing real) or the real machine. an exported prefix must
+# not turn a real apply into a fake one: the apply is refused (not root) or waits for a yes it does not get, and nothing is changed
+test_an_exported_prefix_does_not_turn_a_real_apply_into_a_fake_one() {
+  # shellcheck disable=SC2016 # the script body is text for bash -c
+  PLAN_PREFIX="$TEST_TMP/fake" assert_status 3 bash -c '. "$1/lib/common.sh"; . "$1/lib/plan.sh"; PLAN_SIMULATION_LOG=""; plan_reset
+    plan_step run "make a file" "[ -e $2 ]" "touch $2"; plan_evaluate; plan_apply' _ "$REPO_DIR" "$TEST_TMP/made"
+  assert_no_file "$TEST_TMP/made"
+}
+
+test_an_exported_confirmation_and_recheck_are_not_taken() {
+  local out
+  # shellcheck disable=SC2016 # the script body is text for bash -c
+  out="$(PLAN_CONFIRMED=yes PLAN_RECHECK=yes bash -c '. "$1/lib/common.sh"; . "$1/lib/plan.sh"; printf "%s|%s" "$PLAN_CONFIRMED" "$PLAN_RECHECK"' _ "$REPO_DIR")"
+  assert_eq "no|no" "$out"
+}
+
+# ---- the audit writer (lib/audit.sh)
+
+test_audit_operation_starts_from_its_fixed_value() {
+  assert_ignored_at_load audit AUDIT_OPERATION install
+}
+
+test_audit_pending_starts_from_its_fixed_value() {
+  assert_ignored_at_load audit AUDIT_PENDING ""
+}
+
+# the pending audit file is written by root
+test_an_exported_pending_audit_file_is_not_written() {
+  local victim="$TEST_TMP/victim.jsonl"
+  # shellcheck disable=SC2016 # the script body is text for bash -c
+  AUDIT_PENDING="$victim" bash -c '. "$1/lib/common.sh"; . "$1/lib/audit.sh"; PREFIX="$2"; AUDIT_DIR="/var/log/nowhere"; audit_write "{\"n\": 1}"' _ "$REPO_DIR" "$TEST_TMP/fake" > /dev/null 2>&1 || true
+  assert_no_file "$victim"
+}
+
+# ---- the preflight (lib/preflight.sh)
+
+test_preflight_ssh_command_starts_from_its_fixed_value() {
+  assert_ignored_at_load preflight PREFLIGHT_SSH_COMMAND ssh
+}
+
+test_preflight_system_python_starts_from_its_fixed_value() {
+  assert_ignored_at_load preflight PREFLIGHT_SYSTEM_PYTHON /usr/bin/python3
+}
+
+# preflight runs the SSH client as root before the owner has said yes
+test_an_exported_ssh_command_is_not_run_by_the_preflight() {
+  local planted
+  planted="$(make_planted_script ssh)"
+  # shellcheck disable=SC2016 # the script body is text for bash -c
+  PREFLIGHT_SSH_COMMAND="$planted" bash -c '. "$1/lib/common.sh"; . "$1/lib/preflight.sh"; preflight_ssh_server yes' _ "$REPO_DIR" > /dev/null 2>&1 || true
+  assert_no_file "$TEST_TMP/ssh.ran"
+}
+
+# ---- the shared test-run rule (lib/common.sh): not root, or root with the marker only a test container's setup makes
+
+test_a_test_run_is_any_process_that_is_not_root() {
+  # shellcheck disable=SC2329 # called by sirven_test_run in lib/common.sh
+  id() { printf '1000'; }
+  assert_status 0 sirven_test_run "$TEST_TMP/no-such-marker"
+}
+
+test_as_root_a_test_run_needs_the_marker_and_the_marker_must_be_root_owned_and_private() {
+  # shellcheck disable=SC2329 # called by sirven_test_run in lib/common.sh
+  id() { printf '0'; }
+  assert_status 1 sirven_test_run "$TEST_TMP/no-such-marker"
+  : > "$TEST_TMP/marker"
+  chmod 0600 "$TEST_TMP/marker"
+  if [ "$(command id -u)" -eq 0 ]; then
+    assert_status 0 sirven_test_run "$TEST_TMP/marker"
+    chmod 0620 "$TEST_TMP/marker"
+    assert_status 1 sirven_test_run "$TEST_TMP/marker"
+    chmod 0602 "$TEST_TMP/marker"
+    assert_status 1 sirven_test_run "$TEST_TMP/marker"
+    rm -f "$TEST_TMP/marker"
+    ln -s /etc/hostname "$TEST_TMP/marker"
+    assert_status 1 sirven_test_run "$TEST_TMP/marker"
+  else
+    # not root: the file is ours, not root's, so a marker we made ourselves is refused
+    assert_status 1 sirven_test_run "$TEST_TMP/marker"
+    mkdir "$TEST_TMP/folder-marker"
+    assert_status 1 sirven_test_run "$TEST_TMP/folder-marker"
+  fi
+}
+
+# the commands the adopt step probes are seams for tests: root runs only what the vetted search path finds
+test_as_root_the_tailscale_and_bb_seams_are_ignored_without_the_marker() {
+  local planted
+  planted="$(make_planted_script tailscale)"
+  # shellcheck disable=SC2329 # called by the library
+  id() { printf '0'; }
+  # shellcheck source=lib/adopt.sh
+  . "$REPO_DIR/lib/adopt.sh"
+  PREFIX="$TEST_TMP/fake"
+  SIRVEN_TAILSCALE="$planted"
+  SIRVEN_BB="$planted"
+  assert_eq "" "$(_adopt_tailscale_command)" "root, no marker: SIRVEN_TAILSCALE names nothing"
+  assert_eq "" "$(_adopt_command "$(adopt_seam SIRVEN_BB)" bb)" "root, no marker: SIRVEN_BB names nothing"
+}
+
+test_not_as_root_the_tailscale_and_bb_seams_are_honoured() {
+  local planted
+  planted="$(make_planted_script tailscale)"
+  # shellcheck disable=SC2329 # called by the library
+  id() { printf '1000'; }
+  # shellcheck source=lib/adopt.sh
+  . "$REPO_DIR/lib/adopt.sh"
+  PREFIX="$TEST_TMP/fake"
+  SIRVEN_TAILSCALE="$planted"
+  assert_eq "$planted" "$(_adopt_tailscale_command)"
+  SIRVEN_TAILSCALE=none
+  assert_eq "" "$(_adopt_tailscale_command)"
+}
+
+test_the_adopt_seam_check_says_when_a_seam_is_ignored_as_root() {
+  # shellcheck disable=SC2329 # called by the library
+  id() { printf '0'; }
+  # shellcheck source=lib/adopt.sh
+  . "$REPO_DIR/lib/adopt.sh"
+  DRY_RUN=yes
+  PREFIX=""
+  # shellcheck disable=SC2034 # read by adopt_check_seams
+  SIRVEN_TAILSCALE=none
+  # shellcheck disable=SC2034 # read by adopt_check_seams
+  SIRVEN_BB=""
+  capture adopt_check_seams
+  assert_contains "$CAPTURED_STDERR" "SIRVEN_TAILSCALE"
+  assert_contains "$CAPTURED_STDERR" "ignored"
+}
+
+# the keep-awake program is run by the user who asked for it, never by root from an inherited variable
+test_as_root_the_keep_awake_variable_is_ignored() {
+  local planted
+  planted="$(make_planted_script awake)"
+  # shellcheck disable=SC2016 # the script body is text for bash -c
+  SIRVEN_KEEP_AWAKE_BIN="$planted" SIRVEN_OS_OVERRIDE=macos bash -c '
+    id() { printf "0"; }
+    export -f id
+    ROOT_DIR="$1"; . "$1/lib/common.sh"
+    eval "$(sed -n "/^keep_awake()/,/^}/p" "$1/bin/sirven")"
+    keep_awake' _ "$REPO_DIR" > /dev/null 2>&1 || true
+  assert_no_file "$TEST_TMP/awake.ran"
+}
