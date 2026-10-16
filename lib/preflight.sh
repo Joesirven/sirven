@@ -17,7 +17,9 @@ PREFLIGHT_MINIMUM_TAILSCALE="1.60.0"
 PREFLIGHT_MINIMUM_CLOUDFLARED="2024.1.0"
 
 PREFLIGHT_PROBLEMS=0
-PREFLIGHT_SSH_COMMAND="${PREFLIGHT_SSH_COMMAND:-ssh}"
+# the SSH client the probe runs, before the owner has said yes and as root on a real run: fixed here, never read from the environment
+# (a test points it at a fake after this file is loaded)
+PREFLIGHT_SSH_COMMAND="ssh"
 
 # version_at_least HAVE WANT: true when dotted version HAVE is at least WANT.
 version_at_least() {
@@ -64,8 +66,8 @@ preflight_bash() {
 
 # PREFLIGHT_SYSTEM_PYTHON: the python3 that macos ships. on a Mac without the command line
 # developer tools it is a placeholder that only opens a system dialog. a variable, so tests can
-# point it at a fake.
-PREFLIGHT_SYSTEM_PYTHON="${PREFLIGHT_SYSTEM_PYTHON:-/usr/bin/python3}"
+# point it at a fake after this file is loaded; it is never read from the environment.
+PREFLIGHT_SYSTEM_PYTHON="/usr/bin/python3"
 
 # _preflight_placeholder_python: true on a Mac where python3 is the placeholder. it asks
 # xcode-select first, so the placeholder itself is never run, and it never runs a python3 that
@@ -194,7 +196,6 @@ preflight_ssh_server() {
 preflight_all() {
   local os="$1" transport="$2" strict="$3"
   PREFLIGHT_PROBLEMS=0
-PREFLIGHT_SSH_COMMAND="${PREFLIGHT_SSH_COMMAND:-ssh}"
   preflight_bash
   preflight_python "$os"
   preflight_commands yes mkdir chmod cp cmp touch grep sed tr head id uname dirname

@@ -36,10 +36,12 @@ CLOUDFLARE_SERVICE_ACCOUNT_MARK="sirven Cloudflare Tunnel service"
 CLOUDFLARE_UNIT_DIRECTORY="/etc/systemd/system"
 CLOUDFLARE_PLACEHOLDER_HOSTNAME="agent.example.org"
 CLOUDFLARE_MACOS_REASON="applying to a macos machine is not verified yet; the tunnel service is a systemd unit, which only linux has"
-# set by the arguments and the environment (install.sh): the hostname to route, the account number, the zone number (optional)
-CLOUDFLARE_HOSTNAME="${CLOUDFLARE_HOSTNAME:-}"
-CLOUDFLARE_ACCOUNT="${CLOUDFLARE_ACCOUNT:-}"
-CLOUDFLARE_ZONE="${CLOUDFLARE_ZONE:-}"
+# set by install.sh from its arguments and from SIRVEN_CLOUDFLARE_HOSTNAME, SIRVEN_CLOUDFLARE_ACCOUNT_ID and SIRVEN_CLOUDFLARE_ZONE_ID, which it
+# checks: the hostname to route, the account number, the zone number (optional). they go into the text of steps that root runs, so a
+# value that did not pass that check (a variable of this name in the environment, in uninstall.sh or bin/sirven) is never taken.
+CLOUDFLARE_HOSTNAME=""
+CLOUDFLARE_ACCOUNT=""
+CLOUDFLARE_ZONE=""
 
 # the one place the environment route can hold the token, not exported (see cloudflare_hold_token). the held name is its own name, so
 # nothing here is confused with the variable the person set.

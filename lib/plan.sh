@@ -54,17 +54,23 @@ plan_conflict() {
 # plain indexed arrays only, walked by index and never expanded whole, so it runs on bash 3.2
 # with set -u, where expanding an empty array is an error.
 
-PLAN_PREFIX="${PLAN_PREFIX:-}"
-PLAN_SIMULATION_LOG="${PLAN_SIMULATION_LOG:-}"
-PLAN_OPERATING_SYSTEM="${PLAN_OPERATING_SYSTEM:-linux}"
-PLAN_RECORD_FILE="${PLAN_RECORD_FILE:-}"
-PLAN_STEP_HOOK="${PLAN_STEP_HOOK:-}"
-PLAN_RECHECK="${PLAN_RECHECK:-no}"
+# internal state. every PLAN_ variable below is set to a fixed value here and changed only by sirven's own code (install.sh, uninstall.sh,
+# bin/sirven, lib/components.sh): none is read from the environment. each one either names something that runs as root (the step hook,
+# the check before the first change) or a file root writes (the install record, the simulation log), or decides whether a run is a fake
+# root or the real machine and whether the owner is asked (the prefix, the operating system, the confirmation). root can inherit an
+# environment from anywhere (sudo -E, a root shell), so an exported value must change nothing. a test sets them after loading this file.
+PLAN_PREFIX=""
+PLAN_SIMULATION_LOG=""
+PLAN_OPERATING_SYSTEM="linux"
+PLAN_RECORD_FILE=""
+PLAN_STEP_HOOK=""
+PLAN_RECHECK="no"
 PLAN_CONFIRMED=no
 # PLAN_BEFORE_FIRST_CHANGE: the name of a function the caller sets, run once by plan_apply after the plan is confirmed and before the
 # first step, for a check that has to reach the network (the Cloudflare account, say): nothing goes out before the owner has said yes.
-# a nonzero status stops the apply with that status and nothing changed. it is not cleared by plan_reset.
-PLAN_BEFORE_FIRST_CHANGE="${PLAN_BEFORE_FIRST_CHANGE:-}"
+# a nonzero status stops the apply with that status and nothing changed. it is not cleared by plan_reset. every caller of plan_apply
+# sets it explicitly, to the empty string when it has no such check.
+PLAN_BEFORE_FIRST_CHANGE=""
 
 plan_reset() {
   PLAN_KIND=()

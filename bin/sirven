@@ -618,8 +618,11 @@ build_rollback_plan() {
 
 rollback_apply() {
   local status=0 record before
+  # every one of these is set here, because lib/plan.sh takes none of them from the environment
   PLAN_RECORD_FILE="${PREFIX}$(layout_record_file)"
   PLAN_STEP_HOOK=audit_step_hook
+  PLAN_RECHECK=no
+  PLAN_BEFORE_FIRST_CHANGE=""
   AUDIT_OPERATION="grant rollback"
   AUDIT_PENDING="$STAGE_DIR/audit-pending.jsonl"
   record="${PREFIX}$(access_control_record_file)"

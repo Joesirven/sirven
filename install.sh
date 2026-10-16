@@ -474,9 +474,14 @@ kill_switch_audit_paths() {
 # revoke_started before its first step and revoke_finished after its last, also when a step failed.
 apply_for_real() {
   local status=0 record before
+  # every one of these is set here on every path, because lib/plan.sh takes none of them from the environment
   PLAN_RECORD_FILE="${PREFIX}$(layout_record_file)"
   PLAN_STEP_HOOK=audit_step_hook
+  PLAN_RECHECK=no
   if [ "$COMMAND" = revoke ]; then PLAN_RECHECK=yes; fi
+  # a check that has to reach the network waits for the owner's yes and runs before the first change (see cloudflare_check_account_before_apply)
+  PLAN_BEFORE_FIRST_CHANGE=""
+  if [ "$COMMAND" = install ] && [ "$TRANSPORT" = cloudflare ]; then PLAN_BEFORE_FIRST_CHANGE=cloudflare_check_account_before_apply; fi
   AUDIT_OPERATION="$COMMAND"
   AUDIT_PENDING="$STAGE_DIR/audit-pending.jsonl"
   record="${PREFIX}$(access_control_record_file)"
@@ -559,8 +564,6 @@ finish() {
       DIE_STATUS=2 die "the kill switch cut $SERVICE_USER off while this run waited for the lock, and the plan above was made before that. nothing was changed. to bring the account back on purpose, run it again with --reinstate."
     fi
   fi
-  # a check that has to reach the network waits for the owner's yes and runs before the first change (see cloudflare_check_account_before_apply)
-  if [ "$COMMAND" = install ] && [ "$TRANSPORT" = cloudflare ]; then PLAN_BEFORE_FIRST_CHANGE=cloudflare_check_account_before_apply; fi
   apply_for_real || status=$?
   if [ "$COMMAND" = revoke ] && [ "$status" -eq 3 ] && [ -n "$(plan_blockers)" ]; then
     say "revoke is plan only for now. nothing was changed. to undo this install today, use ./uninstall.sh --dry-run to read the removal plan, then ./uninstall.sh to apply it." >&2
