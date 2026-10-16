@@ -4,6 +4,9 @@
 # else: root can inherit an environment from anywhere (sudo -E, a root shell, a service). each test exports the variable, then checks
 # that the code ignores it. a variable that is a test hook is honoured only in a test run (see sirven_test_run in lib/common.sh).
 
+# shellcheck source=lib/common.sh
+. "$REPO_DIR/lib/common.sh"
+
 install_sh() {
   SIRVEN_OS_OVERRIDE=linux "$REPO_DIR/install.sh" "$@" --owner example
 }
@@ -237,4 +240,44 @@ test_as_root_the_keep_awake_variable_is_ignored() {
     eval "$(sed -n "/^keep_awake()/,/^}/p" "$1/bin/sirven")"
     keep_awake' _ "$REPO_DIR" > /dev/null 2>&1 || true
   assert_no_file "$TEST_TMP/awake.ran"
+}
+
+# ---- the API program clears OPENSSL_CONF (and the proxy and certificate variables) before the ssl module is loaded: OpenSSL reads the
+# configuration file once, when the module loads, so clearing it afterwards does nothing
+
+# ssl_environment_at_load: what the environment holds, for each of the names, at the moment the ssl module is first loaded by the program
+ssl_environment_at_load() {
+  env OPENSSL_CONF=/nonexistent/openssl.cnf SSL_CERT_FILE=/nonexistent/ca.pem https_proxy=http://127.0.0.1:9 HTTPS_PROXY=http://127.0.0.1:9 SSLKEYLOGFILE=/nonexistent/keys \
+    python3 -I -c '
+import builtins, os, runpy, sys
+seen = []
+real_import = builtins.__import__
+def spy(name, *arguments, **keywords):
+    if name == "ssl" and "ssl" not in sys.modules:
+        seen.append(",".join(sorted(key for key in ("OPENSSL_CONF", "SSL_CERT_FILE", "https_proxy", "HTTPS_PROXY", "SSLKEYLOGFILE") if key in os.environ)))
+    return real_import(name, *arguments, **keywords)
+builtins.__import__ = spy
+runpy.run_path(sys.argv[1], run_name="not_the_program")
+print("loaded" if seen else "ssl-not-loaded")
+print(seen[0] if seen else "")' "$REPO_DIR/lib/cloudflare_api.py"
+}
+
+test_the_openssl_configuration_is_cleared_before_the_ssl_module_is_loaded() {
+  local result
+  result="$(ssl_environment_at_load)"
+  assert_contains "$result" "loaded" "the program loads ssl, so the order matters"
+  assert_eq "" "$(printf '%s\n' "$result" | sed -n 2p)" "no proxy, certificate or OpenSSL variable is left when ssl is loaded"
+}
+
+test_the_openssl_configuration_is_still_cleared_when_the_client_is_made() {
+  local left
+  left="$(env OPENSSL_CONF=/nonexistent/openssl.cnf python3 -I -c '
+import importlib.util, os, sys
+spec = importlib.util.spec_from_file_location("cloudflare_api", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+os.environ["OPENSSL_CONF"] = "/nonexistent/again"
+module.clear_environment()
+print(os.environ.get("OPENSSL_CONF", "cleared"))' "$REPO_DIR/lib/cloudflare_api.py")"
+  assert_eq cleared "$left"
 }

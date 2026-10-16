@@ -15,6 +15,17 @@ test_the_gate_block_is_the_same_in_every_entry_script() {
   assert_eq "$install" "$sirven" "install.sh and bin/sirven carry the same gate"
 }
 
+# TMPDIR names the folder the stage directory (the pending audit file, the grant snapshot) is made in, and root writes there
+test_the_gate_drops_the_variables_that_would_steer_what_root_writes_and_runs() {
+  local block name file
+  for file in install.sh uninstall.sh bin/sirven; do
+    block="$(gate_block "$REPO_DIR/$file" | grep -v '^[[:space:]]*#')"
+    for name in BASH_ENV ENV CDPATH LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT PYTHONPATH PYTHONHOME PYTHONSTARTUP TMPDIR; do
+      assert_contains "$block" "$name" "$file: the gate must unset $name for root"
+    done
+  done
+}
+
 test_the_gate_does_not_read_a_file_of_the_folder_it_judges() {
   local block
   block="$(gate_block "$REPO_DIR/install.sh" | grep -v '^[[:space:]]*#')"

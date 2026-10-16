@@ -427,5 +427,42 @@ check_exit "another apply keeps it as it is" 0 install_cf
 check "and still sends nothing" bash -c '[ "$(wc -l < /tmp/fake-api/calls.log)" = "$0" ] && [ "$(api_value tunnels)" = 1 ]' "$calls_before_repair"
 SIRVEN_CLOUDFLARE_API_TOKEN="$TOKEN" uninstall_cf >/dev/null 2>&1
 
+# 14. internal state is not read from the environment, as root on a real run (R1 of the re-review of SIR-34). a variable that names a
+# program root runs, or a file root writes, is set by sirven's own code and by nothing else; the seams that exist for tests are honoured only
+# in a test run (the marker file), the same rule as for the API address above
+test_run_with() { bash -c '. /srv/pkg/lib/common.sh; sirven_test_run'; }
+rm -f /run/sirven-test-run
+check "as root, with no marker file, this is not a test run" bash -c '! test_run_with' 
+install -o root -g root -m 0600 /dev/null /run/sirven-test-run
+check "as root, with a root-owned private marker file, it is" test_run_with
+rm -f /run/sirven-test-run; install -o nobody -g nogroup -m 0600 /dev/null /run/sirven-test-run
+check "a marker file owned by someone else is not" bash -c '! test_run_with'
+rm -f /run/sirven-test-run; install -o root -g root -m 0666 /dev/null /run/sirven-test-run
+check "a marker file anyone can write is not" bash -c '! test_run_with'
+rm -f /run/sirven-test-run; install -o root -g root -m 0620 /dev/null /run/sirven-test-run
+check "a marker file the group can write is not" bash -c '! test_run_with'
+rm -f /run/sirven-test-run; ln -s /etc/hostname /run/sirven-test-run
+check "a link in place of the marker file is not" bash -c '! test_run_with'
+rm -f /run/sirven-test-run
+
+PLANTED=/tmp/planted-program
+printf '#!/bin/sh\necho "$0 $*" >> /tmp/planted-program.ran\n' > "$PLANTED"; chmod 0755 "$PLANTED"
+reset_machine
+rm -f /tmp/planted-program.ran
+check_exit "a real install with PLAN_BEFORE_FIRST_CHANGE and PLAN_STEP_HOOK exported, no transport, applies" 0 as_a_caller env PLAN_BEFORE_FIRST_CHANGE="$PLANTED" PLAN_STEP_HOOK="$PLANTED" PLAN_RECORD_FILE=/tmp/planted-record PLAN_PREFIX=/tmp/planted-prefix PREFLIGHT_SSH_COMMAND="$PLANTED" AUDIT_PENDING=/tmp/planted-pending bash install.sh --yes --transport none
+check "the program they name was not run, and the files they name were not written" bash -c '[ ! -e /tmp/planted-program.ran ] && [ ! -e /tmp/planted-record ] && [ ! -e /tmp/planted-pending ] && [ ! -e /tmp/planted-prefix ]'
+check "the install went to the real machine (an exported PLAN_PREFIX did not make it a fake root)" bash -c '[ -s /var/lib/sirven/install-record.tsv ]'
+check_exit "a real revoke with the same variables exported" 0 as_a_caller env PLAN_BEFORE_FIRST_CHANGE="$PLANTED" PLAN_STEP_HOOK="$PLANTED" bash install.sh revoke --all --yes
+check_exit "a real uninstall that removes the audit log, with the same variables exported" 0 as_a_caller env PLAN_BEFORE_FIRST_CHANGE="$PLANTED" PLAN_STEP_HOOK="$PLANTED" bash uninstall.sh --yes --remove-audit-log
+check "nothing they name was run in any of the three" bash -c '[ ! -e /tmp/planted-program.ran ]'
+# the programs the adopt step probes: named by the environment, they are root's to run only in a test run
+rm -f /tmp/planted-program.ran /run/sirven-test-run
+check_exit "a dry run as root with SIRVEN_TAILSCALE and SIRVEN_BB naming a program, and no marker file" 0 as_a_caller env SIRVEN_TAILSCALE="$PLANTED" SIRVEN_BB="$PLANTED" bash install.sh --dry-run --transport none
+check "ignored, with a note, and not run" bash -c 'grep -q "SIRVEN_TAILSCALE is for test runs only" <<< "$0" && [ ! -e /tmp/planted-program.ran ]' "$LAST_OUTPUT"
+install -o root -g root -m 0600 /dev/null /run/sirven-test-run
+check_exit "the same dry run with the marker file" 0 as_a_caller env SIRVEN_TAILSCALE="$PLANTED" SIRVEN_BB="$PLANTED" bash install.sh --dry-run --transport none
+check "runs the program: it is a test run" bash -c '[ -e /tmp/planted-program.ran ]'
+rm -f /tmp/planted-program.ran
+
 # nothing of the stand-ins or the scenario's own state is left in a place the next scenario would see: the container is thrown away
 finish

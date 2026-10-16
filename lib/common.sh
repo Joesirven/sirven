@@ -19,6 +19,21 @@ shell_quote() {
   printf '%q' "$1"
 }
 
+# sirven_test_run [MARKER]: true when this is a test run, the one rule for honouring a variable that exists only for the tests (a command to
+# run in place of a real one, say). a test run is a process that is not root (it can only hurt its own account), or root with a file
+# /run/sirven-test-run that is a plain file (not a link) owned by root and writable by nobody else, which only the test container's own
+# setup makes. an environment alone is not enough as root: root's environment can be inherited from anywhere (sudo -E, a root shell, a
+# service). lib/cloudflare_api.py applies the same rule. MARKER is for the unit tests of this function; no caller passes it.
+sirven_test_run() {
+  local marker="${1:-/run/sirven-test-run}" listing mode owner
+  [ "$(id -u)" -eq 0 ] || return 0
+  [ -f "$marker" ] && [ ! -L "$marker" ] || return 1
+  listing="$(ls -ldn "$marker" 2>/dev/null)" || return 1
+  read -r mode _ owner _ <<< "$listing"
+  # a plain file ("-"), owned by user 0, with no write bit for the group (position 5) or for others (position 8)
+  [ "${mode:0:1}" = "-" ] && [ "$owner" = 0 ] && [ "${mode:5:1}" = "-" ] && [ "${mode:8:1}" = "-" ]
+}
+
 lowercase() {
   printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
 }
