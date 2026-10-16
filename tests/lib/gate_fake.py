@@ -6,7 +6,6 @@
 CHECKER is the python text of the gate's checker (the here-document of sirven_vet), SPEC is a JSON file:
     accounts   [[name, user number, group number or "folder", shell], ...]  added to root and the owner
     members    {"group number": [names listed in the group file]}
-    shadow     text of a made-up /etc/shadow (absent: no such file)
     login_defs text of a made-up /etc/login.defs (absent: no such file)
     acl        {"path below the folder, or . for the folder": [[tag, permission, id], ...]}  made-up access lists
 The real passwd and group databases are replaced, so the folders being judged can be ordinary ones the test made.
@@ -64,12 +63,11 @@ fake_grp.getgrgid = lambda number: types.SimpleNamespace(gr_name="g%d" % number,
 sys.modules["pwd"], sys.modules["grp"] = fake_pwd, fake_grp
 
 scratch = tempfile.mkdtemp()
-for key, constant in (("shadow", '"/etc/shadow"'), ("login_defs", '"/etc/login.defs"')):
-    path = os.path.join(scratch, key)
-    if key in spec:
-        with open(path, "w") as handle:
-            handle.write(spec[key])
-    text = text.replace(constant, repr(path))
+path = os.path.join(scratch, "login_defs")
+if "login_defs" in spec:
+    with open(path, "w") as handle:
+        handle.write(spec["login_defs"])
+text = text.replace('"/etc/login.defs"', repr(path))
 
 if "acl" in spec:
     def getxattr(path, name, follow_symlinks=True):

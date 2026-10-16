@@ -123,28 +123,25 @@ outsiders_of() {  # SPEC_JSON NUMBER: who the checker names as other members of 
 
 test_the_system_accounts_in_group_root_that_cannot_log_in_do_not_make_it_untrusted() {
   vet_python_available || return 0
-  # Fedora 42's four: sync, shutdown and halt have a program for a shell and a locked password, operator has nologin
-  local spec='{"accounts": [["sync",5,0,"/bin/sync"],["shutdown",6,0,"/sbin/shutdown"],["halt",7,0,"/sbin/halt"],["operator",11,0,"/sbin/nologin"]],
-    "shadow": "sync:*:19000:0:99999:7:::\nshutdown:*:19000:0:99999:7:::\nhalt:!!:19000:0:99999:7:::\noperator:*:19000::::::\n"}'
+  # Fedora 42's four: sync, shutdown and halt have one fixed program for a shell, operator has nologin
+  local spec='{"accounts": [["sync",5,0,"/bin/sync"],["shutdown",6,0,"/sbin/shutdown"],["halt",7,0,"/sbin/halt"],["operator",11,0,"/sbin/nologin"]]}'
   assert_eq '{"0": []}' "$(outsiders_of "$spec" 0)" "Fedora's gid-0 system accounts are not outsiders"
 }
 
-test_a_member_of_group_root_with_a_login_shell_and_a_usable_password_is_an_outsider() {
+test_a_member_of_group_root_with_a_login_shell_is_an_outsider() {
   vet_python_available || return 0
-  # shellcheck disable=SC2016 # a password hash is text, not an expansion
-  local spec='{"accounts": [["worker",600,0,"/bin/bash"]], "shadow": "worker:$6$salt$hash:19000::::::\n"}'
-  assert_eq '{"0": ["worker"]}' "$(outsiders_of "$spec" 0)" "a system account with a password and a shell"
-  spec='{"accounts": [["worker",600,0,"/bin/bash"]], "shadow": "worker::19000::::::\n"}'
-  assert_eq '{"0": ["worker"]}' "$(outsiders_of "$spec" 0)" "an empty password field is no lock"
-  spec='{"accounts": [["worker",600,0,"/bin/bash"]]}'
-  assert_eq '{"0": ["worker"]}' "$(outsiders_of "$spec" 0)" "without a readable password file nothing counts as locked"
+  local spec='{"accounts": [["worker",600,0,"/bin/bash"]]}'
+  assert_eq '{"0": ["worker"]}' "$(outsiders_of "$spec" 0)" "a system account with a shell"
 }
 
-test_a_locked_password_makes_a_system_account_harmless_even_with_a_shell() {
+test_an_empty_shell_field_is_not_a_quiet_shell() {
   vet_python_available || return 0
-  # shellcheck disable=SC2016 # a password hash is text, not an expansion
-  local spec='{"accounts": [["svc",600,0,"/bin/bash"]], "shadow": "svc:!$6$salt$hash:19000::::::\n"}'
-  assert_eq '{"0": []}' "$(outsiders_of "$spec" 0)" "a password locked with a leading !"
+  # an empty shell field means /bin/sh. the gate does not read the password file: a locked password still lets the account log in
+  # by key, be reached by su, or run a service, so it makes nobody harmless (scenario 52 holds the real accounts with locked passwords)
+  local spec='{"accounts": [["svc",600,0,""]]}'
+  assert_eq '{"0": ["svc"]}' "$(outsiders_of "$spec" 0)" "an empty shell field"
+  spec='{"accounts": [["svc",600,0,"/usr/bin/python3"]]}'
+  assert_eq '{"0": ["svc"]}' "$(outsiders_of "$spec" 0)" "a program that is not on the list of quiet shells"
 }
 
 test_only_a_system_account_is_harmless_never_an_ordinary_one() {

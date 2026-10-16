@@ -2,8 +2,9 @@
 # SIR-32 round 3 (review e4). what the gate accepts as "only root and the owner can write this", judged on the folder the first
 # install or the kill switch runs from, with no kept copy yet. the whole package tree is judged, not a list of names.
 # SIR-96: a sticky world-writable folder on the way (like /tmp) is let through only when the folder below it is root's or the
-# owner's and is not open to others; a member of group root counts against the group unless it is a system account that cannot
-# log in or be used to write (Fedora puts sync, shutdown, halt and operator in group root).
+# owner's and is not open to others; a member of group root counts against the group unless it is a system account whose shell
+# is on a short list (nologin, false, and the programs of Fedora's sync, shutdown and halt). a locked password is not enough:
+# the account can still log in by key, be reached by su, or run a service.
 # SIR-97: a refusal for an access list entry names the entry, not the group whose mode bits are only the mask.
 set -uo pipefail
 . "$(dirname "$0")/../../lib/world.sh"
@@ -42,10 +43,25 @@ fresh /work/m3; setfacl -m g:agentgrp:rw /work/m3/lib/audit.sh; verdict "an acce
 check "... the refusal names the group entry" grep -q 'audit.sh: an access list entry gives the group agentgrp write' /tmp/o
 # group root, with accounts that Fedora has and that Debian and Ubuntu do not
 limit="$(sed -n 's/^UID_MIN[[:space:]]\{1,\}\([0-9]\{1,\}\).*/\1/p' /etc/login.defs | head -1)"; limit="${limit:-1000}"
-useradd -r -M -g 0 -s /usr/sbin/nologin sir96nologin; useradd -r -M -g 0 -s /bin/bash sir96locked
-check "precondition: both new accounts are system accounts below $limit and sir96locked has a locked password" bash -c \
-  '[ "$(id -u sir96nologin)" -lt "$1" ] && [ "$(id -u sir96locked)" -lt "$1" ] && getent shadow sir96locked | cut -d: -f2 | grep -q "^[!*]"' _ "$limit"
-fresh /work/g1; chmod -R g+w /work/g1; verdict "group root can write, its other members are system accounts that cannot log in" /work/g1 accept
+useradd -r -M -g 0 -s /usr/sbin/nologin sir96nologin; useradd -r -M -g 0 -s /bin/sync sir96sync
+check "precondition: both new accounts are system accounts below $limit" bash -c \
+  '[ "$(id -u sir96nologin)" -lt "$1" ] && [ "$(id -u sir96sync)" -lt "$1" ]' _ "$limit"
+fresh /work/g1; chmod -R g+w /work/g1; verdict "group root can write, its other members are system accounts with a nologin or sync shell" /work/g1 accept
+# a locked password (! or *) does not make a system account with a shell harmless: it can still log in by key, be reached by su, or run a service
+useradd -r -M -g 0 -s /bin/bash -p '!' sir96locked
+check "precondition: sir96locked is a system account below $limit with a shell and a locked password" bash -c \
+  '[ "$(id -u sir96locked)" -lt "$1" ] && getent passwd sir96locked | grep -q ":/bin/bash$" && getent shadow sir96locked | cut -d: -f2 | grep -q "^[!*]"' _ "$limit"
+fresh /work/g1b; chmod -R g+w /work/g1b; verdict "group root can write and a system account in it has /bin/bash and a locked password (!)" /work/g1b refuse
+check "... and it names that account" grep -q 'which has other members: .*sir96locked' /tmp/o
+userdel sir96locked 2>/dev/null
+useradd -r -M -g 0 -s /bin/bash -p '*' sir96locked
+fresh /work/g1c; chmod -R g+w /work/g1c; verdict "group root can write and a system account in it has /bin/bash and a locked password (*)" /work/g1c refuse
+userdel sir96locked 2>/dev/null
+useradd -r -M -g 0 -s '' -p '*' sir96empty
+check "precondition: sir96empty has an empty shell field" bash -c '[ "$(getent passwd sir96empty | cut -d: -f7)" = "" ]'
+fresh /work/g1d; chmod -R g+w /work/g1d; verdict "group root can write and a system account in it has an empty shell (which means /bin/sh)" /work/g1d refuse
+check "... and it names that account" grep -q 'which has other members: .*sir96empty' /tmp/o
+userdel sir96empty 2>/dev/null
 useradd -r -M -g 0 -s /bin/bash -p '$6$harness$notalockedpassword' sir96worker
 fresh /work/g2; chmod -R g+w /work/g2; verdict "group root can write and a system account in it has a shell and a password" /work/g2 refuse
 check "... and it names that account" grep -q 'which has other members: sir96worker' /tmp/o

@@ -58,8 +58,10 @@ sirven_vet() {
 import grp, os, pwd, re, stat, struct, sys
 folder, owner = sys.argv[1], sys.argv[2]
 ACCESS_LIST, USER, GROUP_OBJ, GROUP, MASK = "system.posix_acl_access", 0x02, 0x04, 0x08, 0x10
-LOGIN_DEFS, SHADOW = "/etc/login.defs", "/etc/shadow"
-NO_SHELL = ("/sbin/nologin", "/usr/sbin/nologin", "/bin/false", "/usr/bin/false")
+LOGIN_DEFS = "/etc/login.defs"
+# the only shells a system account in group root may have: nothing that gives a login (nologin, false) or one fixed program
+# that Fedora gives its stock accounts (sync, shutdown, halt). an empty shell field means /bin/sh, so it is not on the list.
+QUIET_SHELLS = ("/sbin/nologin", "/usr/sbin/nologin", "/bin/false", "/usr/bin/false", "/bin/sync", "/sbin/shutdown", "/sbin/halt")
 users = {0}
 try:
     users.add(pwd.getpwnam(owner).pw_uid)
@@ -82,27 +84,17 @@ def system_limit():  # the first ordinary user number: UID_MIN of the login defi
         return int(found.group(1)) if found else 1000
     except (OSError, ValueError):
         return 1000
-def locked_names():  # accounts whose password cannot be typed: the password field starts with ! or *. read by hand (spwd is gone from Python 3.13)
-    found = set()
-    try:
-        with open(SHADOW) as handle:
-            for line in handle:
-                fields = line.split(":")
-                if len(fields) > 1 and fields[1][:1] in ("!", "*"):
-                    found.add(fields[0])
-    except (OSError, ValueError):
-        pass
-    return found
-def harmless(name, gid, limit, locked):
+def harmless(name, gid, limit):
     # root and the owner are trusted. in group root (number 0) so is a system account (a user number below the first ordinary one)
-    # that cannot log in or be used to write: its shell is nologin or false, or its password is locked. every other member is an outsider.
+    # whose shell is on the short list QUIET_SHELLS. a locked password counts for nothing: a key login, su, cron or a service still runs
+    # as the account. every other member is an outsider.
     try:
         entry = pwd.getpwnam(name)
     except KeyError:
         return False
     if entry.pw_uid in users:
         return True
-    return gid == 0 and entry.pw_uid < limit and (entry.pw_shell in NO_SHELL or name in locked)
+    return gid == 0 and entry.pw_uid < limit and entry.pw_shell in QUIET_SHELLS
 def outsiders(gid):  # the members of group gid who could still change what the group can write, by name
     try:
         members = set(grp.getgrgid(gid).gr_mem)
@@ -111,8 +103,8 @@ def outsiders(gid):  # the members of group gid who could still change what the 
             return ["(the members of group number %d are unknown)" % gid]
         members = set()
     members.update(entry.pw_name for entry in pwd.getpwall() if entry.pw_gid == gid)
-    limit, locked = system_limit(), locked_names()
-    return sorted(name for name in members if not harmless(name, gid, limit, locked))
+    limit = system_limit()
+    return sorted(name for name in members if not harmless(name, gid, limit))
 def group_trusted(gid):
     return not outsiders(gid)
 def entries(path):
