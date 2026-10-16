@@ -18,6 +18,7 @@ uninstall_sh() {
 # a script that records that it ran, for a variable to name. the script is a plain file, as a planted one would be.
 make_planted_script() {  # NAME: prints the script's path; it leaves NAME.ran beside it when it runs
   local script="$TEST_TMP/$1.sh"
+  # shellcheck disable=SC2016 # the script body is text for the printf, not an expansion
   printf '#!/bin/sh\necho "$0 $*" >> "%s/%s.ran"\n' "$TEST_TMP" "$1" > "$script"
   chmod 0755 "$script"
   printf '%s' "$script"
@@ -25,6 +26,7 @@ make_planted_script() {  # NAME: prints the script's path; it leaves NAME.ran be
 
 # value_after_loading LIBRARY NAME VALUE: the value NAME has after the library is loaded into a shell that had NAME exported as VALUE
 value_after_loading() {
+  # shellcheck disable=SC2016 # the script body is text for bash -c
   env "$2=$3" bash -c '. "$1/lib/common.sh"; . "$1/lib/$2.sh"; printf "%s" "${!3}"' _ "$REPO_DIR" "$1" "$2"
 }
 
@@ -221,7 +223,9 @@ test_the_adopt_seam_check_says_when_a_seam_is_ignored_as_root() {
   . "$REPO_DIR/lib/adopt.sh"
   DRY_RUN=yes
   PREFIX=""
+  # shellcheck disable=SC2034 # read by adopt_check_seams
   SIRVEN_TAILSCALE=none
+  # shellcheck disable=SC2034 # read by adopt_check_seams
   SIRVEN_BB=""
   capture adopt_check_seams
   assert_contains "$CAPTURED_STDERR" "SIRVEN_TAILSCALE"
