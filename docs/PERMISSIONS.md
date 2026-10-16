@@ -419,7 +419,16 @@ the kill switch reads it to know what to remove.
   copy (the first install), the folder must be one nobody but root and the owner can write. "can write" is judged on every
   file and folder of the package tree and every folder on the way to it: owner, mode, group members, and access list entries; a
   link that leaves the package is refused; a read-only mount is **not** taken as safe, because the same files can be writable
-  through another mount. the state directory is forced to mode 0700 and root as owner whether or not this run made it.
+  through another mount. two allowances, both narrow. (1) a folder on the way that is sticky and open to everyone, like `/tmp`
+  (mode 1777), is let through only when it belongs to root or the owner and the folder just below it also does and is not open
+  to others, because the sticky bit then stops anyone else from renaming or replacing that entry; the folder below gets no such
+  allowance itself (a second sticky folder in a row is refused), and the package folder and everything inside it always get the
+  full check. a sticky folder with an access list entry for somebody else is still refused. (2) a group that can write is trusted
+  when every account in it is root, the owner, or (in group root only) a system account, meaning a user number below `UID_MIN`
+  of `/etc/login.defs` (1000 when it says nothing), that cannot log in or be used to write: its shell is `nologin` or `false`, or
+  its password is locked (the `/etc/shadow` field starts with `!` or `*`). Fedora puts `sync`, `shutdown`, `halt` and `operator` in
+  group root, so without this every folder owned by `root:root` would have been refused there. any other account in the group,
+  and a name in the group file with no account, makes the group untrusted, and the refusal names it. the state directory is forced to mode 0700 and root as owner whether or not this run made it.
   a `--prefix` with a `.` or `..` component is refused whether or not the folders exist, and a started-from-standard-input script is refused.
   the safe way to run any root command is the launcher `/usr/local/sbin/sirven`, written by install, root-owned, mode 755: it
   sets its own search path and runs the kept copy. install writes it only if `/usr/local/sbin` and every folder above it can be written by

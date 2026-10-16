@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # SIR-32 round 3 (review e4). what the gate accepts as "only root and the owner can write this", judged on the folder the first
 # install or the kill switch runs from, with no kept copy yet. the whole package tree is judged, not a list of names.
+# SIR-96: a sticky world-writable folder on the way (like /tmp) is let through only when the folder below it is root's or the
+# owner's and is not open to others; a member of group root counts against the group unless it is a system account that cannot
+# log in or be used to write (Fedora puts sync, shutdown, halt and operator in group root).
 set -uo pipefail
 . "$(dirname "$0")/../../lib/world.sh"
 useradd -m agent 2>/dev/null; groupadd agentgrp; usermod -aG agentgrp agent
@@ -20,6 +23,26 @@ mkdir -p /work/parent3; chmod 755 /work/parent3; setfacl -m u:agent:rwx /work/pa
 fresh /work/real4; chgrp -R agentgrp /work/real4; chmod -R g+w /work/real4; verdict "group agentgrp (the agent is a member) can write" /work/real4 refuse
 fresh /work/real5; setfacl -m u:agent:rw /work/real5/lib/audit.sh; verdict "access list entry on one library" /work/real5 refuse
 mkdir -p /work/tmp6; chmod 1777 /work/tmp6; fresh /work/tmp6/pkg; verdict "package inside a sticky world-writable folder like /tmp" /work/tmp6/pkg accept
+fresh /tmp/pkg-in-real-tmp; verdict "package inside the real /tmp" /tmp/pkg-in-real-tmp accept
+mkdir -p /work/tmp7; chmod 1777 /work/tmp7; fresh /work/tmp7/pkg; chown agent /work/tmp7/pkg; verdict "sticky world-writable parent, package folder owned by the agent" /work/tmp7/pkg refuse
+check "... and it names the package folder and its owner" grep -q '/work/tmp7/pkg: owned by agent' /tmp/o
+mkdir -p /work/tmp8; chmod 1777 /work/tmp8; fresh /work/tmp8/pkg; chmod o+w /work/tmp8/pkg; verdict "sticky world-writable parent, package folder open to everyone" /work/tmp8/pkg refuse
+mkdir -p /work/tmp9/inner; chmod 1777 /work/tmp9 /work/tmp9/inner; fresh /work/tmp9/inner/pkg; verdict "two sticky world-writable folders in a row: only the first is let through" /work/tmp9/inner/pkg refuse
+mkdir -p /work/tmp10; chmod 777 /work/tmp10; fresh /work/tmp10/pkg; verdict "world-writable parent without the sticky bit" /work/tmp10/pkg refuse
+fresh /work/tmp11; chmod 1777 /work/tmp11; verdict "the package folder itself is sticky and world-writable" /work/tmp11 refuse
+# group root, with accounts that Fedora has and that Debian and Ubuntu do not
+limit="$(sed -n 's/^UID_MIN[[:space:]]\{1,\}\([0-9]\{1,\}\).*/\1/p' /etc/login.defs | head -1)"; limit="${limit:-1000}"
+useradd -r -M -g 0 -s /usr/sbin/nologin sir96nologin; useradd -r -M -g 0 -s /bin/bash sir96locked
+check "precondition: both new accounts are system accounts below $limit and sir96locked has a locked password" bash -c \
+  '[ "$(id -u sir96nologin)" -lt "$1" ] && [ "$(id -u sir96locked)" -lt "$1" ] && getent shadow sir96locked | cut -d: -f2 | grep -q "^[!*]"' _ "$limit"
+fresh /work/g1; chmod -R g+w /work/g1; verdict "group root can write, its other members are system accounts that cannot log in" /work/g1 accept
+useradd -r -M -g 0 -s /bin/bash -p '$6$harness$notalockedpassword' sir96worker
+fresh /work/g2; chmod -R g+w /work/g2; verdict "group root can write and a system account in it has a shell and a password" /work/g2 refuse
+check "... and it names that account" grep -q 'which has other members: sir96worker' /tmp/o
+userdel sir96worker 2>/dev/null; useradd -M -u 1500 -g 0 -s /usr/sbin/nologin sir96ordinary
+fresh /work/g3; chmod -R g+w /work/g3; verdict "group root can write and an ordinary account (user number 1500) is in it" /work/g3 refuse
+check "... and it names that account" grep -q 'which has other members: sir96ordinary' /tmp/o
+userdel sir96ordinary 2>/dev/null
 fresh /work/real7; chmod -R o+w /work/real7/tests; verdict "a world-writable folder inside the package that is not a code folder (the whole tree is judged)" /work/real7 refuse
 fresh /work/real8; ln -s /etc /work/real8/lib/etc-link; verdict "a link inside the package to a folder outside it" /work/real8 refuse
 fresh /work/real9; chown agent /work/real9/lib/common.sh; verdict "a library owned by the agent" /work/real9 refuse
