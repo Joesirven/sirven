@@ -194,11 +194,108 @@ sys.exit(3 if problems else 0)
 PY
 }
 
+# sirven_flag_value FLAG ARGUMENT...: print the value of FLAG, or of --flag=VALUE, from ARGUMENT...; exit 1 when absent
+sirven_flag_value() {
+  local flag="$1"
+  shift
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      "$flag")
+        [ "$#" -ge 2 ] || return 1
+        case "$2" in --*) return 1 ;; esac
+        printf '%s' "$2"
+        return 0
+        ;;
+      "$flag"=*) printf '%s' "${1#*=}"; return 0 ;;
+    esac
+    shift
+  done
+  return 1
+}
+
+# sirven_refuse_owner_name NAME SERVICE_USER: exit 2 when NAME is not a plain owner account, or is the service account
+sirven_refuse_owner_name() {
+  local name="$1" service_user="$2"
+  case "$name" in
+    '' | *[!A-Za-z0-9._-]*)
+      printf 'error: --owner must be a plain account name\n' >&2
+      exit 2
+      ;;
+  esac
+  if [ "$name" = "$service_user" ]; then
+    printf 'error: refusing --owner %s: that is the service user account, not the owner who holds the audit log. nothing was changed.\n' "$name" >&2
+    exit 2
+  fi
+}
+
+# sirven_trusted_sudo_user SERVICE_USER: print the sudo account name when the environment corroborates it, else print nothing
+sirven_trusted_sudo_user() {
+  local service_user="$1"
+  /usr/bin/python3 -I - "$service_user" <<'PY'
+import os, pwd, re, sys
+service_user = sys.argv[1]
+sudo_user = os.environ.get("SUDO_USER", "")
+sudo_uid = os.environ.get("SUDO_UID", "")
+if not sudo_user or sudo_user == "root":
+    raise SystemExit
+if not sudo_uid.isdigit():
+    raise SystemExit
+sudo_uid = int(sudo_uid)
+try:
+    entry = pwd.getpwnam(sudo_user)
+except KeyError:
+    raise SystemExit
+if entry.pw_uid != sudo_uid:
+    raise SystemExit
+if sudo_user == service_user:
+    raise SystemExit
+uid_min = 1000
+try:
+    with open("/etc/login.defs") as handle:
+        found = re.search(r"^[ \t]*UID_MIN[ \t]+([0-9]+)[ \t]*(#.*)?$", handle.read(), re.M)
+        if found:
+            uid_min = int(found.group(1))
+except OSError:
+    pass
+if entry.pw_uid < uid_min:
+    raise SystemExit
+try:
+    loginuid = open("/proc/self/loginuid").read().strip()
+except OSError:
+    raise SystemExit
+if loginuid in ("4294967295", "-1", ""):
+    raise SystemExit
+if not loginuid.isdigit() or int(loginuid) != sudo_uid:
+    raise SystemExit
+print(sudo_user)
+PY
+}
+
+# sirven_gate_owner SERVICE_USER ARGUMENT...: set SIRVEN_GATE_OWNER for vetting and for the libraries; print the name
+sirven_gate_owner() {
+  local service_user="$1"
+  shift
+  local explicit="" trusted="" owner=""
+  explicit="$(sirven_flag_value --owner "$@")" || explicit=""
+  trusted="$(sirven_trusted_sudo_user "$service_user")"
+  if [ -n "$explicit" ]; then
+    sirven_refuse_owner_name "$explicit" "$service_user"
+    owner="$explicit"
+  elif [ -n "$trusted" ]; then
+    owner="$trusted"
+  else
+    owner=root
+  fi
+  SIRVEN_GATE_OWNER="$owner"
+  export SIRVEN_GATE_OWNER
+  printf '%s' "$owner"
+}
+
 # sirven_gate ENTRY KIND ARGUMENT...: ENTRY is this script's path below the package folder (install.sh, uninstall.sh, bin/sirven);
 # KIND is install for an install, anything else for the rest. ROOT_DIR is this script's physical folder. as root on linux it
 # either returns, having vetted the folder it will read its libraries from, or runs the kept copy instead, or refuses.
 sirven_gate() {
-  local entry="$1" kind="$2" owner="${SUDO_USER:-root}" kept="" output who dir real
+  local entry="$1" kind="$2" kept="" output who dir real service_user owner
   shift 2
   [ "$EUID" -eq 0 ] || return 0
   [ "$(/usr/bin/uname -s)" = Linux ] || return 0
@@ -220,6 +317,8 @@ sirven_gate() {
     fi
   done
   export PATH
+  service_user="$(sirven_flag_value --user "$@")" || service_user=agent
+  owner="$(sirven_gate_owner "$service_user" "$@")"
   who="any account other than root"
   [ "$owner" = root ] || who="any account other than root and $owner"
   if [ -f "$SIRVEN_KEPT/$entry" ]; then kept="$(cd -P "$SIRVEN_KEPT" && pwd -P)"; fi
@@ -326,7 +425,7 @@ parse_arguments() {
   SERVICE_USER=agent
   USER_GIVEN=no
   REPAIR_PATHS_TEXT=""
-  OWNER="${SUDO_USER:-$(id -un)}"
+  OWNER="${SIRVEN_GATE_OWNER:-$(id -un)}"
   case "${1:-}" in
     -h | --help | help) usage; exit 0 ;;
     grant) shift ;;

@@ -396,7 +396,7 @@ kill_switch_uid_min() {
 # below UID_MIN (the system accounts: a database, a web server), and nobody (65534). a real root only.
 kill_switch_refuse_unsafe_user() {
   local number minimum
-  if [ "$SERVICE_USER" = root ] || [ "$SERVICE_USER" = "$OWNER" ] || [ "$SERVICE_USER" = "${SUDO_USER:-}" ]; then
+  if [ "$SERVICE_USER" = root ] || [ "$SERVICE_USER" = "$OWNER" ]; then
     DIE_STATUS=2 die "refusing to revoke $SERVICE_USER: it is root, the owner, or the account running this, which the kill switch would lock out. --user names the agent's account. nothing was changed."
   fi
   [ -z "$PREFIX" ] || return 0
