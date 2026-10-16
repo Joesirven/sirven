@@ -79,6 +79,8 @@ class Failure(Exception):
 
 
 TEST_RUN_MARKER = "/run/sirven-test-run"
+
+
 def test_run():
     """not root, or root with the marker file only the test container's setup makes (see the top of this file)"""
     if os.geteuid() != 0:
