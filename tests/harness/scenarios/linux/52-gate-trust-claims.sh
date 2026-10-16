@@ -4,6 +4,7 @@
 # SIR-96: a sticky world-writable folder on the way (like /tmp) is let through only when the folder below it is root's or the
 # owner's and is not open to others; a member of group root counts against the group unless it is a system account that cannot
 # log in or be used to write (Fedora puts sync, shutdown, halt and operator in group root).
+# SIR-97: a refusal for an access list entry names the entry, not the group whose mode bits are only the mask.
 set -uo pipefail
 . "$(dirname "$0")/../../lib/world.sh"
 useradd -m agent 2>/dev/null; groupadd agentgrp; usermod -aG agentgrp agent
@@ -30,6 +31,15 @@ mkdir -p /work/tmp8; chmod 1777 /work/tmp8; fresh /work/tmp8/pkg; chmod o+w /wor
 mkdir -p /work/tmp9/inner; chmod 1777 /work/tmp9 /work/tmp9/inner; fresh /work/tmp9/inner/pkg; verdict "two sticky world-writable folders in a row: only the first is let through" /work/tmp9/inner/pkg refuse
 mkdir -p /work/tmp10; chmod 777 /work/tmp10; fresh /work/tmp10/pkg; verdict "world-writable parent without the sticky bit" /work/tmp10/pkg refuse
 fresh /work/tmp11; chmod 1777 /work/tmp11; verdict "the package folder itself is sticky and world-writable" /work/tmp11 refuse
+# an access list on a file whose group has a member (agentgrp has the agent): the mode shows group write, but that is the mask
+fresh /work/m1; chgrp agentgrp /work/m1/lib/audit.sh; chmod 644 /work/m1/lib/audit.sh; setfacl -m u:agent:rw /work/m1/lib/audit.sh
+check "precondition: the file shows group write (the mask) though its group may only read" bash -c '[ "$(stat -c %a /work/m1/lib/audit.sh)" = 664 ] && getfacl -p /work/m1/lib/audit.sh | grep -q "^group::r--"'
+verdict "an access list entry for the agent on a file of a group with a member" /work/m1 refuse
+check "... the refusal names the file and the entry, not the group" bash -c 'grep -q "audit.sh: an access list entry gives agent write" /tmp/o && ! grep -q "writable by the group" /tmp/o'
+fresh /work/m2; chgrp agentgrp /work/m2/lib/audit.sh; chmod 644 /work/m2/lib/audit.sh; setfacl -m u:root:rw /work/m2/lib/audit.sh
+verdict "an access list whose only entry is root's, on a file of a group with a member" /work/m2 accept
+fresh /work/m3; setfacl -m g:agentgrp:rw /work/m3/lib/audit.sh; verdict "an access list entry for a group with a member" /work/m3 refuse
+check "... the refusal names the group entry" grep -q 'audit.sh: an access list entry gives the group agentgrp write' /tmp/o
 # group root, with accounts that Fedora has and that Debian and Ubuntu do not
 limit="$(sed -n 's/^UID_MIN[[:space:]]\{1,\}\([0-9]\{1,\}\).*/\1/p' /etc/login.defs | head -1)"; limit="${limit:-1000}"
 useradd -r -M -g 0 -s /usr/sbin/nologin sir96nologin; useradd -r -M -g 0 -s /bin/bash sir96locked

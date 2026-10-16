@@ -428,7 +428,7 @@ the kill switch reads it to know what to remove.
   of `/etc/login.defs` (1000 when it says nothing), that cannot log in or be used to write: its shell is `nologin` or `false`, or
   its password is locked (the `/etc/shadow` field starts with `!` or `*`). Fedora puts `sync`, `shutdown`, `halt` and `operator` in
   group root, so without this every folder owned by `root:root` would have been refused there. any other account in the group,
-  and a name in the group file with no account, makes the group untrusted, and the refusal names it. the state directory is forced to mode 0700 and root as owner whether or not this run made it.
+  and a name in the group file with no account, makes the group untrusted, and the refusal names it. when a file has an access list, the group bits of its mode are the mask, not what the owning group may do, so the owning group's own entry (cut by the mask) is what is judged; a refusal for an access list entry names that entry (`an access list entry gives agent write`), never the group. the state directory is forced to mode 0700 and root as owner whether or not this run made it.
   a `--prefix` with a `.` or `..` component is refused whether or not the folders exist, and a started-from-standard-input script is refused.
   the safe way to run any root command is the launcher `/usr/local/sbin/sirven`, written by install, root-owned, mode 755: it
   sets its own search path and runs the kept copy. install writes it only if `/usr/local/sbin` and every folder above it can be written by

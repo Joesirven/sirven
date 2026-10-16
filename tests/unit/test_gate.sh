@@ -241,3 +241,52 @@ test_the_group_message_names_the_members_that_make_it_untrusted() {
   assert_contains "$CAPTURED_STDOUT" "lib: writable by the group"
   assert_contains "$CAPTURED_STDOUT" "which has other members: worker"
 }
+
+# ---- the reason for a refusal when an access list is on the file (SIR-97). with an access list the group bits of the mode are
+# the mask, so a file whose owning group cannot write shows group write; the refusal must name the entry that gives the write.
+
+acl_package() {  # sets PKG, with lib/a.sh mode 664 (the mask is rw)
+  PKG="$TEST_TMP/pkg"
+  mkdir -p "$PKG/lib" && echo x > "$PKG/lib/a.sh" && chmod -R go-w "$PKG" && chmod 664 "$PKG/lib/a.sh"
+}
+
+test_an_access_list_entry_is_named_as_the_cause_not_the_group() {
+  vet_python_available || return 0
+  acl_package
+  # the owning group may only read (entry 4, permission 4), user number 4242 may write, mask rw; the file's group has an outsider
+  local spec='{"accounts": [["worker",600,"folder","/bin/bash"],["intruder",4242,4242,"/bin/bash"]],
+    "acl": {"lib/a.sh": [[2,6,4242],[4,4,4294967295],[16,6,4294967295]]}}'
+  assert_status 3 fake_run "$spec" run "$PKG" "$(id -un)"
+  assert_contains "$CAPTURED_STDOUT" "lib/a.sh: an access list entry gives intruder write"
+  assert_not_contains "$CAPTURED_STDOUT" "writable by the group"
+}
+
+test_a_mask_that_only_serves_a_trusted_entry_is_not_blamed_on_the_group() {
+  vet_python_available || return 0
+  acl_package
+  # the same file with the only named entry for the owner: nobody else can write, though the mode shows group write
+  local spec acl_owner
+  acl_owner="$(id -u)"
+  spec='{"accounts": [["worker",600,"folder","/bin/bash"]], "acl": {"lib/a.sh": [[2,6,'"$acl_owner"'],[4,4,4294967295],[16,6,4294967295]]}}'
+  assert_status 0 fake_run "$spec" run "$PKG" "$(id -un)"
+}
+
+test_an_owning_group_entry_that_can_write_is_still_the_groups_doing() {
+  vet_python_available || return 0
+  acl_package
+  local spec='{"accounts": [["worker",600,"folder","/bin/bash"]], "acl": {"lib/a.sh": [[2,6,0],[4,6,4294967295],[16,6,4294967295]]}}'
+  assert_status 3 fake_run "$spec" run "$PKG" "$(id -un)"
+  assert_contains "$CAPTURED_STDOUT" "lib/a.sh: writable by the group"
+  assert_contains "$CAPTURED_STDOUT" "which has other members: worker"
+  # and a mask that takes the write away from that entry makes it harmless
+  spec='{"accounts": [["worker",600,"folder","/bin/bash"]], "acl": {"lib/a.sh": [[2,6,0],[4,6,4294967295],[16,4,4294967295]]}}'
+  assert_status 0 fake_run "$spec" run "$PKG" "$(id -un)"
+}
+
+test_an_access_list_entry_for_an_untrusted_group_is_named_as_such() {
+  vet_python_available || return 0
+  acl_package
+  local spec='{"accounts": [["worker",600,5000,"/bin/bash"]], "acl": {"lib/a.sh": [[8,6,5000],[4,4,4294967295],[16,6,4294967295]]}}'
+  assert_status 3 fake_run "$spec" run "$PKG" "$(id -un)"
+  assert_contains "$CAPTURED_STDOUT" "lib/a.sh: an access list entry gives the group g5000 write"
+}

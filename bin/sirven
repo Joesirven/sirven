@@ -57,7 +57,7 @@ sirven_vet() {
   /usr/bin/python3 -I - "$1" "$2" <<'PY'
 import grp, os, pwd, re, stat, struct, sys
 folder, owner = sys.argv[1], sys.argv[2]
-ACCESS_LIST, USER, GROUP, MASK = "system.posix_acl_access", 0x02, 0x08, 0x10
+ACCESS_LIST, USER, GROUP_OBJ, GROUP, MASK = "system.posix_acl_access", 0x02, 0x04, 0x08, 0x10
 LOGIN_DEFS, SHADOW = "/etc/login.defs", "/etc/shadow"
 NO_SHELL = ("/sbin/nologin", "/usr/sbin/nologin", "/bin/false", "/usr/bin/false")
 users = {0}
@@ -133,12 +133,16 @@ def writers(path, info, sticky_parent):
     mode = stat.S_IMODE(info.st_mode)
     if mode & 0o002 and not sticky_parent:
         return "writable by everyone (mode %o)" % mode
-    if mode & 0o020 and not sticky_parent:
+    listed = entries(path)
+    mask = next((perm for tag, perm, _ in listed if tag == MASK), 7)
+    # with an access list the group bits of the mode are the mask, not the owning group's own permission: that is the group
+    # entry (tag 0x04), cut by the mask. judging the mask as the group's would name the group for what an entry did.
+    own_group = next((perm for tag, perm, _ in listed if tag == GROUP_OBJ), None)
+    group_write = mode & 0o020 if own_group is None else own_group & mask & 0o2
+    if group_write and not sticky_parent:
         others = outsiders(info.st_gid)
         if others:
             return "writable by the group %s (mode %o), which has other members: %s" % (gid_name(info.st_gid), mode, ", ".join(others))
-    listed = entries(path)
-    mask = next((perm for tag, perm, _ in listed if tag == MASK), 7)
     for tag, perm, number in listed:
         if perm & mask & 0o2:
             if tag == USER and number not in users:

@@ -40,6 +40,7 @@ chown root /work/bad/lib/common.sh
 setfacl -m u:intruder:rw /work/bad/lib/audit.sh
 check_exit "(2) install from a copy with an access list entry for another account is refused" 2 bash install.sh --yes --level observer --transport none
 check "(2) it names the file and the entry" grep -q 'audit.sh: an access list entry gives intruder write' <<< "$LAST_OUTPUT"
+check "(2) ... and does not blame group root for it" bash -c '! grep -q "writable by the group" <<< "$0"' "$LAST_OUTPUT"
 setfacl -b /work/bad/lib/audit.sh
 useradd -m agent
 check_exit "(2) revoke with no kept copy from a folder the agent can write is refused" 2 env PATH="$PATH" bash -c 'cd /work/bad && chmod g+w lib && setfacl -m u:agent:rwx lib && bash install.sh revoke --all --yes --transport none'
