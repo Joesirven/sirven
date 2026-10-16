@@ -500,9 +500,6 @@ parse_arguments() {
   case "$OWNER" in
     '' | *[!A-Za-z0-9._-]*) usage_error "--owner must be a plain account name" ;;
   esac
-  if [ "$OWNER" = "$SERVICE_USER" ]; then
-    usage_error "--owner must not name the service user account"
-  fi
   if [ -n "$PREFIX" ]; then
     case "$PREFIX" in
       /*) ;;

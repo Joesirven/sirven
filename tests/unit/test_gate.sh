@@ -20,14 +20,17 @@ gate_owner_helpers() {  # the owner decision helpers from the gate block
   gate_block "$REPO_DIR/install.sh" | sed -n '/^sirven_flag_value()/,/^sirven_gate()/{ /^sirven_gate()/d; p; }'
 }
 
+gate_owner_call() {  # FUNCTION ARGUMENT...: run a gate owner helper (heredocs cannot live inside bash -c text)
+  gate_owner_helpers > "$TEST_TMP/gate_owner_fns.sh"
+  bash -c '. "$1"; "$2" "${@:3}"' _ "$TEST_TMP/gate_owner_fns.sh" "$@"
+}
+
 # ---- the owner the gate trusts for vetting (SIR-99). SUDO_USER alone is not enough as root.
 
 test_the_gate_owner_helpers_read_flags_from_the_arguments() {
-  local body
-  body="$(gate_owner_helpers)"
-  assert_eq example "$(bash -c "$body; sirven_flag_value --owner" _ --owner example --dry-run)"
-  assert_eq other "$(bash -c "$body; sirven_flag_value --user" _ --user other --prefix /x)"
-  assert_status 1 bash -c "$body; sirven_flag_value --owner" _ --dry-run
+  assert_eq example "$(gate_owner_call sirven_flag_value --owner --owner example --dry-run)"
+  assert_eq other "$(gate_owner_call sirven_flag_value --user --user other --prefix /x)"
+  assert_status 1 gate_owner_call sirven_flag_value --owner --dry-run
 }
 
 test_sudo_user_is_not_trusted_without_a_matching_sudo_uid() {
@@ -62,18 +65,16 @@ test_sudo_user_is_trusted_when_sudo_uid_and_loginuid_match() {
 
 test_the_gate_owner_defaults_to_root_without_a_trusted_sudo_user_or_an_explicit_owner() {
   vet_python_available || return 0
-  local body
-  body="$(gate_owner_helpers)"
-  assert_eq root "$(bash -c "$body; sirven_gate_owner agent" _)"
-  assert_eq root "$(env SUDO_USER=agent SUDO_UID=1500 bash -c "$body; sirven_gate_owner agent" _)"
+  assert_eq root "$(gate_owner_call sirven_gate_owner agent)"
+  assert_eq root "$(SUDO_USER=agent SUDO_UID=1500 gate_owner_call sirven_gate_owner agent)"
 }
 
 test_the_gate_owner_takes_an_explicit_owner_and_refuses_the_service_user() {
   vet_python_available || return 0
-  local body
-  body="$(gate_owner_helpers)"
-  assert_eq example "$(bash -c "$body; sirven_gate_owner agent" _ --owner example)"
-  assert_status 2 env SIRVEN_GATE_OWNER=ignored bash -c "$body; sirven_gate_owner agent" _ --owner agent --user agent
+  assert_eq example "$(gate_owner_call sirven_gate_owner agent --owner example)"
+  gate_owner_helpers > "$TEST_TMP/gate_owner_fns.sh"
+  # shellcheck disable=SC2016 # the script body is text for bash -c
+  assert_status 2 bash -c '. "$1"; sirven_gate_owner agent "$@"' _ "$TEST_TMP/gate_owner_fns.sh" --owner agent --user agent
   assert_contains "$CAPTURED_STDERR" "service user"
 }
 
@@ -175,7 +176,7 @@ test_a_package_name_with_a_slash_or_dots_is_refused() {
 # so the cases do not depend on which accounts the machine running them has; the folders are real.
 
 gate_checker() {  # the python text of the checker: the here-document of sirven_vet in install.sh
-  gate_block "$REPO_DIR/install.sh" | sed -n "/<<'PY'/,/^PY\$/p" | sed '1d;$d'
+  gate_block "$REPO_DIR/install.sh" | awk '/^sirven_vet\(\)/,/^PY$/{print}' | sed -n "/<<'PY'/,/^PY\$/p" | sed '1d;$d'
 }
 
 fake_run() {  # SPEC_JSON VERB ARGUMENT...: run tests/lib/gate_fake.py with the made-up databases
