@@ -32,18 +32,35 @@ any local account can listen on a port of this machine, so an address on this ma
 anywhere else. in every other case the override is ignored, with a note, and the real address is used.
 
 this program clears the proxy and certificate variables of its environment (http_proxy and the like, SSL_CERT_FILE, SSL_CERT_DIR,
-SSLKEYLOGFILE) before it calls the API, uses no proxy, and follows no redirect: the Authorization header is sent to the one address
+SSLKEYLOGFILE, OPENSSL_CONF) before it loads the ssl module, and again before it calls the API, uses no proxy, and follows no redirect: the Authorization header is sent to the one address
 and to no other.
 """
-import base64
-import json
 import os
-import re
-import stat
-import sys
-import urllib.error
-import urllib.parse
-import urllib.request
+
+# what changes where a request goes, which certificates are trusted, or where TLS secrets are written, whatever the caller had in its
+# environment: proxies, certificate files, a key log file, and the OpenSSL configuration file. cleared here, before anything below
+# loads the ssl module (urllib.request does): OpenSSL reads OPENSSL_CONF once, when the module is loaded, so clearing it afterwards
+# would change nothing. compared in lower case for the proxy ones.
+CLEARED_EXACT = ("SSL_CERT_FILE", "SSL_CERT_DIR", "SSLKEYLOGFILE", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE", "OPENSSL_CONF")
+CLEARED_LOWER = ("http_proxy", "https_proxy", "all_proxy", "ftp_proxy", "no_proxy")
+
+
+def clear_environment():
+    for name in list(os.environ):
+        if name in CLEARED_EXACT or name.lower() in CLEARED_LOWER:
+            del os.environ[name]
+
+
+clear_environment()
+
+import base64  # noqa: E402 (after the environment is cleared, on purpose)
+import json  # noqa: E402
+import re  # noqa: E402
+import stat  # noqa: E402
+import sys  # noqa: E402
+import urllib.error  # noqa: E402
+import urllib.parse  # noqa: E402
+import urllib.request  # noqa: E402
 
 DEFAULT_BASE = "https://api.cloudflare.com/client/v4"
 ACCOUNT = re.compile(r"^[0-9a-f]{32}$")
@@ -62,18 +79,6 @@ class Failure(Exception):
 
 
 TEST_RUN_MARKER = "/run/sirven-test-run"
-# variables that change where a request goes or which certificates are trusted (or where TLS secrets are written), whatever the caller
-# had in its environment; compared in lower case for the proxy ones
-CLEARED_EXACT = ("SSL_CERT_FILE", "SSL_CERT_DIR", "SSLKEYLOGFILE", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE", "OPENSSL_CONF")
-CLEARED_LOWER = ("http_proxy", "https_proxy", "all_proxy", "ftp_proxy", "no_proxy")
-
-
-def clear_environment():
-    for name in list(os.environ):
-        if name in CLEARED_EXACT or name.lower() in CLEARED_LOWER:
-            del os.environ[name]
-
-
 def test_run():
     """not root, or root with the marker file only the test container's setup makes (see the top of this file)"""
     if os.geteuid() != 0:
