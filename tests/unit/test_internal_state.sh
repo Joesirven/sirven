@@ -111,3 +111,21 @@ test_an_exported_confirmation_and_recheck_are_not_taken() {
   out="$(PLAN_CONFIRMED=yes PLAN_RECHECK=yes bash -c '. "$1/lib/common.sh"; . "$1/lib/plan.sh"; printf "%s|%s" "$PLAN_CONFIRMED" "$PLAN_RECHECK"' _ "$REPO_DIR")"
   assert_eq "no|no" "$out"
 }
+
+# ---- the audit writer (lib/audit.sh)
+
+test_audit_operation_starts_from_its_fixed_value() {
+  assert_ignored_at_load audit AUDIT_OPERATION install
+}
+
+test_audit_pending_starts_from_its_fixed_value() {
+  assert_ignored_at_load audit AUDIT_PENDING ""
+}
+
+# the pending audit file is written by root
+test_an_exported_pending_audit_file_is_not_written() {
+  local victim="$TEST_TMP/victim.jsonl"
+  # shellcheck disable=SC2016 # the script body is text for bash -c
+  AUDIT_PENDING="$victim" bash -c '. "$1/lib/common.sh"; . "$1/lib/audit.sh"; PREFIX="$2"; AUDIT_DIR="/var/log/nowhere"; audit_write "{\"n\": 1}"' _ "$REPO_DIR" "$TEST_TMP/fake" > /dev/null 2>&1 || true
+  assert_no_file "$victim"
+}

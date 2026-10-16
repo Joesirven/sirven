@@ -11,8 +11,9 @@
 # in a pending file and go in as soon as it does.
 # reads: PREFIX, PACKAGE, CONFIG_DIR, AUDIT_DIR, OWNER, SERVICE_USER, STAGE_DIR
 
-AUDIT_OPERATION="${AUDIT_OPERATION:-install}"
-AUDIT_PENDING="${AUDIT_PENDING:-}"
+# internal state, never read from the environment: AUDIT_PENDING is a file root appends to, and both are set by the entry scripts when they apply.
+AUDIT_OPERATION="install"
+AUDIT_PENDING=""
 
 audit_log_file() {
   printf '%s/audit.jsonl' "$AUDIT_DIR"
