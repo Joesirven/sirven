@@ -129,3 +129,22 @@ test_an_exported_pending_audit_file_is_not_written() {
   AUDIT_PENDING="$victim" bash -c '. "$1/lib/common.sh"; . "$1/lib/audit.sh"; PREFIX="$2"; AUDIT_DIR="/var/log/nowhere"; audit_write "{\"n\": 1}"' _ "$REPO_DIR" "$TEST_TMP/fake" > /dev/null 2>&1 || true
   assert_no_file "$victim"
 }
+
+# ---- the preflight (lib/preflight.sh)
+
+test_preflight_ssh_command_starts_from_its_fixed_value() {
+  assert_ignored_at_load preflight PREFLIGHT_SSH_COMMAND ssh
+}
+
+test_preflight_system_python_starts_from_its_fixed_value() {
+  assert_ignored_at_load preflight PREFLIGHT_SYSTEM_PYTHON /usr/bin/python3
+}
+
+# preflight runs the SSH client as root before the owner has said yes
+test_an_exported_ssh_command_is_not_run_by_the_preflight() {
+  local planted
+  planted="$(make_planted_script ssh)"
+  # shellcheck disable=SC2016 # the script body is text for bash -c
+  PREFLIGHT_SSH_COMMAND="$planted" bash -c '. "$1/lib/common.sh"; . "$1/lib/preflight.sh"; preflight_ssh_server yes' _ "$REPO_DIR" > /dev/null 2>&1 || true
+  assert_no_file "$TEST_TMP/ssh.ran"
+}
